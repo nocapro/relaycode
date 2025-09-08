@@ -716,4 +716,63 @@ describe('e2e/transaction', () => {
     expect(stateData?.snapshot[originalFilePath]).toBe(originalServiceContent);
     expect(stateData?.snapshot[renamedFilePath]).toBe(null); // It didn't exist at snapshot time
   });
+
+  it('should successfully process multiple concurrent transactions without race conditions', async () => {
+    const file1 = 'src/file1.ts';
+    const file2 = 'src/file2.ts';
+    const originalContent = 'original';
+    await createTestFile(context.testDir.path, file1, originalContent);
+    await createTestFile(context.testDir.path, file2, originalContent);
+
+    const finalContent1 = 'final content for file 1';
+    const finalContent2 = 'final content for file 2';
+
+    const promise1 = runProcessPatch(
+      context, {},
+      [{ type: 'edit', path: file1, content: finalContent1 }]
+    );
+
+    const promise2 = runProcessPatch(
+      context, {},
+      [{ type: 'edit', path: file2, content: finalContent2 }]
+    );
+
+    await Promise.all([promise1, promise2]);
+
+    const content1 = await fs.readFile(path.join(context.testDir.path, file1), 'utf-8');
+    const content2 = await fs.readFile(path.join(context.testDir.path, file2), 'utf-8');
+
+    expect(content1).toBe(finalContent1);
+    expect(content2).toBe(finalContent2);
+  });
+
+  it('should successfully roll back multiple concurrent transactions without race conditions', async () => {
+    const file1 = 'src/file1.ts';
+    const file2 = 'src/file2.ts';
+    const originalContent = 'original';
+    await createTestFile(context.testDir.path, file1, originalContent);
+    await createTestFile(context.testDir.path, file2, originalContent);
+
+    const disapprovedContent1 = 'this should be rolled back 1';
+    const disapprovedContent2 = 'this should be rolled back 2';
+
+    const prompter = async () => false;
+
+    const promise1 = runProcessPatch(
+      context, { approvalMode: 'manual' },
+      [{ type: 'edit', path: file1, content: disapprovedContent1 }], { prompter }
+    );
+    const promise2 = runProcessPatch(
+      context, { approvalMode: 'manual' },
+      [{ type: 'edit', path: file2, content: disapprovedContent2 }], { prompter }
+    );
+
+    await Promise.all([promise1, promise2]);
+
+    const content1 = await fs.readFile(path.join(context.testDir.path, file1), 'utf-8');
+    const content2 = await fs.readFile(path.join(context.testDir.path, file2), 'utf-8');
+
+    expect(content1).toBe(originalContent);
+    expect(content2).toBe(originalContent);
+  });
 });

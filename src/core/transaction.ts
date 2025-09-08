@@ -19,6 +19,8 @@ type ProcessPatchOptions = {
     yes?: boolean;
 };
 
+const transactionLocks = new Map<string, Promise<any>>();
+
 export const createSnapshot = async (filePaths: string[], cwd: string = process.cwd()): Promise<FileSnapshot> => {
   const snapshot: FileSnapshot = {};
   await Promise.all(
@@ -208,7 +210,7 @@ const handleApproval = async ({ config, cwd, getConfirmation }: ApprovalOptions)
     return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);
 };
 
-export const processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
     const cwd = options?.cwd || process.cwd();
     const getConfirmation = createConfirmationHandler({ yes: options?.yes }, options?.prompter);
     const { control, operations, reasoning } = parsedResponse;
@@ -343,6 +345,24 @@ export const processPatch = async (config: Config, parsedResponse: ParsedLLMResp
         const reason = getErrorMessage(error);
         await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
     }
+};
+
+/**
+ * Processes a patch transaction. This function acts as a locking wrapper around the core
+ * patch processing logic (`_processPatch`) to ensure that only one transaction is
+ * processed at a time for a given working directory. This prevents race conditions
+ * with the file-based database.
+ * @param config The application configuration.
+ * @param parsedResponse The parsed response from the LLM.
+ * @param options Options for processing the patch.
+ */
+export const processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+    const cwd = options?.cwd || process.cwd();
+    const run = () => _processPatch(config, parsedResponse, options);
+    const ongoingTransaction = transactionLocks.get(cwd) ?? Promise.resolve();
+    const nextTransaction = ongoingTransaction.finally(run);
+    transactionLocks.set(cwd, nextTransaction);
+    await nextTransaction;
 };
 
 const handleAutoGitBranch = async (config: Config, stateFile: StateFile, cwd: string): Promise<void> => {
