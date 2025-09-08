@@ -1,0 +1,658 @@
+uuid: a669d65a-8b83-4929-a1d2-0545f1b6a030
+projectId: relaycode
+createdAt: '2025-06-24T05:00:21.054Z'
+gitCommitMsg: 'refactor: expose more utils for programmatic API'
+promptSummary: >-
+  The user wants to make the programmatic API more friendly by exposing more
+  necessary APIs and refactoring for better code structure.
+reasoning:
+  - >-
+    Based on your request to make the programmatic API more friendly and
+    reflecting on the extensive change history, I'll perform a refactoring to
+    expose more utility functions and types. This will involve creating a new
+    `formatters.ts` utility file to properly separate concerns, and then
+    updating the main `index.ts` to export these new APIs for programmatic use.
+  - >-
+    First, I'll create a new `formatters.ts` file in `src/utils` to house the
+    `formatTransactionDetails` function. This function is a pure data formatter
+    and is more appropriately located in `utils` than in a `commands` file.
+  - >-
+    Next, I'll update `src/commands/log.ts` to use this new formatter utility,
+    removing the function definition from the command file itself.
+  - >-
+    The `git-commit` command also uses `formatTransactionDetails`, so I'll
+    update its import path.
+  - Similarly, I'll update the import in the `revert` command.
+  - >-
+    To allow programmatic users to create their own notifiers, I'll export the
+    `createNotifier` factory function.
+  - >-
+    Finally, I'll update `src/index.ts` to export all the newly available
+    utilities and functions, making the library much more powerful for
+    programmatic use. This includes file system helpers, loggers, formatters,
+    notifiers, and important constants.
+operations:
+  - type: write
+    path: src/utils/formatters.ts
+    content: |-
+      import chalk from 'chalk';
+      import { FileOperation, StateFile } from '../types';
+
+      const opToString = (op: FileOperation): string => {
+          switch (op.type) {
+              case 'write': return `${chalk.green('write')}:  ${chalk.cyan(op.path)}`;
+              case 'delete': return `${chalk.red('delete')}: ${chalk.cyan(op.path)}`;
+              case 'rename': return `${chalk.yellow('rename')}: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`;
+          }
+      };
+
+      export const formatTransactionDetails = (
+          tx: StateFile,
+          options: { showOperations?: boolean, showSpacing?: boolean, showReasoning?: boolean } = {}
+      ): string[] => {
+          const lines: string[] = [];
+          lines.push(`- ${chalk.bold('UUID')}: ${chalk.gray(tx.uuid)}`);
+          lines.push(`  ${chalk.bold('Date')}: ${new Date(tx.createdAt).toLocaleString()}`);
+          if (tx.promptSummary) {
+              lines.push(`  ${chalk.bold('Prompt Summary')}: ${tx.promptSummary}`);
+          }
+          if (tx.gitCommitMsg) {
+              lines.push(`  ${chalk.bold('Git Commit')}: "${tx.gitCommitMsg}"`);
+          }
+          if ((options.showReasoning ?? true) && tx.reasoning && tx.reasoning.length > 0) {
+              lines.push(`  ${chalk.bold('Reasoning')}:`);
+              tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+          }
+          if (options.showOperations && tx.operations && tx.operations.length > 0) {
+              lines.push(`  ${chalk.bold('Changes')}:`);
+              tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+          }
+          if (options.showSpacing) {
+              lines.push(''); // Newline for spacing
+          }
+          return lines;
+      };
+    patchStrategy: replace
+  - type: write
+    path: src/commands/log.ts
+    content: |-
+      <<<<<<< SEARCH
+      import { logger } from '../utils/logger';
+      import { FileOperation, StateFile } from '../types';
+      import { readAllStateFiles } from '../core/state';
+      import { STATE_DIRECTORY_NAME } from '../utils/constants';
+      import chalk from 'chalk';
+
+      const opToString = (op: FileOperation): string => {
+          switch (op.type) {
+              case 'write': return `${chalk.green('write')}:  ${chalk.cyan(op.path)}`;
+              case 'delete': return `${chalk.red('delete')}: ${chalk.cyan(op.path)}`;
+              case 'rename': return `${chalk.yellow('rename')}: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`;
+          }
+      };
+
+      export const formatTransactionDetails = (
+          tx: StateFile,
+          options: { showOperations?: boolean, showSpacing?: boolean, showReasoning?: boolean } = {}
+      ): string[] => {
+          const lines: string[] = [];
+          lines.push(`- ${chalk.bold('UUID')}: ${chalk.gray(tx.uuid)}`);
+          lines.push(`  ${chalk.bold('Date')}: ${new Date(tx.createdAt).toLocaleString()}`);
+          if (tx.promptSummary) {
+              lines.push(`  ${chalk.bold('Prompt Summary')}: ${tx.promptSummary}`);
+          }
+          if (tx.gitCommitMsg) {
+              lines.push(`  ${chalk.bold('Git Commit')}: "${tx.gitCommitMsg}"`);
+          }
+          if ((options.showReasoning ?? true) && tx.reasoning && tx.reasoning.length > 0) {
+              lines.push(`  ${chalk.bold('Reasoning')}:`);
+              tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+          }
+          if (options.showOperations && tx.operations && tx.operations.length > 0) {
+              lines.push(`  ${chalk.bold('Changes')}:`);
+              tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+          }
+          if (options.showSpacing) {
+              lines.push(''); // Newline for spacing
+          }
+          return lines;
+      };
+      =======
+      import { logger } from '../utils/logger';
+      import { readAllStateFiles } from '../core/state';
+      import { STATE_DIRECTORY_NAME } from '../utils/constants';
+      import chalk from 'chalk';
+      import { formatTransactionDetails } from '../utils/formatters';
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/git-commit.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from './log';
+
+      import chalk from 'chalk';
+
+      =======
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from '../utils/formatters';
+
+      import chalk from 'chalk';
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/revert.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from './log';
+
+      import chalk from 'chalk';
+
+      =======
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from '../utils/formatters';
+
+      import chalk from 'chalk';
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/utils/notifier.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      const createNotifier = (messageTemplate: (param: string) => string) => {
+
+      =======
+
+      export const createNotifier = (messageTemplate: (param: string) => string)
+      => {
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/index.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      export { 
+          applyOperations, 
+          createSnapshot, 
+          deleteFile, 
+          readFileContent, 
+          restoreSnapshot, 
+          writeFileContent 
+      } from './core/executor';
+
+      =======
+
+      export { 
+          applyOperations, 
+          createSnapshot, 
+          deleteFile, 
+          readFileContent, 
+          restoreSnapshot, 
+          writeFileContent,
+          fileExists,
+          renameFile
+      } from './core/executor';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export { logger } from './utils/logger';
+
+      export { getConfirmation } from './utils/prompt';
+
+      =======
+
+      export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+      export { getConfirmation } from './utils/prompt';
+
+      export { formatTransactionDetails } from './utils/formatters';
+
+      export { 
+          createNotifier,
+          notifyPatchDetected,
+          notifyApprovalRequired,
+          notifySuccess,
+          notifyFailure,
+      } from './utils/notifier';
+
+      export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from
+      './utils/constants';
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/utils/formatters.ts: null
+  src/commands/log.ts: >-
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, StateFile } from '../types';
+
+    import { readAllStateFiles } from '../core/state';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+    import chalk from 'chalk';
+
+
+    const opToString = (op: FileOperation): string => {
+        switch (op.type) {
+            case 'write': return `${chalk.green('write')}:  ${chalk.cyan(op.path)}`;
+            case 'delete': return `${chalk.red('delete')}: ${chalk.cyan(op.path)}`;
+            case 'rename': return `${chalk.yellow('rename')}: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`;
+        }
+    };
+
+
+    export const formatTransactionDetails = (
+        tx: StateFile,
+        options: { showOperations?: boolean, showSpacing?: boolean, showReasoning?: boolean } = {}
+    ): string[] => {
+        const lines: string[] = [];
+        lines.push(`- ${chalk.bold('UUID')}: ${chalk.gray(tx.uuid)}`);
+        lines.push(`  ${chalk.bold('Date')}: ${new Date(tx.createdAt).toLocaleString()}`);
+        if (tx.promptSummary) {
+            lines.push(`  ${chalk.bold('Prompt Summary')}: ${tx.promptSummary}`);
+        }
+        if (tx.gitCommitMsg) {
+            lines.push(`  ${chalk.bold('Git Commit')}: "${tx.gitCommitMsg}"`);
+        }
+        if ((options.showReasoning ?? true) && tx.reasoning && tx.reasoning.length > 0) {
+            lines.push(`  ${chalk.bold('Reasoning')}:`);
+            tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+        }
+        if (options.showOperations && tx.operations && tx.operations.length > 0) {
+            lines.push(`  ${chalk.bold('Changes')}:`);
+            tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+        }
+        if (options.showSpacing) {
+            lines.push(''); // Newline for spacing
+        }
+        return lines;
+    };
+
+
+    export const logCommand = async (cwd: string = process.cwd(),
+    outputCapture?: string[]): Promise<void> => {
+        const log = (message: string) => {
+            if (outputCapture) {
+                outputCapture.push(message);
+            } else {
+                logger.log(message);
+            }
+        };
+
+        const transactions = await readAllStateFiles(cwd);
+
+        if (transactions === null) {
+            log(`${chalk.yellow('warn')}: State directory '${chalk.cyan(STATE_DIRECTORY_NAME)}' not found. No logs to display.`);
+            log(`${chalk.blue('info')}: Run ${chalk.magenta("'relay init'")} to initialize the project.`);
+            return;
+        }
+
+        if (transactions.length === 0) {
+            log(`${chalk.blue('info')}: No committed transactions found.`);
+            return;
+        }
+
+        log(chalk.bold('Committed Transactions (most recent first):'));
+        log(chalk.gray('-------------------------------------------'));
+
+        if (transactions.length === 0) {
+            log(`${chalk.blue('info')}: No valid transactions found.`);
+            return;
+        }
+
+        transactions.forEach(tx => {
+            formatTransactionDetails(tx, { showOperations: true, showSpacing: true, showReasoning: false }).forEach(line => log(line));
+        });
+    };
+  src/commands/git-commit.ts: >-
+    import { findLatestStateFile } from '../core/state';
+
+    import { logger } from '../utils/logger';
+
+    import { executeShellCommand } from '../utils/shell';
+
+    import { getConfirmation as defaultGetConfirmation } from '../utils/prompt';
+
+    import { formatTransactionDetails } from './log';
+
+    import chalk from 'chalk';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    export const gitCommitCommand = async (cwd: string = process.cwd(),
+    prompter?: Prompter): Promise<void> => {
+        const getConfirmation = prompter || defaultGetConfirmation;
+
+        logger.info('Looking for the last transaction to commit...');
+        const latestTransaction = await findLatestStateFile(cwd);
+
+        if (!latestTransaction) {
+            logger.warn('No committed transactions found.');
+            return;
+        }
+
+        if (!latestTransaction.gitCommitMsg) {
+            logger.warn('The latest transaction does not have a git commit message.');
+            logger.log('Transaction details:');
+            formatTransactionDetails(latestTransaction, { showSpacing: true }).forEach(line => logger.log(line));
+            return;
+        }
+
+        logger.log('Found latest transaction with commit message:');
+        formatTransactionDetails(latestTransaction).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation(`\nDo you want to run ${chalk.magenta("'git add .'")} and ${chalk.magenta(`'git commit -m "${latestTransaction.gitCommitMsg}"'`)}? (y/N)`);
+        if (!confirmed) {
+            logger.info('Commit operation cancelled.');
+            return;
+        }
+
+        logger.info(`Running ${chalk.magenta("'git add .'")}...`);
+        const addResult = await executeShellCommand('git add .', cwd);
+        if (addResult.exitCode !== 0) {
+            logger.error(`${chalk.magenta("'git add .'")} failed with exit code ${chalk.red(addResult.exitCode)}.`);
+            logger.error(addResult.stderr);
+            return;
+        }
+        logger.success(`${chalk.magenta("'git add .'")} completed successfully.`);
+
+        const commitCmd = `git commit -m "${latestTransaction.gitCommitMsg}"`;
+        logger.info(`Running ${chalk.magenta(`'${commitCmd}'`)}...`);
+        const commitResult = await executeShellCommand(commitCmd, cwd);
+
+        if (commitResult.exitCode !== 0) {
+            logger.error(`${chalk.magenta("'git commit'")} failed with exit code ${chalk.red(commitResult.exitCode)}.`);
+            logger.error(commitResult.stderr);
+            if (commitResult.stdout) logger.log(commitResult.stdout);
+            logger.warn('You may need to resolve commit issues manually.');
+            return;
+        }
+        
+        logger.success('✅ Git commit successful!');
+        logger.log(commitResult.stdout);
+    };
+  src/commands/revert.ts: >-
+    import { loadConfigOrExit } from '../core/config';
+
+    import { readStateFile, readAllStateFiles } from '../core/state';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, ParsedLLMResponse, StateFile } from '../types';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { getConfirmation as defaultGetConfirmation } from '../utils/prompt';
+
+    import { formatTransactionDetails } from './log';
+
+    import chalk from 'chalk';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    const isUUID = (str: string): boolean => {
+        return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+    };
+
+
+    export const revertCommand = async (identifier?: string, cwd: string =
+    process.cwd(), prompter?: Prompter): Promise<void> => {
+        const getConfirmation = prompter || defaultGetConfirmation;
+        const config = await loadConfigOrExit(cwd);
+
+        let stateToRevert: StateFile | null = null;
+        let targetDescription: string;
+
+        // Default to '1' to revert the latest transaction if no identifier is provided.
+        const effectiveIdentifier = identifier ?? '1';
+
+        if (isUUID(effectiveIdentifier)) {
+            targetDescription = `transaction with UUID '${chalk.cyan(effectiveIdentifier)}'`;
+            logger.info(`Attempting to revert ${targetDescription}`);
+            stateToRevert = await readStateFile(cwd, effectiveIdentifier);
+        } else if (/^-?\d+$/.test(effectiveIdentifier)) {
+            const index = Math.abs(parseInt(effectiveIdentifier, 10));
+            if (isNaN(index) || index <= 0) {
+                logger.error(`Invalid index. Please provide a positive number (e.g., ${chalk.cyan('"1"')} for the latest).`);
+                return;
+            }
+            targetDescription = index === 1 ? 'the latest transaction' : `the ${chalk.cyan(index)}-th latest transaction`;
+            logger.info(`Looking for ${targetDescription}...`);
+            const allTransactions = await readAllStateFiles(cwd);
+            if (!allTransactions || allTransactions.length < index) {
+                logger.error(`Transaction not found. Only ${chalk.cyan(allTransactions?.length ?? 0)} transactions exist.`);
+                return;
+            }
+            stateToRevert = allTransactions[index - 1] ?? null;
+        } else {
+            logger.error(`Invalid identifier: '${chalk.yellow(identifier)}'. Please provide a UUID or an index (e.g., ${chalk.cyan("'1'")} for the latest).`);
+            return;
+        }
+
+        if (!stateToRevert) {
+            logger.error(`Could not find ${targetDescription}.`);
+            return;
+        }
+
+        logger.log(chalk.bold(`Transaction to be reverted:`));
+        formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation('\nAre you sure you want to revert this transaction? (y/N)');
+        if (!confirmed) {
+            logger.info('Revert operation cancelled.');
+            return;
+        }
+
+        // 3. Generate inverse operations
+        const inverse_operations = [...stateToRevert.operations]
+            .reverse()
+            .map((op): FileOperation | null => {
+                switch (op.type) {
+                    case 'rename':
+                        return { type: 'rename', from: op.to, to: op.from };
+                    case 'delete': {
+                        const deletedContent = stateToRevert.snapshot[op.path];
+                        if (deletedContent === null || typeof deletedContent === 'undefined') {
+                            logger.warn(`Cannot revert deletion of ${chalk.cyan(op.path)}, original content not found in snapshot. Skipping.`);
+                            return null;
+                        }
+                        return { type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' };
+                    }
+                    case 'write': {
+                        const originalContent = stateToRevert.snapshot[op.path];
+                        if (typeof originalContent === 'undefined') {
+                            logger.warn(`Cannot find original state for ${chalk.cyan(op.path)} in snapshot. Skipping revert for this operation.`);
+                            return null;
+                        }
+                        if (originalContent === null) {
+                            return { type: 'delete', path: op.path };
+                        } else {
+                            return { type: 'write', path: op.path, content: originalContent, patchStrategy: 'replace' };
+                        }
+                    }
+                }
+            })
+            .filter((op): op is FileOperation => op !== null);
+
+        if (inverse_operations.length === 0) {
+            logger.warn('No operations to revert for this transaction.');
+            return;
+        }
+
+        // 4. Create and process a new "revert" transaction
+        const newUuid = uuidv4();
+        const reasoning = [
+            `Reverting transaction ${stateToRevert.uuid}.`,
+            `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+        ];
+
+        const parsedResponse: ParsedLLMResponse = {
+            control: {
+                projectId: config.projectId,
+                uuid: newUuid,
+            },
+            operations: inverse_operations,
+            reasoning,
+        };
+
+        logger.info(`Creating new transaction ${chalk.gray(newUuid)} to perform the revert.`);
+        await processPatch(config, parsedResponse, { cwd, prompter });
+    };
+  src/utils/notifier.ts: >-
+    const notifier = require('toasted-notifier');
+
+    import { APP_NAME } from './constants';
+
+
+    // This is a "fire-and-forget" utility. If notifications fail for any reason
+
+    // (e.g., unsupported OS, DND mode, permissions), it should not crash the
+    app.
+
+    const sendNotification = (options: { title: string; message: string;
+    enableNotifications?: boolean }) => {
+        // Skip notification if explicitly disabled
+        if (options.enableNotifications === false) {
+            return;
+        }
+        
+        try {
+            notifier.notify(
+                {
+                    title: options.title,
+                    message: options.message,
+                    sound: false, // Keep it quiet by default
+                    wait: false,
+                },
+                (err: any) => {
+                    if (err) {
+                        // Silently ignore errors. This is a non-critical feature.
+                    }
+                }
+            );
+        } catch (err) {
+            // Silently ignore errors.
+        }
+    };
+
+
+    const createNotifier = (messageTemplate: (param: string) => string) => {
+        return (param: string, enableNotifications: boolean = true) => {
+            sendNotification({
+                title: APP_NAME,
+                message: messageTemplate(param),
+                enableNotifications,
+            });
+        };
+    };
+
+
+    export const notifyPatchDetected = createNotifier(
+        (projectId: string) => `New patch detected for project \`${projectId}\`.`
+    );
+
+
+    export const notifyApprovalRequired = createNotifier(
+        (projectId: string) => `Action required to approve changes for \`${projectId}\`.`
+    );
+
+
+    export const notifySuccess = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` applied successfully.`
+    );
+
+
+    export const notifyFailure = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` failed and was rolled back.`
+    );
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath } from './core/config';
+
+    export { 
+        applyOperations, 
+        createSnapshot, 
+        deleteFile, 
+        readFileContent, 
+        restoreSnapshot, 
+        writeFileContent 
+    } from './core/executor';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState,
+        getStateFilePath,
+        getUndoneStateFilePath
+    } from './core/state';
+
+    export { processPatch } from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { logger } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+approved: true

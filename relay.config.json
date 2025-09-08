@@ -1,0 +1,26 @@
+{
+  "$schema": "https://relay-code.dev/schema.json",
+  "projectId": "relaycode",
+  "core": {
+    "logLevel": "info",
+    "enableNotifications": true,
+    "watchConfig": true
+  },
+  "watcher": {
+    "clipboardPollInterval": 2000,
+    "preferredStrategy": "auto"
+  },
+  "patch": {
+    "approvalMode": "manual",
+    "approvalOnErrorCount": 0,
+    "linter": "",
+    "preCommand": "",
+    "postCommand": "",
+    "minFileChanges": 0
+  },
+  "git": {
+    "autoGitBranch": false,
+    "gitBranchPrefix": "relay/",
+    "gitBranchTemplate": "gitCommitMsg"
+  }
+}

@@ -1,0 +1,1335 @@
+uuid: a1d3a95c-7d34-4a4b-8e2b-f35c59f77258
+projectId: relaycode
+createdAt: '2025-06-22T08:16:14.001Z'
+reasoning:
+  - >-
+    Based on my analysis of your project's performance, I've identified several
+    key areas for significant speed improvements, primarily related to I/O
+    operations and process spawning. The following changes will radically
+    improve performance without degrading features or using prohibited in-memory
+    state.
+  - '### 1. Faster Shell Command Execution'
+  - >-
+    The existing `executeShellCommand` utility uses `child_process.exec` and
+    wraps commands in PowerShell on Windows, which has a high startup overhead.
+    I'm replacing this with `child_process.spawn` using the `shell: true`
+    option. This will use the system's default shell (`cmd.exe` on Windows,
+    `/bin/sh` on Unix-like systems), which is substantially faster for running
+    external linter, pre-command, and post-command hooks.
+  - '### 2. Optimized Transaction State Reading'
+  - >-
+    Operations like `undo` and `log` were slowed down by reading and parsing
+    every single transaction file from disk. I've implemented two key
+    optimizations:
+  - >-
+    1.  **Fast "Find Latest"**: The `findLatestStateFile` function (used by
+    `undo`) now quickly finds the most recent transaction by reading only the
+    first few bytes of each state file to extract the `createdAt` timestamp,
+    avoiding full YAML parsing.
+  - >-
+    2.  **Centralized Sorting**: The `readAllStateFiles` function now sorts
+    transactions by date, removing redundant sorting operations in the `log`
+    command.
+  - >-
+    These changes make operations on a large history of transactions
+    significantly faster.
+  - '### 3. Efficient File Content Handling During Transactions'
+  - >-
+    To generate a summary of changes, the tool was re-reading files from the
+    disk after applying operations. I've refactored the `applyOperations`
+    function to return the new file contents directly. This avoids redundant
+    disk reads, speeding up the transaction summary calculation.
+  - >-
+    These combined optimizations will lead to a dramatically faster and more
+    responsive experience across all `relaycode` commands.
+operations:
+  - type: write
+    path: src/utils/shell.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { exec } from 'child_process';
+
+      import path from 'path';
+
+      import { logger } from './logger';
+
+
+      type ExecutionResult = {
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+      };
+
+
+      export const executeShellCommand = (command: string, cwd = process.cwd()):
+      Promise<ExecutionResult> => {
+        if (!command || command.trim() === '') {
+          return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+        }
+
+        // Normalize path for Windows environments
+        const normalizedCwd = path.resolve(cwd);
+
+        return new Promise((resolve) => {
+          // On Windows, make sure to use cmd.exe or PowerShell to execute command
+          const isWindows = process.platform === 'win32';
+          const finalCommand = isWindows 
+            ? `powershell -Command "${command.replace(/"/g, '\\"')}"`
+            : command;
+            
+          logger.debug(`Executing command: ${finalCommand} in directory: ${normalizedCwd}`);
+          
+          exec(finalCommand, { cwd: normalizedCwd }, (error, stdout, stderr) => {
+            const exitCode = error ? error.code || 1 : 0;
+            
+            resolve({
+              exitCode,
+              stdout: stdout.toString().trim(),
+              stderr: stderr.toString().trim(),
+            });
+          });
+        });
+      };
+
+      =======
+
+      import { spawn } from 'child_process';
+
+      import path from 'path';
+
+      import { logger } from './logger';
+
+
+      type ExecutionResult = {
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+      };
+
+
+      export const executeShellCommand = (command: string, cwd = process.cwd()):
+      Promise<ExecutionResult> => {
+        if (!command || command.trim() === '') {
+          return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+        }
+
+        const normalizedCwd = path.resolve(cwd);
+
+        return new Promise((resolve) => {
+          logger.debug(`Executing command: ${command} in directory: ${normalizedCwd}`);
+          
+          const child = spawn(command, {
+            cwd: normalizedCwd,
+            shell: true, // Use shell to interpret the command (e.g., cmd.exe on Windows, /bin/sh on Linux)
+            stdio: ['ignore', 'pipe', 'pipe'], // stdin, stdout, stderr
+          });
+
+          let stdout = '';
+          let stderr = '';
+
+          child.stdout.on('data', (data) => {
+            stdout += data.toString();
+          });
+
+          child.stderr.on('data', (data) => {
+            stderr += data.toString();
+          });
+          
+          child.on('close', (code) => {
+            resolve({
+              exitCode: code ?? 1,
+              stdout: stdout.trim(),
+              stderr: stderr.trim(),
+            });
+          });
+
+          child.on('error', (err) => {
+            // e.g., command not found
+            resolve({
+              exitCode: 1,
+              stdout: '',
+              stderr: err.message,
+            });
+          });
+        });
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      export const readStateFile = async (cwd: string, uuid: string):
+      Promise<StateFile | null> => {
+        const committedPath = getStateFilePath(cwd, uuid, false);
+        try {
+          const fileContent = await fs.readFile(committedPath, 'utf-8');
+          const yamlContent = yaml.load(fileContent);
+          return StateFileSchema.parse(yamlContent);
+        } catch (error) {
+          // Can be file not found, YAML parsing error, or Zod validation error.
+          // In any case, we can't get the state file.
+          return null;
+        }
+      };
+
+      =======
+
+      export const readStateFile = async (cwd: string, uuid: string):
+      Promise<StateFile | null> => {
+        const committedPath = getStateFilePath(cwd, uuid, false);
+        try {
+          const fileContent = await fs.readFile(committedPath, 'utf-8');
+          const yamlContent = yaml.load(fileContent);
+          const parsed = StateFileSchema.safeParse(yamlContent);
+          if (parsed.success) {
+            return parsed.data;
+          }
+          logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);
+          return null;
+        } catch (error) {
+          // Can be file not found or YAML parsing error.
+          // In any case, we can't get the state file.
+          return null;
+        }
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const results = await Promise.all(promises);
+          return results.filter((sf): sf is StateFile => !!sf);
+      }
+
+      =======
+          const results = await Promise.all(promises);
+          const validResults = results.filter((sf): sf is StateFile => !!sf);
+
+          // Sort transactions by date, most recent first
+          validResults.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+          return validResults;
+      }
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const findLatestStateFile = async (cwd: string = process.cwd()):
+      Promise<StateFile | null> => {
+          const transactions = await readAllStateFiles(cwd);
+          if (!transactions || transactions.length === 0) {
+              return null;
+          }
+
+          transactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+          return transactions[0] || null;
+      };
+
+      =======
+
+      export const findLatestStateFile = async (cwd: string = process.cwd()):
+      Promise<StateFile | null> => {
+          const stateDir = getStateDirectory(cwd);
+          try {
+              await fs.access(stateDir);
+          } catch (e) {
+              return null;
+          }
+
+          const files = await fs.readdir(stateDir);
+          const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+
+          if (transactionFiles.length === 0) {
+              return null;
+          }
+
+          // Read creation date from each file without parsing the whole thing.
+          // This is much faster than reading and parsing the full YAML for every file.
+          const filesWithDates = await Promise.all(
+              transactionFiles.map(async (file) => {
+                  const filePath = path.join(stateDir, file);
+                  let createdAt: Date | null = null;
+                  try {
+                      // Read only the first 512 bytes to find `createdAt`. This is an optimization.
+                      const fileHandle = await fs.open(filePath, 'r');
+                      const buffer = Buffer.alloc(512);
+                      await fileHandle.read(buffer, 0, 512, 0);
+                      await fileHandle.close();
+                      const content = buffer.toString('utf-8');
+                      // Extract date from a line like 'createdAt: 2023-01-01T00:00:00.000Z'
+                      const match = content.match(/^createdAt:\s*['"]?(.+?)['"]?$/m);
+                      if (match && match[1]) {
+                          createdAt = new Date(match[1]);
+                      }
+                  } catch (error) {
+                      if (!isEnoentError(error)) {
+                        logger.debug(`Could not read partial date from ${file}: ${getErrorMessage(error)}`);
+                      }
+                  }
+                  return { file, createdAt };
+              })
+          );
+
+          const validFiles = filesWithDates.filter(f => f.createdAt instanceof Date) as { file: string; createdAt: Date }[];
+
+          if (validFiles.length === 0) {
+              // Fallback for safety, though it should be rare.
+              const transactions = await readAllStateFiles(cwd);
+              return transactions?.[0] ?? null;
+          }
+
+          validFiles.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+          const latestFile = validFiles[0];
+          if (!latestFile) {
+              return null;
+          }
+
+          // Now read the full content of only the latest file
+          return readStateFile(cwd, latestFile.file.replace('.yml', ''));
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/log.ts
+    content: |-
+      <<<<<<< SEARCH
+          transactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+          log('Committed Transactions (most recent first):');
+      =======
+          log('Committed Transactions (most recent first):');
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/executor.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      export const applyOperations = async (operations: FileOperation[], cwd:
+      string = process.cwd()): Promise<void> => {
+        // Operations must be applied sequentially to ensure that if one fails,
+        // we can roll back from a known state.
+        for (const op of operations) {
+          if (op.type === 'delete') {
+            await deleteFile(op.path, cwd);
+            continue;
+          }
+          if (op.type === 'rename') {
+            await renameFile(op.from, op.to, cwd);
+            continue;
+          } 
+          
+          if (op.patchStrategy === 'replace') {
+            await writeFileContent(op.path, op.content, cwd);
+            continue;
+          }
+
+          // For patch strategies, apply them sequentially
+          const originalContent = await readFileContent(op.path, cwd);
+          if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+            throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+          }
+
+          try {
+            const diffParams = {
+              originalContent: originalContent ?? '',
+              diffContent: op.content,
+            };
+
+            let result;
+            switch (op.patchStrategy) {
+              case 'new-unified':
+                const newUnifiedStrategy = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+                result = await newUnifiedStrategy.applyDiff(diffParams);
+                break;
+              case 'multi-search-replace':
+                result = await multiSearchReplaceService.multiSearchReplaceService.applyDiff(diffParams);
+                break;
+              case 'unified':
+                result = await unifiedDiffService.unifiedDiffService.applyDiff(diffParams.originalContent, diffParams.diffContent);
+                break;
+              default:
+                throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+            }
+
+            if (result.success) {
+              await writeFileContent(op.path, result.content, cwd);
+            } else {
+              throw new Error(result.error);
+            }
+          } catch (e) {
+            throw new Error(`Error applying patch for ${op.path} with strategy ${op.patchStrategy}: ${getErrorMessage(e)}`);
+          }
+        }
+      };
+
+      =======
+
+      export const applyOperations = async (operations: FileOperation[], cwd:
+      string = process.cwd()): Promise<Map<string, string>> => {
+        const newContents = new Map<string, string>();
+        // Operations must be applied sequentially to ensure that if one fails,
+        // we can roll back from a known state.
+        for (const op of operations) {
+          if (op.type === 'delete') {
+            await deleteFile(op.path, cwd);
+            continue;
+          }
+          if (op.type === 'rename') {
+            await renameFile(op.from, op.to, cwd);
+            continue;
+          } 
+          
+          let finalContent: string;
+
+          if (op.patchStrategy === 'replace') {
+            finalContent = op.content;
+          } else {
+            // For patch strategies, apply them sequentially
+            const originalContent = await readFileContent(op.path, cwd);
+            if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+              throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+            }
+
+            try {
+              const diffParams = {
+                originalContent: originalContent ?? '',
+                diffContent: op.content,
+              };
+
+              let result;
+              switch (op.patchStrategy) {
+                case 'new-unified':
+                  const newUnifiedStrategy = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+                  result = await newUnifiedStrategy.applyDiff(diffParams);
+                  break;
+                case 'multi-search-replace':
+                  result = await multiSearchReplaceService.multiSearchReplaceService.applyDiff(diffParams);
+                  break;
+                case 'unified':
+                  result = await unifiedDiffService.unifiedDiffService.applyDiff(diffParams.originalContent, diffParams.diffContent);
+                  break;
+                default:
+                  throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+              }
+
+              if (result.success) {
+                finalContent = result.content;
+              } else {
+                throw new Error(result.error);
+              }
+            } catch (e) {
+              throw new Error(`Error applying patch for ${op.path} with strategy ${op.patchStrategy}: ${getErrorMessage(e)}`);
+            }
+          }
+          
+          await writeFileContent(op.path, finalContent, cwd);
+          newContents.set(op.path, finalContent);
+        }
+        return newContents;
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      const calculateLineChanges = async (op: FileOperation, snapshot:
+      FileSnapshot, cwd: string): Promise<{ added: number; removed: number }> =>
+      {
+          if (op.type === 'rename') {
+              return { added: 0, removed: 0 };
+          }
+          const oldContent = snapshot[op.path] ?? null;
+
+          if (op.type === 'delete') {
+              const oldLines = oldContent ? oldContent.split('\n') : [];
+              return { added: 0, removed: oldLines.length };
+          }
+
+          // After applyOperations, the new content is on disk
+          const newContent = await readFileContent(op.path, cwd);
+          if (oldContent === newContent) return { added: 0, removed: 0 };
+
+          const oldLines = oldContent ? oldContent.split('\n') : [];
+          const newLines = newContent ? newContent.split('\n') : [];
+
+          if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+          if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+          
+          const oldSet = new Set(oldLines);
+          const newSet = new Set(newLines);
+          
+          const added = newLines.filter(line => !oldSet.has(line)).length;
+          const removed = oldLines.filter(line => !newSet.has(line)).length;
+          
+          return { added, removed };
+      };
+
+      =======
+
+      const calculateLineChanges = (
+          op: FileOperation, 
+          snapshot: FileSnapshot, 
+          newContents: Map<string, string>
+      ): { added: number; removed: number } => {
+          if (op.type === 'rename') {
+              return { added: 0, removed: 0 };
+          }
+          const oldContent = snapshot[op.path] ?? null;
+
+          if (op.type === 'delete') {
+              const oldLines = oldContent ? oldContent.split('\n') : [];
+              return { added: 0, removed: oldLines.length };
+          }
+          
+          const newContent = newContents.get(op.path) ?? null;
+
+          if (oldContent === newContent) return { added: 0, removed: 0 };
+
+          const oldLines = oldContent?.split('\n') ?? [];
+          const newLines = newContent?.split('\n') ?? [];
+
+          if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+          if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+          
+          // This is a simplified diff, for a more accurate count a real diff algorithm is needed,
+          // but this is fast and good enough for a summary.
+          const oldSet = new Set(oldLines);
+          const newSet = new Set(newLines);
+          
+          let added = 0;
+          for (const line of newLines) {
+              if (!oldSet.has(line)) added++;
+          }
+
+          let removed = 0;
+          for (const line of oldLines) {
+              if (!newSet.has(line)) removed++;
+          }
+          
+          return { added, removed };
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+              // Apply changes
+              logger.log('  - Applying file operations...');
+              await applyOperations(operations, cwd);
+              logger.success('  - File operations complete.');
+
+              const opStatsPromises = operations.map(async op => {
+                  const stats = await calculateLineChanges(op, snapshot, cwd);
+      =======
+              // Apply changes
+              logger.log('  - Applying file operations...');
+              const newContents = await applyOperations(operations, cwd);
+              logger.success('  - File operations complete.');
+
+              const opStats = operations.map(op => {
+                  const stats = calculateLineChanges(op, snapshot, newContents);
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+                  if (op.type === 'write') {
+                      logger.success(`✔ Written: ${op.path} (+${stats.added}, -${stats.removed})`);
+                  } else if (op.type === 'delete') {
+                      logger.success(`✔ Deleted: ${op.path}`);
+                  } else if (op.type === 'rename') {
+                      logger.success(`✔ Renamed: ${op.from} -> ${op.to}`);
+                  }
+                  return stats;
+              });
+              const opStats = await Promise.all(opStatsPromises);
+      =======
+                  if (op.type === 'write') {
+                      logger.success(`✔ Written: ${op.path} (+${stats.added}, -${stats.removed})`);
+                  } else if (op.type === 'delete') {
+                      logger.success(`✔ Deleted: ${op.path}`);
+                  } else if (op.type === 'rename') {
+                      logger.success(`✔ Renamed: ${op.from} -> ${op.to}`);
+                  }
+                  return stats;
+              });
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/utils/shell.ts: >-
+    import { exec } from 'child_process';
+
+    import path from 'path';
+
+    import { logger } from './logger';
+
+
+    type ExecutionResult = {
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    };
+
+
+    export const executeShellCommand = (command: string, cwd = process.cwd()):
+    Promise<ExecutionResult> => {
+      if (!command || command.trim() === '') {
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      }
+
+      // Normalize path for Windows environments
+      const normalizedCwd = path.resolve(cwd);
+
+      return new Promise((resolve) => {
+        // On Windows, make sure to use cmd.exe or PowerShell to execute command
+        const isWindows = process.platform === 'win32';
+        const finalCommand = isWindows 
+          ? `powershell -Command "${command.replace(/"/g, '\\"')}"`
+          : command;
+          
+        logger.debug(`Executing command: ${finalCommand} in directory: ${normalizedCwd}`);
+        
+        exec(finalCommand, { cwd: normalizedCwd }, (error, stdout, stderr) => {
+          const exitCode = error ? error.code || 1 : 0;
+          
+          resolve({
+            exitCode,
+            stdout: stdout.toString().trim(),
+            stderr: stderr.toString().trim(),
+          });
+        });
+      });
+    };
+
+
+    export const getErrorCount = async (linterCommand: string, cwd =
+    process.cwd()): Promise<number> => {
+      if (!linterCommand || linterCommand.trim() === '') {
+        return 0;
+      }
+      
+      const { exitCode, stderr } = await executeShellCommand(linterCommand, cwd);
+      if (exitCode === 0) return 0;
+
+      // Try to extract a number of errors from stderr or assume 1 if non-zero exit code
+      const errorMatches = stderr.match(/(\d+) error/i);
+      if (errorMatches && errorMatches[1]) {
+        return parseInt(errorMatches[1], 10);
+      }
+      return exitCode === 0 ? 0 : 1;
+    };
+  src/core/state.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { StateFile, StateFileSchema } from '../types';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError } from '../utils/logger';
+
+    import { fileExists, safeRename } from './executor';
+
+
+    const stateDirectoryCache = new Map<string, boolean>();
+
+
+    const getStateDirectory = (cwd: string) => path.resolve(cwd,
+    STATE_DIRECTORY_NAME);
+
+
+    export const getStateFilePath = (cwd: string, uuid: string, isPending:
+    boolean): string => {
+      const fileName = isPending ? `${uuid}.pending.yml` : `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd), fileName);
+    };
+
+
+    export const getUndoneStateFilePath = (cwd: string, uuid: string): string =>
+    {
+      const fileName = `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd),'undone', fileName);
+    };
+
+
+    // Ensure state directory exists with caching for performance
+
+    const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      const dirPath = getStateDirectory(cwd);
+      if (!stateDirectoryCache.has(dirPath)) {
+        await fs.mkdir(dirPath, { recursive: true });
+        stateDirectoryCache.set(dirPath, true);
+      }
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      const undonePath = getUndoneStateFilePath(cwd, uuid);
+      // Check if a transaction has been committed or undone.
+      // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+      // because we don't check for `.pending.yml` files.
+      return (await fileExists(committedPath)) || (await fileExists(undonePath));
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const validatedState = StateFileSchema.parse(state);
+      const yamlString = yaml.dump(validatedState);
+      const filePath = getStateFilePath(cwd, state.uuid, true);
+      
+      // Ensure directory exists (cached)
+      await ensureStateDirectory(cwd);
+      
+      // Write file
+      await fs.writeFile(filePath, yamlString, 'utf-8');
+    };
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      await safeRename(pendingPath, committedPath);
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      try {
+        await fs.unlink(pendingPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // Already gone, that's fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      try {
+        const fileContent = await fs.readFile(committedPath, 'utf-8');
+        const yamlContent = yaml.load(fileContent);
+        return StateFileSchema.parse(yamlContent);
+      } catch (error) {
+        // Can be file not found, YAML parsing error, or Zod validation error.
+        // In any case, we can't get the state file.
+        return null;
+      }
+    };
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd()):
+    Promise<StateFile[] | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null; // No state directory, so no transactions
+        }
+
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+
+        const promises = transactionFiles.map(async (file) => {
+            const stateFile = await readStateFile(cwd, file.replace('.yml', ''));
+            if (!stateFile) {
+                logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+            }
+            return stateFile;
+        });
+
+        const results = await Promise.all(promises);
+        return results.filter((sf): sf is StateFile => !!sf);
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd()):
+    Promise<StateFile | null> => {
+        const transactions = await readAllStateFiles(cwd);
+        if (!transactions || transactions.length === 0) {
+            return null;
+        }
+
+        transactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return transactions[0] || null;
+    };
+  src/commands/log.ts: >-
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, StateFile } from '../types';
+
+    import { readAllStateFiles } from '../core/state';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+
+    const opToString = (op: FileOperation): string => {
+        switch (op.type) {
+            case 'write': return `write: ${op.path}`;
+            case 'delete': return `delete: ${op.path}`;
+            case 'rename': return `rename: ${op.from} -> ${op.to}`;
+        }
+    };
+
+
+    export const formatTransactionDetails = (
+        tx: StateFile,
+        options: { showOperations?: boolean, showSpacing?: boolean } = {}
+    ): string[] => {
+        const lines: string[] = [];
+        lines.push(`- UUID: ${tx.uuid}`);
+        lines.push(`  Date: ${new Date(tx.createdAt).toLocaleString()}`);
+        if (tx.reasoning && tx.reasoning.length > 0) {
+            lines.push('  Reasoning:');
+            tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+        }
+        if (options.showOperations && tx.operations && tx.operations.length > 0) {
+            lines.push('  Changes:');
+            tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+        }
+        if (options.showSpacing) {
+            lines.push(''); // Newline for spacing
+        }
+        return lines;
+    };
+
+
+    export const logCommand = async (cwd: string = process.cwd(),
+    outputCapture?: string[]): Promise<void> => {
+        const log = (message: string) => {
+            if (outputCapture) {
+                outputCapture.push(message);
+            } else {
+                logger.log(message);
+            }
+        };
+
+        const transactions = await readAllStateFiles(cwd);
+
+        if (transactions === null) {
+            log(`warn: State directory '${STATE_DIRECTORY_NAME}' not found. No logs to display.`);
+            log("info: Run 'relay init' to initialize the project.");
+            return;
+        }
+
+        if (transactions.length === 0) {
+            log('info: No committed transactions found.');
+            return;
+        }
+
+        transactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        log('Committed Transactions (most recent first):');
+        log('-------------------------------------------');
+
+        if (transactions.length === 0) {
+            log('info: No valid transactions found.');
+            return;
+        }
+
+        transactions.forEach(tx => {
+            formatTransactionDetails(tx, { showOperations: true, showSpacing: true }).forEach(line => log(line));
+        });
+    };
+  src/core/executor.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { FileOperation, FileSnapshot } from '../types';
+
+    import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+    unifiedDiffService } from 'diff-apply';
+
+    import { getErrorMessage, isEnoentError } from '../utils/logger';
+
+
+    export const readFileContent = async (filePath: string, cwd: string =
+    process.cwd()): Promise<string | null> => {
+      try {
+        return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null; // File doesn't exist
+        }
+        throw error;
+      }
+    };
+
+
+    export const writeFileContent = async (filePath: string, content: string,
+    cwd: string = process.cwd()): Promise<void> => {
+      const absolutePath = path.resolve(cwd, filePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, content, 'utf-8');
+    };
+
+
+    export const deleteFile = async (filePath: string, cwd: string =
+    process.cwd()): Promise<void> => {
+      try {
+        await fs.unlink(path.resolve(cwd, filePath));
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // File already deleted, which is fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const fileExists = async (filePath: string, cwd: string =
+    process.cwd()): Promise<boolean> => {
+      try {
+        await fs.access(path.resolve(cwd, filePath));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+
+    export const safeRename = async (fromPath: string, toPath:string):
+    Promise<void> => {
+        try {
+            await fs.rename(fromPath, toPath);
+        } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'EXDEV') {
+                await fs.copyFile(fromPath, toPath);
+                await fs.unlink(fromPath);
+            } else {
+                throw error;
+            }
+        }
+    };
+
+
+    export const renameFile = async (fromPath: string, toPath: string, cwd:
+    string = process.cwd()): Promise<void> => {
+      const fromAbsolutePath = path.resolve(cwd, fromPath);
+      const toAbsolutePath = path.resolve(cwd, toPath);
+      await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+      await safeRename(fromAbsolutePath, toAbsolutePath);
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      
+      // Process file reads in parallel for better performance
+      const snapshotPromises = filePaths.map(async (filePath) => {
+        try {
+          const absolutePath = path.resolve(cwd, filePath);
+          try {
+            const content = await fs.readFile(absolutePath, 'utf-8');
+            return { path: filePath, content };
+          } catch (error) {
+            if (isEnoentError(error)) {
+              return { path: filePath, content: null }; // File doesn't exist, which is fine.
+            } else {
+              throw error;
+            }
+          }
+        } catch (error) {
+          console.error(`Error creating snapshot for ${filePath}:`, error);
+          throw error;
+        }
+      });
+      
+      const results = await Promise.all(snapshotPromises);
+      
+      // Combine results into snapshot object
+      for (const result of results) {
+        snapshot[result.path] = result.content;
+      }
+      
+      return snapshot;
+    };
+
+
+    export const applyOperations = async (operations: FileOperation[], cwd:
+    string = process.cwd()): Promise<void> => {
+      // Operations must be applied sequentially to ensure that if one fails,
+      // we can roll back from a known state.
+      for (const op of operations) {
+        if (op.type === 'delete') {
+          await deleteFile(op.path, cwd);
+          continue;
+        }
+        if (op.type === 'rename') {
+          await renameFile(op.from, op.to, cwd);
+          continue;
+        } 
+        
+        if (op.patchStrategy === 'replace') {
+          await writeFileContent(op.path, op.content, cwd);
+          continue;
+        }
+
+        // For patch strategies, apply them sequentially
+        const originalContent = await readFileContent(op.path, cwd);
+        if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+          throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+        }
+
+        try {
+          const diffParams = {
+            originalContent: originalContent ?? '',
+            diffContent: op.content,
+          };
+
+          let result;
+          switch (op.patchStrategy) {
+            case 'new-unified':
+              const newUnifiedStrategy = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+              result = await newUnifiedStrategy.applyDiff(diffParams);
+              break;
+            case 'multi-search-replace':
+              result = await multiSearchReplaceService.multiSearchReplaceService.applyDiff(diffParams);
+              break;
+            case 'unified':
+              result = await unifiedDiffService.unifiedDiffService.applyDiff(diffParams.originalContent, diffParams.diffContent);
+              break;
+            default:
+              throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+          }
+
+          if (result.success) {
+            await writeFileContent(op.path, result.content, cwd);
+          } else {
+            throw new Error(result.error);
+          }
+        } catch (e) {
+          throw new Error(`Error applying patch for ${op.path} with strategy ${op.patchStrategy}: ${getErrorMessage(e)}`);
+        }
+      }
+    };
+
+
+    // Helper to check if a directory is empty
+
+    const isDirectoryEmpty = async (dirPath: string): Promise<boolean> => {
+      try {
+        const files = await fs.readdir(dirPath);
+        return files.length === 0;
+      } catch (error) {
+        // If directory doesn't exist or is not accessible, consider it "not empty"
+        return false;
+      }
+    };
+
+
+    // Recursively remove all empty parent directories up to a limit
+
+    const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+    string): Promise<void> => {
+      if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+        return;
+      }
+      
+      try {
+        const isEmpty = await isDirectoryEmpty(dirPath);
+        if (isEmpty) {
+          await fs.rmdir(dirPath);
+          // Recursively check parent directory
+          await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+        }
+      } catch (error) {
+        // Ignore directory removal errors, but don't continue up the chain
+        if (!(error instanceof Error && 'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) {
+          console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+        }
+      }
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesDeleted = new Set<string>();
+
+      // Handle all file operations sequentially to ensure atomicity during rollback
+      for (const [filePath, content] of entries) {
+        const fullPath = path.resolve(cwd, filePath);
+        try {
+          if (content === null) {
+            // If the file didn't exist in the snapshot, make sure it doesn't exist after restore
+            try {
+              await fs.unlink(fullPath);
+              directoriesDeleted.add(path.dirname(fullPath));
+            } catch (error) {
+              if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+                // File or directory already doesn't exist, which is fine
+              } else {
+                throw error;
+              }
+            }
+          } else {
+            // Create directory structure if needed
+            const dir = path.dirname(fullPath);
+            await fs.mkdir(dir, { recursive: true });
+            
+            // Write the original content back to the file
+            await fs.writeFile(fullPath, content, 'utf-8');
+          }
+        } catch (error) {
+          console.error(`Failed to restore ${filePath}:`, error);
+          throw error;
+        }
+      }
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesDeleted)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+    };
+  src/core/transaction.ts: >-
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { createSnapshot, restoreSnapshot, applyOperations, readFileContent }
+    from './executor';
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt';
+
+    import { notifyApprovalRequired, notifyFailure, notifySuccess } from
+    '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+    };
+
+
+    const calculateLineChanges = async (op: FileOperation, snapshot:
+    FileSnapshot, cwd: string): Promise<{ added: number; removed: number }> => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+
+        // After applyOperations, the new content is on disk
+        const newContent = await readFileContent(op.path, cwd);
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent ? oldContent.split('\n') : [];
+        const newLines = newContent ? newContent.split('\n') : [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        const oldSet = new Set(oldLines);
+        const newSet = new Set(newLines);
+        
+        const added = newLines.filter(line => !oldSet.has(line)).length;
+        const removed = oldLines.filter(line => !newSet.has(line)).length;
+        
+        return { added, removed };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log('\nSummary:');
+        logger.log(`Applied ${operations.length} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${duration.toFixed(2)}ms`);
+        logger.success(`✅ Transaction ${uuid} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true):
+    Promise<void> => {
+        logger.warn(`Rolling back changes: ${reason}`);
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.success(`↩️ Transaction ${uuid} rolled back.`);
+                notifyFailure(uuid, enableNotifications);
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${uuid}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${config.projectId}', got '${projectId}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${uuid}' has already been processed.`);
+            return;
+        }
+
+        // 2. Pre-flight checks
+        if (config.preCommand) {
+            logger.log(`  - Running pre-command: ${config.preCommand}`);
+            const { exitCode, stderr } = await executeShellCommand(config.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${exitCode}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${uuid}...`);
+        logger.log(`Reasoning:\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid, projectId, createdAt: new Date().toISOString(), reasoning, operations, snapshot, approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStatsPromises = operations.map(async op => {
+                const stats = await calculateLineChanges(op, snapshot, cwd);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${op.path} (+${stats.added}, -${stats.removed})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${op.path}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${op.from} -> ${op.to}`);
+                }
+                return stats;
+            });
+            const opStats = await Promise.all(opStatsPromises);
+
+            // Run post-command
+            if (config.postCommand) {
+                logger.log(`  - Running post-command: ${config.postCommand}`);
+                const postResult = await executeShellCommand(config.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${postResult.exitCode}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log('\nPre-flight summary:');
+            logger.success(`Lines changed: +${totalAdded}, -${totalRemoved}`);
+            logger.log(`Checks completed in ${checksDuration.toFixed(2)}ms`);
+
+            // Check for approval
+            const finalErrorCount = await getErrorCount(config.linter, cwd);
+            logger.log(`  - Final linter error count: ${finalErrorCount}`);
+            
+            let isApproved: boolean;
+            if (config.approvalMode === 'auto') { // Auto mode allows conditional auto-approval
+                const canAutoApprove = finalErrorCount <= config.approvalOnErrorCount;
+
+                if (canAutoApprove) {
+                    logger.success('  - Changes automatically approved based on your configuration.');
+                    isApproved = true;
+                } else {
+                    notifyApprovalRequired(config.projectId, config.enableNotifications);
+                    isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+                }
+            } else { // Manual mode always requires user approval
+                logger.warn('Manual approval required because "approvalMode" is set to "manual".');
+                notifyApprovalRequired(config.projectId, config.enableNotifications);
+                isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+            }
+
+            if (isApproved) {
+                stateFile.approved = true;
+                await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.enableNotifications);
+            } else {
+                throw new Error('Changes were not approved.');
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.enableNotifications);
+        }
+    };
+approved: true

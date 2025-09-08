@@ -1,0 +1,106 @@
+{
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "docs/repomix-output.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    // "compress": true,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "copyToClipboard": true,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100
+    }
+  },
+  "include": [
+    "package.json",
+    "tsconfig.json",
+    "src",
+    // "src/index.ts",
+    // "packages/konro/package.json",
+    // "packages/konro/src",
+    // "packages/konro/tsconfig.json",
+    "packages/apply-multi-diff/package.json",
+    // "packages/apply-multi-diff/README.md",
+    "packages/apply-multi-diff/tsconfig.json",
+    // "packages/apply-multi-diff/src",
+    // "packages/apply-multi-diff/test",
+    "packages/apply-multi-diff/src/index.ts",
+    "packages/apply-multi-diff/src/types.ts",
+    "packages/relaycode-core/package.json",
+    "packages/relaycode-core/src",
+    "packages/relaycode-core/tsconfig.json",
+    "packages/relaycode-core/tsup.config.ts",
+    // "packages/relaycode-core/src/index.ts",
+    // "test/e2e/transaction.test.ts",
+    // "test/e2e/revert.test.ts",
+    // "packages/relaycode-core/tsconfig.json",
+    // "docs/separation.report.md",
+    // "src/core",
+    // "src/commands/init.ts",
+    // "src/index.ts",
+    // "test",
+    // "test/unit",
+    // "test/e2e/watch.test.ts",
+    // "test/test.util.ts",
+    // "test/e2e/patcher.test.ts",
+// "test/e2e/transaction.test.ts",
+// "test/e2e/git-commit.test.ts"
+    // "test/fixtures",
+    // "src/commands/revert.ts",
+    // "src/core/transaction.ts"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      // "src/commands",
+      // "src/utils",
+      // "packages/apply-multi-diff/src/utils"
+      // "src/utils/notifier.ts",
+      // "src/utils/shell.ts",
+      // "src/utils/prompt.ts",
+      // "src/utils/logger.ts",
+      // "src/core/clipboard.ts",
+      // "src/cli.ts"
+
+
+      // ".relaycode",
+      // "fallbacks",
+      // ".cursor",
+      // "docs",
+      // "node_modules",
+      // ".gitignore",
+      // ".repomixignore",
+      // "bun.lock",
+      // "README.md",
+      // "repomix.config.json",
+      // "tsconfig.tsbuildinfo",
+      // "REQUIREMENT.md",
+      // "test"
+      // // "src/utils"
+      // // "test/e2e/patcher.test.ts",
+      // // "test/e2e/transaction.test.ts",
+      // // "test/e2e/watch.test.ts",
+      // // "test/e2e/init.test.ts",
+      // // "test/fixtures"
+      // // "test/unit",
+      // // "src/utils"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}

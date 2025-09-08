@@ -1,0 +1,1480 @@
+uuid: a8d5420d-7dd2-4217-b769-6d87e35b7501
+projectId: relaycode
+createdAt: '2025-06-22T07:52:57.682Z'
+reasoning:
+  - >-
+    I will now proceed with refactoring the codebase to make it more DRY (Don't
+    Repeat Yourself) by consolidating repeated logic into reusable functions and
+    employing more data-driven patterns. This will reduce the overall lines of
+    code and improve maintainability without altering functionality.
+  - >-
+    First, I'll introduce a helper function to check for a specific file system
+    error (`ENOENT`) that is checked in multiple places.
+  - Now, I'll update various files to use the new `isEnoentError` helper.
+  - >-
+    Next, I'll centralize path generation logic. I'll export path helper
+    functions from `state.ts`, update `state.ts` to use the new error checker,
+    and then use these helpers in the `undo` command.
+  - I'll export these new functions through the main `index.ts`.
+  - Now I can refactor the `undo` command to be simpler.
+  - >-
+    Finally, I will refactor the `watch` command's system prompt generation to
+    be data-driven instead of using a large switch statement, which makes it
+    cleaner and more maintainable.
+operations:
+  - type: write
+    path: src/utils/logger.ts
+    content: |-
+      <<<<<<< SEARCH
+      export const getErrorMessage = (error: unknown): string => {
+          return error instanceof Error ? error.message : String(error);
+      };
+      =======
+      export const getErrorMessage = (error: unknown): string => {
+          return error instanceof Error ? error.message : String(error);
+      };
+
+      export const isEnoentError = (error: unknown): boolean => {
+          return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+      };
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/init.ts
+    content: |-
+      <<<<<<< SEARCH
+      import { logger, getErrorMessage } from '../utils/logger';
+      =======
+      import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+          try {
+              let content = await fs.readFile(gitignorePath, 'utf-8');
+              if (!content.includes(STATE_DIRECTORY_NAME)) {
+                  content += entry;
+                  await fs.writeFile(gitignorePath, content);
+                  logger.info(`Updated ${GITIGNORE_FILE_NAME} to ignore ${STATE_DIRECTORY_NAME}/`);
+              }
+          } catch (error) {
+              if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+                  await fs.writeFile(gitignorePath, entry.trim());
+                  logger.info(`Created ${GITIGNORE_FILE_NAME} and added ${STATE_DIRECTORY_NAME}/`);
+              } else {
+      =======
+          try {
+              let content = await fs.readFile(gitignorePath, 'utf-8');
+              if (!content.includes(STATE_DIRECTORY_NAME)) {
+                  content += entry;
+                  await fs.writeFile(gitignorePath, content);
+                  logger.info(`Updated ${GITIGNORE_FILE_NAME} to ignore ${STATE_DIRECTORY_NAME}/`);
+              }
+          } catch (error) {
+              if (isEnoentError(error)) {
+                  await fs.writeFile(gitignorePath, entry.trim());
+                  logger.info(`Created ${GITIGNORE_FILE_NAME} and added ${STATE_DIRECTORY_NAME}/`);
+              } else {
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/config.ts
+    content: |-
+      <<<<<<< SEARCH
+      import { logger } from '../utils/logger';
+      =======
+      import { logger, isEnoentError } from '../utils/logger';
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+        try {
+          const fileContent = await fs.readFile(configPath, 'utf-8');
+          const configJson = JSON.parse(fileContent);
+          return ConfigSchema.parse(configJson);
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            return null;
+          }
+          if (error instanceof z.ZodError) {
+      =======
+        try {
+          const fileContent = await fs.readFile(configPath, 'utf-8');
+          const configJson = JSON.parse(fileContent);
+          return ConfigSchema.parse(configJson);
+        } catch (error) {
+          if (isEnoentError(error)) {
+            return null;
+          }
+          if (error instanceof z.ZodError) {
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/executor.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { getErrorMessage } from '../utils/logger';
+
+      =======
+
+      import { getErrorMessage, isEnoentError } from '../utils/logger';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const readFileContent = async (filePath: string, cwd: string =
+      process.cwd()): Promise<string | null> => {
+        try {
+          return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            return null; // File doesn't exist
+          }
+          throw error;
+        }
+      };
+
+      =======
+
+      export const readFileContent = async (filePath: string, cwd: string =
+      process.cwd()): Promise<string | null> => {
+        try {
+          return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+        } catch (error) {
+          if (isEnoentError(error)) {
+            return null; // File doesn't exist
+          }
+          throw error;
+        }
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const deleteFile = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+        try {
+          await fs.unlink(path.resolve(cwd, filePath));
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            // File already deleted, which is fine.
+            return;
+          }
+          throw error;
+        }
+      };
+
+      =======
+
+      export const deleteFile = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+        try {
+          await fs.unlink(path.resolve(cwd, filePath));
+        } catch (error) {
+          if (isEnoentError(error)) {
+            // File already deleted, which is fine.
+            return;
+          }
+          throw error;
+        }
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+            try {
+              const content = await fs.readFile(absolutePath, 'utf-8');
+              return { path: filePath, content };
+            } catch (error) {
+              if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+                return { path: filePath, content: null }; // File doesn't exist, which is fine.
+              } else {
+                throw error;
+              }
+            }
+      =======
+            try {
+              const content = await fs.readFile(absolutePath, 'utf-8');
+              return { path: filePath, content };
+            } catch (error) {
+              if (isEnoentError(error)) {
+                return { path: filePath, content: null }; // File doesn't exist, which is fine.
+              } else {
+                throw error;
+              }
+            }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { logger } from '../utils/logger';
+
+      =======
+
+      import { logger, isEnoentError } from '../utils/logger';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const getStateFilePath = (cwd: string, uuid: string, isPending: boolean):
+      string => {
+        const fileName = isPending ? `${uuid}.pending.yml` : `${uuid}.yml`;
+        return path.join(getStateDirectory(cwd), fileName);
+      };
+
+
+      const getUndoneStateFilePath = (cwd: string, uuid: string): string => {
+        const fileName = `${uuid}.yml`;
+        return path.join(getStateDirectory(cwd),'undone', fileName);
+      };
+
+      =======
+
+      export const getStateFilePath = (cwd: string, uuid: string, isPending:
+      boolean): string => {
+        const fileName = isPending ? `${uuid}.pending.yml` : `${uuid}.yml`;
+        return path.join(getStateDirectory(cwd), fileName);
+      };
+
+
+      export const getUndoneStateFilePath = (cwd: string, uuid: string): string
+      => {
+        const fileName = `${uuid}.yml`;
+        return path.join(getStateDirectory(cwd),'undone', fileName);
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const deletePendingState = async (cwd: string, uuid: string):
+      Promise<void> => {
+        const pendingPath = getStateFilePath(cwd, uuid, true);
+        try {
+          await fs.unlink(pendingPath);
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            // Already gone, that's fine.
+            return;
+          }
+          throw error;
+        }
+      };
+
+      =======
+
+      export const deletePendingState = async (cwd: string, uuid: string):
+      Promise<void> => {
+        const pendingPath = getStateFilePath(cwd, uuid, true);
+        try {
+          await fs.unlink(pendingPath);
+        } catch (error) {
+          if (isEnoentError(error)) {
+            // Already gone, that's fine.
+            return;
+          }
+          throw error;
+        }
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/index.ts
+    content: |-
+      <<<<<<< SEARCH
+      export { 
+          commitState,
+          deletePendingState,
+          hasBeenProcessed,
+          findLatestStateFile,
+          readStateFile,
+          readAllStateFiles,
+          writePendingState
+      } from './core/state';
+      =======
+      export { 
+          commitState,
+          deletePendingState,
+          hasBeenProcessed,
+          findLatestStateFile,
+          readStateFile,
+          readAllStateFiles,
+          writePendingState,
+          getStateFilePath,
+          getUndoneStateFilePath
+      } from './core/state';
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/undo.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+      import { findLatestStateFile } from '../core/state';
+
+      =======
+
+      import { findLatestStateFile, getStateFilePath, getUndoneStateFilePath }
+      from '../core/state';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+              await restoreSnapshot(latestTransaction.snapshot, cwd);
+              logger.success('  - Successfully restored file snapshot.');
+
+              const stateDir = path.resolve(cwd, STATE_DIRECTORY_NAME);
+              const undoneDir = path.join(stateDir, 'undone');
+              await fs.mkdir(undoneDir, { recursive: true });
+
+              const oldPath = path.join(stateDir, `${latestTransaction.uuid}.yml`);
+              const newPath = path.join(undoneDir, `${latestTransaction.uuid}.yml`);
+
+              await fs.rename(oldPath, newPath);
+      =======
+              await restoreSnapshot(latestTransaction.snapshot, cwd);
+              logger.success('  - Successfully restored file snapshot.');
+
+              const oldPath = getStateFilePath(cwd, latestTransaction.uuid, false);
+              const newPath = getUndoneStateFilePath(cwd, latestTransaction.uuid);
+
+              await fs.mkdir(path.dirname(newPath), { recursive: true });
+              await fs.rename(oldPath, newPath);
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/watch.ts
+    content: |-
+      <<<<<<< SEARCH
+          const footer = `---------------------------------------------------------------------------`;
+
+          let syntax = '';
+          let strategyDetails = '';
+
+          switch (preferredStrategy) {
+              case 'replace':
+                  syntax = syntaxReplace;
+                  strategyDetails = ''; // Covered in 'otherOps'
+                  break;
+              case 'new-unified':
+                  syntax = syntaxNewUnified;
+                  strategyDetails = sectionNewUnified;
+                  break;
+              case 'multi-search-replace':
+                  syntax = syntaxMultiSearchReplace;
+                  strategyDetails = sectionMultiSearchReplace;
+                  break;
+              case 'auto':
+              default:
+                  syntax = syntaxAuto;
+                  strategyDetails = `${sectionNewUnified}\n${sectionMultiSearchReplace}`;
+                  break;
+          }
+
+          return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+      }
+      =======
+          const footer = `---------------------------------------------------------------------------`;
+
+          const syntaxMap = {
+              auto: syntaxAuto,
+              replace: syntaxReplace,
+              'new-unified': syntaxNewUnified,
+              'multi-search-replace': syntaxMultiSearchReplace,
+          };
+
+          const strategyDetailsMap = {
+              auto: `${sectionNewUnified}\n${sectionMultiSearchReplace}`,
+              replace: '', // Covered in 'otherOps'
+              'new-unified': sectionNewUnified,
+              'multi-search-replace': sectionMultiSearchReplace,
+          };
+
+          const syntax = syntaxMap[preferredStrategy] ?? syntaxMap.auto;
+          const strategyDetails = strategyDetailsMap[preferredStrategy] ?? strategyDetailsMap.auto;
+
+          return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+      }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/utils/logger.ts: |-
+    import chalk from 'chalk';
+    import { LogLevelName } from '../types';
+
+    const LogLevels = {
+      silent: 0,
+      error: 1,
+      warn: 2,
+      info: 3,
+      debug: 4,
+    } as const;
+
+    let currentLogLevel: LogLevelName = 'info'; // Default level
+
+    export const logger = {
+      setLevel: (level: LogLevelName) => {
+        if (level in LogLevels) {
+          currentLogLevel = level;
+        }
+      },
+      info: (message: string) => {
+        if (LogLevels.info <= LogLevels[currentLogLevel]) {
+          console.log(chalk.blue(message));
+        }
+      },
+      success: (message: string) => {
+        if (LogLevels.info <= LogLevels[currentLogLevel]) {
+          console.log(chalk.green(message));
+        }
+      },
+      warn: (message: string) => {
+        if (LogLevels.warn <= LogLevels[currentLogLevel]) {
+          console.log(chalk.yellow(message));
+        }
+      },
+      error: (message: string) => {
+        if (LogLevels.error <= LogLevels[currentLogLevel]) {
+          console.log(chalk.red(message));
+        }
+      },
+      debug: (message: string) => {
+        if (LogLevels.debug <= LogLevels[currentLogLevel]) {
+          console.log(chalk.gray(message));
+        }
+      },
+      log: (message: string) => {
+        // General log, treat as info
+        if (LogLevels.info <= LogLevels[currentLogLevel]) {
+          console.log(message);
+        }
+      },
+      prompt: (message: string) => {
+        // Prompts are special and should be shown unless silent
+            if (currentLogLevel !== 'silent') {
+              console.log(chalk.cyan(message));
+            }
+          },
+        };
+        
+        export const getErrorMessage = (error: unknown): string => {
+            return error instanceof Error ? error.message : String(error);
+        };
+  src/commands/init.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { findConfig, createConfig, ensureStateDirExists, getProjectId } from
+    '../core/config';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME } from
+    '../utils/constants';
+
+
+    const getInitMessage = (projectId: string): string => `
+
+    ✅ relaycode has been initialized for this project.
+
+
+    Configuration file created: ${CONFIG_FILE_NAME}
+
+
+    Project ID: ${projectId}
+
+
+    Next steps:
+
+    1. (Optional) Open ${CONFIG_FILE_NAME} to customize settings like
+    'preferredStrategy' to control how the AI generates code patches.
+       - 'auto' (default): The AI can choose the best patch strategy.
+       - 'new-unified': Forces the AI to use diffs, great for most changes.
+       - 'replace': Forces the AI to replace entire files, good for new files or small changes.
+       - 'multi-search-replace': Forces the AI to perform precise search and replace operations.
+
+    2. Run 'relay watch' in your terminal. This will start the service and
+    display the system prompt tailored to your configuration.
+
+
+    3. Copy the system prompt provided by 'relay watch' and paste it into your
+    AI assistant's "System Prompt" or "Custom Instructions".
+
+    `;
+
+
+
+    const updateGitignore = async (cwd: string): Promise<void> => {
+        const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+        const entry = `\n# relaycode state\n/${STATE_DIRECTORY_NAME}/\n`;
+
+        try {
+            let content = await fs.readFile(gitignorePath, 'utf-8');
+            if (!content.includes(STATE_DIRECTORY_NAME)) {
+                content += entry;
+                await fs.writeFile(gitignorePath, content);
+                logger.info(`Updated ${GITIGNORE_FILE_NAME} to ignore ${STATE_DIRECTORY_NAME}/`);
+            }
+        } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+                await fs.writeFile(gitignorePath, entry.trim());
+                logger.info(`Created ${GITIGNORE_FILE_NAME} and added ${STATE_DIRECTORY_NAME}/`);
+            } else {
+                logger.error(`Failed to update ${GITIGNORE_FILE_NAME}: ${getErrorMessage(error)}`);
+            }
+        }
+    };
+
+
+    export const initCommand = async (cwd: string = process.cwd()):
+    Promise<void> => {
+        logger.info('Initializing relaycode in this project...');
+
+        const config = await findConfig(cwd);
+        if (config) {
+            logger.warn(`${CONFIG_FILE_NAME} already exists. Initialization skipped.`);
+            logger.log(`
+    To use relaycode, please run 'relay watch'.
+
+    It will display a system prompt to copy into your LLM assistant.
+
+    You can review your configuration in ${CONFIG_FILE_NAME}.
+
+    `);
+            return;
+        }
+        
+        const projectId = await getProjectId(cwd);
+        await createConfig(projectId, cwd);
+        logger.success(`Created configuration file: ${CONFIG_FILE_NAME}`);
+        
+        await ensureStateDirExists(cwd);
+        logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+
+        await updateGitignore(cwd);
+
+        logger.log(getInitMessage(projectId));
+    };
+  src/core/config.ts: >-
+    import { z } from 'zod';
+
+    import path from 'path';
+
+    import { promises as fs } from 'fs';
+
+    import { Config, ConfigSchema } from '../types';
+
+    import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger } from '../utils/logger';
+
+
+    export const findConfig = async (cwd: string = process.cwd()):
+    Promise<Config | null> => {
+      const configPath = path.join(cwd, CONFIG_FILE_NAME);
+      try {
+        const fileContent = await fs.readFile(configPath, 'utf-8');
+        const configJson = JSON.parse(fileContent);
+        return ConfigSchema.parse(configJson);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          return null;
+        }
+        if (error instanceof z.ZodError) {
+          throw new Error(`Invalid configuration in ${CONFIG_FILE_NAME}: ${error.message}`);
+        }
+        throw error;
+      }
+    };
+
+
+    export const loadConfigOrExit = async (cwd: string = process.cwd()):
+    Promise<Config> => {
+        const config = await findConfig(cwd);
+        if (!config) {
+            logger.error(`Configuration file '${CONFIG_FILE_NAME}' not found.`);
+            logger.info("Please run 'relay init' to create one.");
+            process.exit(1);
+        }
+        return config;
+    };
+
+
+    export const createConfig = async (projectId: string, cwd: string =
+    process.cwd()): Promise<Config> => {
+        const config = {
+            projectId,
+            clipboardPollInterval: 2000,
+            approvalMode: 'auto' as const,
+            approvalOnErrorCount: 0,
+            linter: 'bun tsc --noEmit',
+            preCommand: '',
+            postCommand: '',
+            preferredStrategy: 'auto' as const,
+            enableNotifications: true,
+        };
+        
+        // Ensure the schema defaults are applied, including for logLevel
+        const validatedConfig = ConfigSchema.parse(config);
+
+        const configPath = path.join(cwd, CONFIG_FILE_NAME);
+        await fs.writeFile(configPath, JSON.stringify(validatedConfig, null, 2));
+
+        return validatedConfig;
+    };
+
+
+    export const ensureStateDirExists = async (cwd: string = process.cwd()):
+    Promise<void> => {
+        const stateDirPath = path.join(cwd, STATE_DIRECTORY_NAME);
+        await fs.mkdir(stateDirPath, { recursive: true });
+    };
+
+
+    export const getProjectId = async (cwd: string = process.cwd()):
+    Promise<string> => {
+        try {
+            const pkgJsonPath = path.join(cwd, 'package.json');
+            const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');
+            const pkgJson = JSON.parse(fileContent);
+            if (pkgJson.name && typeof pkgJson.name === 'string') {
+                return pkgJson.name;
+            }
+        } catch (e) {
+            // Ignore if package.json doesn't exist or is invalid
+        }
+        return path.basename(cwd);
+    };
+  src/core/executor.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { FileOperation, FileSnapshot } from '../types';
+
+    import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+    unifiedDiffService } from 'diff-apply';
+
+    import { getErrorMessage } from '../utils/logger';
+
+
+    export const readFileContent = async (filePath: string, cwd: string =
+    process.cwd()): Promise<string | null> => {
+      try {
+        return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          return null; // File doesn't exist
+        }
+        throw error;
+      }
+    };
+
+
+    export const writeFileContent = async (filePath: string, content: string,
+    cwd: string = process.cwd()): Promise<void> => {
+      const absolutePath = path.resolve(cwd, filePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, content, 'utf-8');
+    };
+
+
+    export const deleteFile = async (filePath: string, cwd: string =
+    process.cwd()): Promise<void> => {
+      try {
+        await fs.unlink(path.resolve(cwd, filePath));
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          // File already deleted, which is fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const safeRename = async (fromPath: string, toPath:string):
+    Promise<void> => {
+        try {
+            await fs.rename(fromPath, toPath);
+        } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'EXDEV') {
+                await fs.copyFile(fromPath, toPath);
+                await fs.unlink(fromPath);
+            } else {
+                throw error;
+            }
+        }
+    };
+
+
+    export const renameFile = async (fromPath: string, toPath: string, cwd:
+    string = process.cwd()): Promise<void> => {
+      const fromAbsolutePath = path.resolve(cwd, fromPath);
+      const toAbsolutePath = path.resolve(cwd, toPath);
+      await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+      await safeRename(fromAbsolutePath, toAbsolutePath);
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      
+      // Process file reads in parallel for better performance
+      const snapshotPromises = filePaths.map(async (filePath) => {
+        try {
+          const absolutePath = path.resolve(cwd, filePath);
+          try {
+            const content = await fs.readFile(absolutePath, 'utf-8');
+            return { path: filePath, content };
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+              return { path: filePath, content: null }; // File doesn't exist, which is fine.
+            } else {
+              throw error;
+            }
+          }
+        } catch (error) {
+          console.error(`Error creating snapshot for ${filePath}:`, error);
+          throw error;
+        }
+      });
+      
+      const results = await Promise.all(snapshotPromises);
+      
+      // Combine results into snapshot object
+      for (const result of results) {
+        snapshot[result.path] = result.content;
+      }
+      
+      return snapshot;
+    };
+
+
+    export const applyOperations = async (operations: FileOperation[], cwd:
+    string = process.cwd()): Promise<void> => {
+      // Operations must be applied sequentially to ensure that if one fails,
+      // we can roll back from a known state.
+      for (const op of operations) {
+        if (op.type === 'delete') {
+          await deleteFile(op.path, cwd);
+          continue;
+        }
+        if (op.type === 'rename') {
+          await renameFile(op.from, op.to, cwd);
+          continue;
+        } 
+        
+        if (op.patchStrategy === 'replace') {
+          await writeFileContent(op.path, op.content, cwd);
+          continue;
+        }
+
+        // For patch strategies, apply them sequentially
+        const originalContent = await readFileContent(op.path, cwd);
+        if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+          throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+        }
+
+        try {
+          const diffParams = {
+            originalContent: originalContent ?? '',
+            diffContent: op.content,
+          };
+
+          let result;
+          switch (op.patchStrategy) {
+            case 'new-unified':
+              const newUnifiedStrategy = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+              result = await newUnifiedStrategy.applyDiff(diffParams);
+              break;
+            case 'multi-search-replace':
+              result = await multiSearchReplaceService.multiSearchReplaceService.applyDiff(diffParams);
+              break;
+            case 'unified':
+              result = await unifiedDiffService.unifiedDiffService.applyDiff(diffParams.originalContent, diffParams.diffContent);
+              break;
+            default:
+              throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+          }
+
+          if (result.success) {
+            await writeFileContent(op.path, result.content, cwd);
+          } else {
+            throw new Error(result.error);
+          }
+        } catch (e) {
+          throw new Error(`Error applying patch for ${op.path} with strategy ${op.patchStrategy}: ${getErrorMessage(e)}`);
+        }
+      }
+    };
+
+
+    // Helper to check if a directory is empty
+
+    const isDirectoryEmpty = async (dirPath: string): Promise<boolean> => {
+      try {
+        const files = await fs.readdir(dirPath);
+        return files.length === 0;
+      } catch (error) {
+        // If directory doesn't exist or is not accessible, consider it "not empty"
+        return false;
+      }
+    };
+
+
+    // Recursively remove all empty parent directories up to a limit
+
+    const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+    string): Promise<void> => {
+      if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+        return;
+      }
+      
+      try {
+        const isEmpty = await isDirectoryEmpty(dirPath);
+        if (isEmpty) {
+          await fs.rmdir(dirPath);
+          // Recursively check parent directory
+          await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+        }
+      } catch (error) {
+        // Ignore directory removal errors, but don't continue up the chain
+        if (!(error instanceof Error && 'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) {
+          console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+        }
+      }
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesDeleted = new Set<string>();
+
+      // Handle all file operations sequentially to ensure atomicity during rollback
+      for (const [filePath, content] of entries) {
+        const fullPath = path.resolve(cwd, filePath);
+        try {
+          if (content === null) {
+            // If the file didn't exist in the snapshot, make sure it doesn't exist after restore
+            try {
+              await fs.unlink(fullPath);
+              directoriesDeleted.add(path.dirname(fullPath));
+            } catch (error) {
+              if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+                // File or directory already doesn't exist, which is fine
+              } else {
+                throw error;
+              }
+            }
+          } else {
+            // Create directory structure if needed
+            const dir = path.dirname(fullPath);
+            await fs.mkdir(dir, { recursive: true });
+            
+            // Write the original content back to the file
+            await fs.writeFile(fullPath, content, 'utf-8');
+          }
+        } catch (error) {
+          console.error(`Failed to restore ${filePath}:`, error);
+          throw error;
+        }
+      }
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesDeleted)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+    };
+  src/core/state.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { StateFile, StateFileSchema } from '../types';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger } from '../utils/logger';
+
+    import { safeRename } from './executor';
+
+
+    const stateDirectoryCache = new Map<string, boolean>();
+
+
+    const getStateDirectory = (cwd: string) => path.resolve(cwd,
+    STATE_DIRECTORY_NAME);
+
+
+    const getStateFilePath = (cwd: string, uuid: string, isPending: boolean):
+    string => {
+      const fileName = isPending ? `${uuid}.pending.yml` : `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd), fileName);
+    };
+
+
+    const getUndoneStateFilePath = (cwd: string, uuid: string): string => {
+      const fileName = `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd),'undone', fileName);
+    };
+
+
+    // Ensure state directory exists with caching for performance
+
+    const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      const dirPath = getStateDirectory(cwd);
+      if (!stateDirectoryCache.has(dirPath)) {
+        await fs.mkdir(dirPath, { recursive: true });
+        stateDirectoryCache.set(dirPath, true);
+      }
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      const undonePath = getUndoneStateFilePath(cwd,uuid);
+      try {
+        // Only check for a committed state file.
+        // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+        await fs.access(committedPath);
+        return true;
+      } catch (e) {
+        try {
+          await fs.access(undonePath);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const validatedState = StateFileSchema.parse(state);
+      const yamlString = yaml.dump(validatedState);
+      const filePath = getStateFilePath(cwd, state.uuid, true);
+      
+      // Ensure directory exists (cached)
+      await ensureStateDirectory(cwd);
+      
+      // Write file
+      await fs.writeFile(filePath, yamlString, 'utf-8');
+    };
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      await safeRename(pendingPath, committedPath);
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      try {
+        await fs.unlink(pendingPath);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          // Already gone, that's fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      try {
+        const fileContent = await fs.readFile(committedPath, 'utf-8');
+        const yamlContent = yaml.load(fileContent);
+        return StateFileSchema.parse(yamlContent);
+      } catch (error) {
+        // Can be file not found, YAML parsing error, or Zod validation error.
+        // In any case, we can't get the state file.
+        return null;
+      }
+    };
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd()):
+    Promise<StateFile[] | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null; // No state directory, so no transactions
+        }
+
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+
+        const promises = transactionFiles.map(async (file) => {
+            const stateFile = await readStateFile(cwd, file.replace('.yml', ''));
+            if (!stateFile) {
+                logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+            }
+            return stateFile;
+        });
+
+        const results = await Promise.all(promises);
+        return results.filter((sf): sf is StateFile => !!sf);
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd()):
+    Promise<StateFile | null> => {
+        const transactions = await readAllStateFiles(cwd);
+        if (!transactions || transactions.length === 0) {
+            return null;
+        }
+
+        transactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return transactions[0] || null;
+    };
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit } from './core/config';
+
+    export { 
+        applyOperations, 
+        createSnapshot, 
+        deleteFile, 
+        readFileContent, 
+        restoreSnapshot, 
+        writeFileContent 
+    } from './core/executor';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export { 
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState
+    } from './core/state';
+
+    export { processPatch } from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { undoCommand } from './commands/undo';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { logger } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+  src/commands/undo.ts: "import { promises as fs } from 'fs';\r\nimport path from 'path';\r\nimport { logger, getErrorMessage } from '../utils/logger';\r\nimport { STATE_DIRECTORY_NAME } from '../utils/constants';\r\nimport { findLatestStateFile } from '../core/state';\r\nimport { restoreSnapshot } from '../core/executor';\r\nimport { getConfirmation as defaultGetConfirmation } from '../utils/prompt';\r\nimport { formatTransactionDetails } from './log';\n\r\ntype Prompter = (question: string) => Promise<boolean>;\n\nexport const undoCommand = async (cwd: string = process.cwd(), prompter?: Prompter): Promise<void> => {\n    const getConfirmation = prompter || defaultGetConfirmation;\n    logger.info('Attempting to undo the last transaction...');\r\n\r\n    const latestTransaction = await findLatestStateFile(cwd);\r\n\r\n    if (!latestTransaction) {\r\n        logger.warn('No committed transactions found to undo.');\r\n        return;\r\n    }\r\n\r\n    const [uuidLine, ...otherLines] = formatTransactionDetails(latestTransaction, { showSpacing: true });\n    logger.log(`The last transaction to be undone is:`);\n    if (uuidLine) {\n        logger.info(uuidLine); // UUID line with info color\n    }\n    otherLines.forEach(line => logger.log(line));\r\n\r\n    const confirmed = await getConfirmation('Are you sure you want to undo this transaction? (y/N)');\r\n\r\n    if (!confirmed) {\r\n        logger.info('Undo operation cancelled.');\r\n        return;\r\n    }\r\n    \r\n    logger.info(`Undoing transaction ${latestTransaction.uuid}...`);\r\n\r\n    try {\r\n        await restoreSnapshot(latestTransaction.snapshot, cwd);\r\n        logger.success('  - Successfully restored file snapshot.');\r\n\r\n        const stateDir = path.resolve(cwd, STATE_DIRECTORY_NAME);\r\n        const undoneDir = path.join(stateDir, 'undone');\r\n        await fs.mkdir(undoneDir, { recursive: true });\r\n\r\n        const oldPath = path.join(stateDir, `${latestTransaction.uuid}.yml`);\r\n        const newPath = path.join(undoneDir, `${latestTransaction.uuid}.yml`);\r\n\r\n        await fs.rename(oldPath, newPath);\r\n        logger.success(`  - Moved transaction file to 'undone' directory.`);\r\n        logger.success(`✅ Last transaction successfully undone.`);\r\n\r\n    } catch (error) {\r\n        logger.error(`Failed to undo transaction: ${getErrorMessage(error)}`);\r\n        logger.error('Your file system may be in a partially restored state. Please check your files.');\r\n    }\r\n};"
+  src/commands/watch.ts: >-
+    import { findConfig, loadConfigOrExit } from '../core/config';
+
+    import { createClipboardWatcher } from '../core/clipboard';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { CONFIG_FILE_NAME } from '../utils/constants';
+
+    import { notifyPatchDetected } from '../utils/notifier';
+
+    import { Config } from '../types';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+
+    const getSystemPrompt = (projectId: string, preferredStrategy:
+    Config['preferredStrategy']): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+        const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+        const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+    \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+    the \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+    ...
+
+    \`\`\``;
+
+        const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+        const syntaxNewUnified = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath new-unified
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+        const syntaxMultiSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath multi-search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`multi-search-replace\` patch strategy for all
+    modifications.`;
+
+        const sectionNewUnified = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+        const sectionMultiSearchReplace = `---
+
+    ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    :start_line: (optional)
+
+    :end_line: (optional)
+
+    -------
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+        const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+        const finalSteps = `---
+
+    ### Final Steps
+
+
+    1.  Add your step-by-step reasoning in plain text before each code block.
+
+    2.  ALWAYS add the following YAML block at the very end of your response.
+    Use the exact projectId shown here. Generate a new random uuid for each
+    response.
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary:
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        \`\`\`
+    `;
+        
+        const footer = `---------------------------------------------------------------------------`;
+
+        let syntax = '';
+        let strategyDetails = '';
+
+        switch (preferredStrategy) {
+            case 'replace':
+                syntax = syntaxReplace;
+                strategyDetails = ''; // Covered in 'otherOps'
+                break;
+            case 'new-unified':
+                syntax = syntaxNewUnified;
+                strategyDetails = sectionNewUnified;
+                break;
+            case 'multi-search-replace':
+                syntax = syntaxMultiSearchReplace;
+                strategyDetails = sectionMultiSearchReplace;
+                break;
+            case 'auto':
+            default:
+                syntax = syntaxAuto;
+                strategyDetails = `${sectionNewUnified}\n${sectionMultiSearchReplace}`;
+                break;
+        }
+
+        return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    }
+
+
+    export const watchCommand = async (cwd: string = process.cwd()): Promise<{
+    stop: () => void }> => {
+      let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+      const configPath = path.resolve(cwd, CONFIG_FILE_NAME);
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.logLevel);
+        logger.debug(`Log level set to: ${config.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.preferredStrategy));
+
+        clipboardWatcher = createClipboardWatcher(config.clipboardPollInterval, async (content) => {
+          logger.info('New clipboard content detected. Attempting to parse...');
+          const parsedResponse = parseLLMResponse(content);
+
+          if (!parsedResponse) {
+            logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+            return;
+          }
+
+          // Check project ID before notifying and processing.
+          if (parsedResponse.control.projectId !== config.projectId) {
+            logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+            return;
+          }
+
+          notifyPatchDetected(config.projectId, config.enableNotifications);
+          logger.success(`Valid patch detected for project '${config.projectId}'. Processing...`);
+          await processPatch(config, parsedResponse, { cwd });
+          logger.info('--------------------------------------------------');
+          logger.info('Watching for next patch...');
+        });
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`${CONFIG_FILE_NAME} is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      const configWatcher = fs.watch(configPath, handleConfigChange);
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+approved: true

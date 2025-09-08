@@ -1,0 +1,681 @@
+uuid: a85d06da-c7fd-4d57-b4d2-c430932c129e
+projectId: relaycode
+createdAt: '2025-06-25T06:05:02.722Z'
+gitCommitMsg: 'refactor: Standardize on ''relay'' for config and state dirs'
+promptSummary: >-
+  The user wants to rename config files from 'relaycode.config.ts' to
+  'relay.config.ts', change the state directory from '.relaycode' to '.relay',
+  and move transaction files into a '.relay/transactions' subdirectory.
+reasoning:
+  - >-
+    Of course, I can help with those changes. It's a good idea to simplify the
+    configuration and directory names. Here are the modifications to achieve
+    your goal.
+  - >-
+    First, I'll update the constants to reflect the new naming scheme for
+    configuration files and the state directory. I'll also add a new constant
+    for the `transactions` subdirectory.
+  - >-
+    Next, I'll modify the state management logic to place transaction files
+    inside the new `.relay/transactions/` directory structure. This includes
+    committed, pending, and undone transaction files.
+  - >-
+    Now, I'll update the configuration loader to look for `relay.config.ts` (and
+    its variants) and adjust its internal temporary file naming.
+  - >-
+    Finally, I'll rename the configuration file template from
+    `relaycode.config.ts` to `relay.config.ts`.
+  - >-
+    These changes will align your project with the new naming conventions. Let
+    me know if there's anything else I can help with!
+operations:
+  - type: write
+    path: src/utils/constants.ts
+    content: |-
+      <<<<<<< SEARCH
+      export const CONFIG_FILE_NAME_JSON = 'relaycode.config.json';
+      export const CONFIG_FILE_NAME_TS = 'relaycode.config.ts';
+      export const CONFIG_FILE_NAME_JS = 'relaycode.config.js';
+      =======
+      export const CONFIG_FILE_NAME_JSON = 'relay.config.json';
+      export const CONFIG_FILE_NAME_TS = 'relay.config.ts';
+      export const CONFIG_FILE_NAME_JS = 'relay.config.js';
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+      export const STATE_DIRECTORY_NAME = '.relaycode';
+      export const GITIGNORE_FILE_NAME = '.gitignore';
+      export const UNDONE_DIRECTORY_NAME = 'undone';
+      =======
+      export const STATE_DIRECTORY_NAME = '.relay';
+      export const GITIGNORE_FILE_NAME = '.gitignore';
+      export const TRANSACTIONS_DIRECTORY_NAME = 'transactions';
+      export const UNDONE_DIRECTORY_NAME = 'undone';
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+      export const GITIGNORE_COMMENT = '# relaycode state';
+      =======
+      export const GITIGNORE_COMMENT = '# relay state';
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      --- src/core/state.ts
+
+      +++ src/core/state.ts
+
+      @@ -2,7 +2,7 @@
+       import path from 'path';
+       import yaml from 'js-yaml';
+       import { StateFile, StateFileSchema } from '../types';
+      -import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX,
+      STATE_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME } from '../utils/constants';
+
+      +import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX,
+      STATE_DIRECTORY_NAME, TRANSACTIONS_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME }
+      from '../utils/constants';
+       import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+       import { fileExists, safeRename } from '../utils/fs';
+       
+      @@ -12,12 +12,12 @@
+       
+       export const getStateFilePath = (cwd: string, uuid: string, isPending: boolean): string => {
+         const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` : `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      -  return path.join(getStateDirectory(cwd), fileName);
+
+      +  return path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME,
+      fileName);
+       };
+       
+       export const getUndoneStateFilePath = (cwd: string, uuid: string): string => {
+         const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      -  return path.join(getStateDirectory(cwd), UNDONE_DIRECTORY_NAME,
+      fileName);
+
+      +  return path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME,
+      UNDONE_DIRECTORY_NAME, fileName);
+       };
+       
+       const getUuidFromFileName = (fileName: string): string => {
+      @@ -30,24 +30,24 @@
+       
+       // Helper to get all committed transaction file names.
+       const getCommittedTransactionFiles = async (cwd: string): Promise<{ stateDir: string; files: string[] } | null> => {
+      -    const stateDir = getStateDirectory(cwd);
+
+      +    const transactionsDir = path.join(getStateDirectory(cwd),
+      TRANSACTIONS_DIRECTORY_NAME);
+           try {
+      -        await fs.access(stateDir);
+
+      +        await fs.access(transactionsDir);
+           } catch (e) {
+               return null;
+           }
+      -    const files = await fs.readdir(stateDir);
+
+      +    const files = await fs.readdir(transactionsDir);
+           const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));
+      -    return { stateDir, files: transactionFiles };
+
+      +    return { stateDir: transactionsDir, files: transactionFiles };
+       };
+       
+       const sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt: string | Date }) => {
+           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+       };
+       
+       // Ensure state directory exists with caching for performance
+       const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      -  const dirPath = getStateDirectory(cwd);
+
+      +  const dirPath = path.join(getStateDirectory(cwd),
+      TRANSACTIONS_DIRECTORY_NAME);
+         if (!stateDirectoryCache.has(dirPath)) {
+           await fs.mkdir(dirPath, { recursive: true });
+           stateDirectoryCache.set(dirPath, true);
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/config.ts
+    content: >-
+      <<<<<<< SEARCH
+          const tempFile = path.join(tempDir, 'relaycode.config.mjs');
+      =======
+          const tempFile = path.join(tempDir, 'relay.config.mjs');
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const loadConfigOrExit = async (cwd: string = process.cwd()):
+      Promise<Config> => {
+        const config = await findConfig(cwd);
+        if (!config) {
+          logger.error(`Configuration file ('${chalk.cyan('relaycode.config.ts')}', '.js', or '.json') not found.`);
+          logger.info(`Please run ${chalk.magenta("'relay init'")} to create one.`);
+          process.exit(1);
+        }
+        return config;
+      };
+
+      =======
+
+      export const loadConfigOrExit = async (cwd: string = process.cwd()):
+      Promise<Config> => {
+        const config = await findConfig(cwd);
+        if (!config) {
+          logger.error(`Configuration file ('${chalk.cyan(CONFIG_FILE_NAME_TS)}', '.js', or '.json') not found.`);
+          logger.info(`Please run ${chalk.magenta("'relay init'")} to create one.`);
+          process.exit(1);
+        }
+        return config;
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: rename
+    from: relaycode.config.ts
+    to: relay.config.ts
+snapshot:
+  relay.config.ts: null
+  src/utils/constants.ts: >-
+    export const APP_NAME = 'Relaycode';
+
+    export const COMMAND_NAME = 'relay';
+
+
+    export const CONFIG_FILE_NAME_JSON = 'relaycode.config.json';
+
+    export const CONFIG_FILE_NAME_TS = 'relaycode.config.ts';
+
+    export const CONFIG_FILE_NAME_JS = 'relaycode.config.js';
+
+    export const CONFIG_FILE_NAMES = [CONFIG_FILE_NAME_TS, CONFIG_FILE_NAME_JS,
+    CONFIG_FILE_NAME_JSON];
+
+    export const STATE_DIRECTORY_NAME = '.relaycode';
+
+    export const GITIGNORE_FILE_NAME = '.gitignore';
+
+    export const UNDONE_DIRECTORY_NAME = 'undone';
+
+    export const FALLBACKS_DIR = 'fallbacks';
+
+    export const WINDOWS_DIR = 'windows';
+
+
+    export const WINDOWS_CLIPBOARD_EXE_NAME = 'clipboard_x86_64.exe';
+
+    export const PENDING_STATE_FILE_SUFFIX = '.pending.yml';
+
+    export const COMMITTED_STATE_FILE_SUFFIX = '.yml';
+
+
+    export const GITIGNORE_COMMENT = '# relaycode state';
+
+
+    export const CODE_BLOCK_START_MARKER = '// START';
+
+    export const CODE_BLOCK_END_MARKER = '// END';
+
+    export const DELETE_FILE_MARKER = '//TODO: delete this file';
+
+    export const RENAME_FILE_OPERATION = 'rename-file';
+  src/core/state.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { StateFile, StateFileSchema } from '../types';
+
+    import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX,
+    STATE_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+
+    import { fileExists, safeRename } from '../utils/fs';
+
+
+    const stateDirectoryCache = new Map<string, boolean>();
+
+
+    const getStateDirectory = (cwd: string) => path.resolve(cwd,
+    STATE_DIRECTORY_NAME);
+
+
+    export const getStateFilePath = (cwd: string, uuid: string, isPending:
+    boolean): string => {
+      const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` : `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      return path.join(getStateDirectory(cwd), fileName);
+    };
+
+
+    export const getUndoneStateFilePath = (cwd: string, uuid: string): string =>
+    {
+      const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      return path.join(getStateDirectory(cwd), UNDONE_DIRECTORY_NAME, fileName);
+    };
+
+
+    const getUuidFromFileName = (fileName: string): string => {
+      return fileName.replace(COMMITTED_STATE_FILE_SUFFIX, '');
+    };
+
+
+    const isUUID = (str: string): boolean => {
+      return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+    };
+
+
+    // Helper to get all committed transaction file names.
+
+    const getCommittedTransactionFiles = async (cwd: string): Promise<{
+    stateDir: string; files: string[] } | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null;
+        }
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));
+        return { stateDir, files: transactionFiles };
+    };
+
+
+    const sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt:
+    string | Date }) => {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    };
+
+
+    // Ensure state directory exists with caching for performance
+
+    const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      const dirPath = getStateDirectory(cwd);
+      if (!stateDirectoryCache.has(dirPath)) {
+        await fs.mkdir(dirPath, { recursive: true });
+        stateDirectoryCache.set(dirPath, true);
+      }
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      const undonePath = getUndoneStateFilePath(cwd, uuid);
+      // Check if a transaction has been committed or undone.
+      // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+      // because we don't check for `.pending.yml` files.
+      return (await fileExists(committedPath)) || (await fileExists(undonePath));
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const validatedState = StateFileSchema.parse(state);
+      const yamlString = yaml.dump(validatedState);
+      const filePath = getStateFilePath(cwd, state.uuid, true);
+      
+      // Ensure directory exists (cached)
+      await ensureStateDirectory(cwd);
+      
+      // Write file
+      await fs.writeFile(filePath, yamlString, 'utf-8');
+    };
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      await safeRename(pendingPath, committedPath);
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      try {
+        await fs.unlink(pendingPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // Already gone, that's fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      try {
+        const fileContent = await fs.readFile(committedPath, 'utf-8');
+        const yamlContent = yaml.load(fileContent);
+        const parsed = StateFileSchema.safeParse(yamlContent);
+        if (parsed.success) {
+          return parsed.data;
+        }
+        logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);
+        return null;
+      } catch (error) {
+        // Can be file not found or YAML parsing error.
+        // In any case, we can't get the state file.
+        return null;
+      }
+    };
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd()):
+    Promise<StateFile[] | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo) {
+            return null;
+        }
+        const { files: transactionFiles } = transactionFileInfo;
+        
+        const promises = transactionFiles.map(async (file) => {
+            const stateFile = await readStateFile(cwd, getUuidFromFileName(file));
+            if (!stateFile) {
+                logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+            }
+            return stateFile;
+        });
+
+        const results = await Promise.all(promises);
+        const validResults = results.filter((sf): sf is StateFile => !!sf);
+
+        // Sort transactions by date, most recent first
+        validResults.sort(sortByDateDesc);
+
+        return validResults;
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd()):
+    Promise<StateFile | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo || transactionFileInfo.files.length === 0) {
+            return null;
+        }
+        const { stateDir, files: transactionFiles } = transactionFileInfo;
+        
+        // Read creation date from each file without parsing the whole thing.
+        // This is much faster than reading and parsing the full YAML for every file.
+        const filesWithDates = await Promise.all(
+            transactionFiles.map(async (file) => {
+                const filePath = path.join(stateDir, file);
+                let createdAt: Date | null = null;
+                try {
+                    // Read only the first 512 bytes to find `createdAt`. This is an optimization.
+                    const fileHandle = await fs.open(filePath, 'r');
+                    const buffer = Buffer.alloc(512);
+                    await fileHandle.read(buffer, 0, 512, 0);
+                    await fileHandle.close();
+                    const content = buffer.toString('utf-8');
+                    // Extract date from a line like 'createdAt: 2023-01-01T00:00:00.000Z'
+                    const match = content.match(/^createdAt:\s*['"]?(.+?)['"]?$/m);
+                    if (match && match[1]) {
+                        createdAt = new Date(match[1]);
+                    }
+                } catch (error) {
+                    if (!isEnoentError(error)) {
+                      logger.debug(`Could not read partial date from ${file}: ${getErrorMessage(error)}`);
+                    }
+                }
+                return { file, createdAt };
+            })
+        );
+
+        const validFiles = filesWithDates.filter(f => f.createdAt instanceof Date) as { file: string; createdAt: Date }[];
+
+        if (validFiles.length === 0) {
+            // Fallback for safety, though it should be rare.
+            const transactions = await readAllStateFiles(cwd);
+            return transactions?.[0] ?? null;
+        }
+
+        validFiles.sort((a, b) => sortByDateDesc({ createdAt: a.createdAt }, { createdAt: b.createdAt }));
+
+        const latestFile = validFiles[0];
+        if (!latestFile) {
+            return null;
+        }
+
+        // Now read the full content of only the latest file
+        return readStateFile(cwd, getUuidFromFileName(latestFile.file));
+    };
+
+
+    export const findStateFileByIdentifier = async (cwd: string, identifier:
+    string): Promise<StateFile | null> => {
+        if (isUUID(identifier)) {
+            return readStateFile(cwd, identifier);
+        }
+        
+        if (/^-?\d+$/.test(identifier)) {
+            const index = Math.abs(parseInt(identifier, 10));
+            if (isNaN(index) || index <= 0) {
+                return null;
+            }
+            // Optimization: use the more efficient method for the most common case.
+            if (index === 1) {
+                return findLatestStateFile(cwd);
+            }
+            const allTransactions = await readAllStateFiles(cwd);
+            if (!allTransactions || allTransactions.length < index) {
+                return null;
+            }
+            return allTransactions[index - 1] ?? null;
+        }
+        return null; // Invalid identifier format
+    };
+  src/core/config.ts: >
+    import { z } from 'zod';
+
+    import path from 'path';
+
+    import { promises as fs } from 'fs';
+
+    import { build } from 'esbuild';
+
+    import os from 'os';
+
+    import { createRequire } from 'module';
+
+    import { Config, ConfigSchema, RelayCodeConfigInput } from '../types';
+
+    import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, CONFIG_FILE_NAME_TS } from
+    '../utils/constants';
+
+    import { logger, isEnoentError } from '../utils/logger';
+
+    import chalk from 'chalk';
+
+
+    export const findConfigPath = async (cwd: string = process.cwd()):
+    Promise<string | null> => {
+      for (const fileName of CONFIG_FILE_NAMES) {
+        const configPath = path.join(cwd, fileName);
+        try {
+          await fs.access(configPath);
+          return configPath;
+        } catch (error) {
+          if (!isEnoentError(error)) {
+            // ignore other errors for now to keep searching
+          }
+        }
+      }
+      return null;
+    };
+
+
+    interface ConfigModule {
+      default: RelayCodeConfigInput;
+    }
+
+
+    const loadModuleConfig = async (configPath: string):
+    Promise<RelayCodeConfigInput> => {
+      let importPath = configPath;
+      let tempDir: string | null = null;
+
+      if (configPath.endsWith('.ts')) {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-'));
+        const tempFile = path.join(tempDir, 'relaycode.config.mjs');
+
+        const buildOptions: Parameters<typeof build>[0] = {
+          entryPoints: [configPath],
+          outfile: tempFile,
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+        };
+
+        // To handle `import { ... } from 'relaycode'` in user configs, we need to tell esbuild where to find it.
+        // When running in dev, we point it to our local `src/index.ts`.
+        // When running as an installed package, we use `require.resolve` to find the installed package's entry point.
+        // This ensures esbuild bundles our library into the temporary config file, making it self-contained.
+        if (import.meta.url.includes('/src/')) {
+            buildOptions.alias = {
+                'relaycode': path.resolve(process.cwd(), 'src/index.ts')
+            }
+        } else {
+            const require = createRequire(import.meta.url);
+            try {
+                const resolvedPath = require.resolve('relaycode');
+                buildOptions.alias = { 'relaycode': resolvedPath };
+            } catch (e) {
+                // This is a fallback in case resolution fails. With the package.json `exports` fix,
+                // this is much less likely to be hit. We are removing the `external` option to prevent a crash.
+                // If the user's config *does* import from 'relaycode', esbuild will now fail with a
+                // clearer error message instead of the cryptic runtime error.
+                logger.warn(`Could not resolve the 'relaycode' package. The config file may fail to load if it uses relaycode imports.`);
+            }
+        }
+        
+        await build(buildOptions);
+        importPath = tempFile;
+      }
+
+      try {
+        // Dynamically import the module. The cache-busting `?t=` is important for reloads.
+        const module: ConfigModule = await import(`${importPath}?t=${Date.now()}`);
+        return module.default;
+      } finally {
+        if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+
+
+    export const findConfig = async (cwd: string = process.cwd()):
+    Promise<Config | null> => {
+      const configPath = await findConfigPath(cwd);
+      if (!configPath) {
+        return null;
+      }
+      try {
+        let configJson: RelayCodeConfigInput;
+        if (configPath.endsWith('.json')) { // Handle JSON config
+          const fileContent = await fs.readFile(configPath, 'utf-8');
+          configJson = JSON.parse(fileContent);
+        } else { // Handle .ts or .js config
+          configJson = await loadModuleConfig(configPath);
+        }
+        return ConfigSchema.parse(configJson);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null;
+        }
+        if (error instanceof z.ZodError) {
+          throw new Error(`Invalid configuration in ${path.basename(configPath)}: ${error.message}`);
+        }
+        throw error;
+      }
+    };
+
+
+    export const loadConfigOrExit = async (cwd: string = process.cwd()):
+    Promise<Config> => {
+      const config = await findConfig(cwd);
+      if (!config) {
+        logger.error(`Configuration file ('${chalk.cyan('relaycode.config.ts')}', '.js', or '.json') not found.`);
+        logger.info(`Please run ${chalk.magenta("'relay init'")} to create one.`);
+        process.exit(1);
+      }
+      return config;
+    };
+
+
+    export const createConfig = async (projectId: string, cwd: string =
+    process.cwd()): Promise<Config> => {
+      const config: RelayCodeConfigInput = { projectId };
+
+      // Ensure the schema defaults are applied for nested objects
+      const validatedConfig = ConfigSchema.parse(config);
+
+      const tsConfigContent = `import { defineConfig } from 'relaycode';
+
+    export default defineConfig(${JSON.stringify({ projectId }, null, 2)});
+
+    `;
+
+      const configPath = path.join(cwd, CONFIG_FILE_NAME_TS);
+      await fs.writeFile(configPath, tsConfigContent);
+
+      return validatedConfig;
+    };
+
+
+    export const ensureStateDirExists = async (cwd: string = process.cwd()):
+    Promise<void> => {
+      const stateDirPath = path.join(cwd, STATE_DIRECTORY_NAME);
+      await fs.mkdir(stateDirPath, { recursive: true });
+    };
+
+
+    export const getProjectId = async (cwd: string = process.cwd()):
+    Promise<string> => {
+      try {
+        const pkgJsonPath = path.join(cwd, 'package.json');
+        const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');
+        const pkgJson = JSON.parse(fileContent);
+        if (pkgJson.name && typeof pkgJson.name === 'string') {
+          return pkgJson.name;
+        }
+      } catch (e) {
+        // Ignore if package.json doesn't exist or is invalid
+      }
+      return path.basename(cwd);
+    };
+  relaycode.config.ts: |
+    import { defineConfig } from 'relaycode';
+
+    export default defineConfig({
+      projectId: 'relaycode',
+      core: {
+        logLevel: 'info',
+        enableNotifications: true,
+        watchConfig: false,
+      },
+      watcher: {
+        clipboardPollInterval: 2000,
+        preferredStrategy: 'auto',
+      },
+      patch: {
+        approvalMode: 'auto',
+        approvalOnErrorCount: 0,
+        linter: 'bun tsc -b --noEmit',
+        preCommand: '',
+        postCommand: '',
+      },
+      git: {
+        autoGitBranch: false,
+        gitBranchPrefix: 'relay/',
+        gitBranchTemplate: 'gitCommitMsg',
+      },
+    });
+approved: true

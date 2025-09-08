@@ -1,0 +1,134 @@
+uuid: 4a25032a-590f-4310-a292-628468725892
+projectId: relaycode
+createdAt: '2025-06-23T16:47:25.533Z'
+reasoning:
+  - >-
+    Of course. I will adjust the log output to place the `gitCommitMsg` and
+    `promptSummary` fields directly after the `createdAt` date for better
+    readability.
+  - 'Here are the changes for `src/commands/log.ts`:'
+  - >-
+    I've updated `formatTransactionDetails` in `src/commands/log.ts` to reorder
+    the transaction details. This change will be reflected in `relay log`,
+    `relay revert`, and `relay git-commit` commands, ensuring consistent output
+    across the tool.
+  - '---'
+operations:
+  - type: write
+    path: src/commands/log.ts
+    content: |-
+      --- src/commands/log.ts
+      +++ src/commands/log.ts
+      @@ -14,18 +14,18 @@
+       ): string[] => {
+           const lines: string[] = [];
+           lines.push(`- UUID: ${tx.uuid}`);
+           lines.push(`  Date: ${new Date(tx.createdAt).toLocaleString()}`);
+      +    if (tx.promptSummary) {
+      +        lines.push(`  Prompt Summary: ${tx.promptSummary}`);
+      +    }
+      +    if (tx.gitCommitMsg) {
+      +        lines.push(`  Git Commit: ${tx.gitCommitMsg}`);
+      +    }
+           if (tx.reasoning && tx.reasoning.length > 0) {
+               lines.push('  Reasoning:');
+               tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+           }
+      -    if (tx.promptSummary) {
+      -        lines.push(`  Prompt Summary: ${tx.promptSummary}`);
+      -    }
+      -    if (tx.gitCommitMsg) {
+      -        lines.push(`  Git Commit: ${tx.gitCommitMsg}`);
+      -    }
+           if (options.showOperations && tx.operations && tx.operations.length > 0) {
+               lines.push('  Changes:');
+               tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+    patchStrategy: new-unified
+snapshot:
+  src/commands/log.ts: >-
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, StateFile } from '../types';
+
+    import { readAllStateFiles } from '../core/state';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+
+    const opToString = (op: FileOperation): string => {
+        switch (op.type) {
+            case 'write': return `write: ${op.path}`;
+            case 'delete': return `delete: ${op.path}`;
+            case 'rename': return `rename: ${op.from} -> ${op.to}`;
+        }
+    };
+
+
+    export const formatTransactionDetails = (
+        tx: StateFile,
+        options: { showOperations?: boolean, showSpacing?: boolean } = {}
+    ): string[] => {
+        const lines: string[] = [];
+        lines.push(`- UUID: ${tx.uuid}`);
+        lines.push(`  Date: ${new Date(tx.createdAt).toLocaleString()}`);
+        if (tx.reasoning && tx.reasoning.length > 0) {
+            lines.push('  Reasoning:');
+            tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+        }
+        if (tx.promptSummary) {
+            lines.push(`  Prompt Summary: ${tx.promptSummary}`);
+        }
+        if (tx.gitCommitMsg) {
+            lines.push(`  Git Commit: ${tx.gitCommitMsg}`);
+        }
+        if (options.showOperations && tx.operations && tx.operations.length > 0) {
+            lines.push('  Changes:');
+            tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+        }
+        if (options.showSpacing) {
+            lines.push(''); // Newline for spacing
+        }
+        return lines;
+    };
+
+
+    export const logCommand = async (cwd: string = process.cwd(),
+    outputCapture?: string[]): Promise<void> => {
+        const log = (message: string) => {
+            if (outputCapture) {
+                outputCapture.push(message);
+            } else {
+                logger.log(message);
+            }
+        };
+
+        const transactions = await readAllStateFiles(cwd);
+
+        if (transactions === null) {
+            log(`warn: State directory '${STATE_DIRECTORY_NAME}' not found. No logs to display.`);
+            log("info: Run 'relay init' to initialize the project.");
+            return;
+        }
+
+        if (transactions.length === 0) {
+            log('info: No committed transactions found.');
+            return;
+        }
+
+        log('Committed Transactions (most recent first):');
+        log('-------------------------------------------');
+
+        if (transactions.length === 0) {
+            log('info: No valid transactions found.');
+            return;
+        }
+
+        transactions.forEach(tx => {
+            formatTransactionDetails(tx, { showOperations: true, showSpacing: true }).forEach(line => log(line));
+        });
+    };
+approved: true
+gitCommitMsg: 'refactor(log): reorder transaction details for better readability'
+promptSummary: >-
+  Reorder fields in 'relay log' output to place gitCommitMsg and promptSummary
+  below the date.

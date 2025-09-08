@@ -1,0 +1,646 @@
+uuid: a6312cfb-b9d2-43bb-81d3-35639d675661
+projectId: relaycode
+createdAt: '2025-06-22T08:25:36.081Z'
+reasoning:
+  - >-
+    I've identified opportunities to make the codebase DRYer in
+    `src/core/clipboard.ts` and `src/core/state.ts` by refactoring repeated
+    logic into constants and a shared helper function. These changes will
+    improve maintainability without affecting performance or functionality.
+  - >-
+    First, I'll refactor `src/core/clipboard.ts` to remove hardcoded paths for
+    the Windows clipboard executable. I will introduce constants for these paths
+    and use them in both `createDirectWindowsClipboardReader` and
+    `ensureClipboardExecutable` functions.
+  - >-
+    Next, I'll address the code duplication in `src/core/state.ts` for finding
+    and listing transaction files. I'll create a helper function
+    `getCommittedTransactionFiles` and update `readAllStateFiles` and
+    `findLatestStateFile` to use it.
+  - >-
+    These changes make the code more maintainable and easier to read by reducing
+    duplication, adhering to the DRY principle.
+operations:
+  - type: write
+    path: src/core/clipboard.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import clipboardy from 'clipboardy';
+
+      import { logger, getErrorMessage } from '../utils/logger';
+
+      import fs from 'fs';
+
+      import path from 'path';
+
+      import { exec } from 'child_process';
+
+
+      type ClipboardCallback = (content: string) => void;
+
+      type ClipboardReader = () => Promise<string>;
+
+
+
+      // Direct Windows clipboard reader that uses the executable directly
+
+      const createDirectWindowsClipboardReader = (): ClipboardReader => {
+        return () => new Promise((resolve) => {
+          try {
+            const localExePath = path.join(process.cwd(), 'fallbacks', 'windows', 'clipboard_x86_64.exe');
+            if (!fs.existsSync(localExePath)) {
+              logger.error('Windows clipboard executable not found. Cannot watch clipboard on Windows.');
+              // Resolve with empty string to avoid stopping the watcher loop, but log an error.
+              return resolve('');
+            }
+            
+            const command = `"${localExePath}" --paste`;
+      =======
+
+      import clipboardy from 'clipboardy';
+
+      import { logger, getErrorMessage } from '../utils/logger';
+
+      import fs from 'fs';
+
+      import path from 'path';
+
+      import { exec } from 'child_process';
+
+
+      type ClipboardCallback = (content: string) => void;
+
+      type ClipboardReader = () => Promise<string>;
+
+
+      const WINDOWS_FALLBACK_DIR = path.join(process.cwd(), 'fallbacks',
+      'windows');
+
+      const WINDOWS_CLIPBOARD_EXE = 'clipboard_x86_64.exe';
+
+      const WINDOWS_CLIPBOARD_PATH = path.join(WINDOWS_FALLBACK_DIR,
+      WINDOWS_CLIPBOARD_EXE);
+
+
+      // Direct Windows clipboard reader that uses the executable directly
+
+      const createDirectWindowsClipboardReader = (): ClipboardReader => {
+        return () => new Promise((resolve) => {
+          try {
+            if (!fs.existsSync(WINDOWS_CLIPBOARD_PATH)) {
+              logger.error('Windows clipboard executable not found. Cannot watch clipboard on Windows.');
+              // Resolve with empty string to avoid stopping the watcher loop, but log an error.
+              return resolve('');
+            }
+            
+            const command = `"${WINDOWS_CLIPBOARD_PATH}" --paste`;
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      // Check if the clipboard executable exists and fix path issues on Windows
+
+      const ensureClipboardExecutable = () => {
+        if (process.platform === 'win32') {
+          try {
+            // Try to find clipboard executables in common locations
+            const possiblePaths = [
+              // Global installation path
+              path.join(process.env.HOME || '', '.bun', 'install', 'global', 'node_modules', 'relaycode', 'fallbacks', 'windows'),
+              // Local installation paths
+              path.join(process.cwd(), 'node_modules', 'clipboardy', 'fallbacks', 'windows'),
+              path.join(process.cwd(), 'fallbacks', 'windows')
+            ];
+            
+            // Create fallbacks directory in the current project if it doesn't exist
+            const localFallbacksDir = path.join(process.cwd(), 'fallbacks', 'windows');
+            if (!fs.existsSync(localFallbacksDir)) {
+              fs.mkdirSync(localFallbacksDir, { recursive: true });
+            }
+            
+            // Find an existing executable
+            let sourceExePath = null;
+            for (const dir of possiblePaths) {
+              const exePath = path.join(dir, 'clipboard_x86_64.exe');
+              if (fs.existsSync(exePath)) {
+                sourceExePath = exePath;
+                break;
+              }
+            }
+            
+            // Copy the executable to the local fallbacks directory if found
+            if (sourceExePath && sourceExePath !== path.join(localFallbacksDir, 'clipboard_x86_64.exe')) {
+              fs.copyFileSync(sourceExePath, path.join(localFallbacksDir, 'clipboard_x86_64.exe'));
+              logger.info('Copied Windows clipboard executable to local fallbacks directory');
+            } else if (!sourceExePath) {
+              logger.error('Windows clipboard executable not found in any location');
+            }
+      =======
+
+      // Check if the clipboard executable exists and fix path issues on Windows
+
+      const ensureClipboardExecutable = () => {
+        if (process.platform === 'win32') {
+          try {
+            // Try to find clipboard executables in common locations
+            const possiblePaths = [
+              // Global installation path
+              path.join(process.env.HOME || '', '.bun', 'install', 'global', 'node_modules', 'relaycode', 'fallbacks', 'windows'),
+              // Local installation paths
+              path.join(process.cwd(), 'node_modules', 'clipboardy', 'fallbacks', 'windows'),
+              WINDOWS_FALLBACK_DIR,
+            ];
+            
+            // Create fallbacks directory in the current project if it doesn't exist
+            if (!fs.existsSync(WINDOWS_FALLBACK_DIR)) {
+              fs.mkdirSync(WINDOWS_FALLBACK_DIR, { recursive: true });
+            }
+            
+            // Find an existing executable
+            let sourceExePath = null;
+            for (const dir of possiblePaths) {
+              const exePath = path.join(dir, WINDOWS_CLIPBOARD_EXE);
+              if (fs.existsSync(exePath)) {
+                sourceExePath = exePath;
+                break;
+              }
+            }
+            
+            // Copy the executable to the local fallbacks directory if found
+            if (sourceExePath && sourceExePath !== WINDOWS_CLIPBOARD_PATH) {
+              fs.copyFileSync(sourceExePath, WINDOWS_CLIPBOARD_PATH);
+              logger.info('Copied Windows clipboard executable to local fallbacks directory');
+            } else if (!sourceExePath) {
+              logger.error('Windows clipboard executable not found in any location');
+            }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      --- src/core/state.ts
+
+      +++ src/core/state.ts
+
+      @@ -14,6 +14,19 @@
+         return path.join(getStateDirectory(cwd),'undone', fileName);
+       };
+       
+      +// Helper to get all committed transaction file names.
+
+      +const getCommittedTransactionFiles = async (cwd: string): Promise<{
+      stateDir: string; files: string[] } | null> => {
+
+      +    const stateDir = getStateDirectory(cwd);
+
+      +    try {
+
+      +        await fs.access(stateDir);
+
+      +    } catch (e) {
+
+      +        return null;
+
+      +    }
+
+      +    const files = await fs.readdir(stateDir);
+
+      +    const transactionFiles = files.filter(f => f.endsWith('.yml') &&
+      !f.endsWith('.pending.yml'));
+
+      +    return { stateDir, files: transactionFiles };
+
+      +};
+
+      +
+       // Ensure state directory exists with caching for performance
+       const ensureStateDirectory = async (cwd: string): Promise<void> => {
+         const dirPath = getStateDirectory(cwd);
+      @@ -79,17 +92,12 @@
+       };
+       
+       export const readAllStateFiles = async (cwd: string = process.cwd()): Promise<StateFile[] | null> => {
+      -    const stateDir = getStateDirectory(cwd);
+
+      -    try {
+
+      -        await fs.access(stateDir);
+
+      -    } catch (e) {
+
+      -        return null; // No state directory, so no transactions
+
+      -    }
+
+      -
+
+      -    const files = await fs.readdir(stateDir);
+
+      -    const transactionFiles = files.filter(f => f.endsWith('.yml') &&
+      !f.endsWith('.pending.yml'));
+
+      -
+
+      +    const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+
+      +    if (!transactionFileInfo) {
+
+      +        return null;
+
+      +    }
+
+      +    const { files: transactionFiles } = transactionFileInfo;
+
+      +    
+           const promises = transactionFiles.map(async (file) => {
+               const stateFile = await readStateFile(cwd, file.replace('.yml', ''));
+               if (!stateFile) {
+      @@ -108,21 +116,13 @@
+       }
+       
+       export const findLatestStateFile = async (cwd: string = process.cwd()): Promise<StateFile | null> => {
+      -    const stateDir = getStateDirectory(cwd);
+
+      -    try {
+
+      -        await fs.access(stateDir);
+
+      -    } catch (e) {
+
+      +    const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+
+      +    if (!transactionFileInfo || transactionFileInfo.files.length === 0) {
+               return null;
+           }
+      -
+
+      -    const files = await fs.readdir(stateDir);
+
+      -    const transactionFiles = files.filter(f => f.endsWith('.yml') &&
+      !f.endsWith('.pending.yml'));
+
+      -
+
+      -    if (transactionFiles.length === 0) {
+
+      -        return null;
+
+      -    }
+
+      -
+
+      +    const { stateDir, files: transactionFiles } = transactionFileInfo;
+
+      +    
+           // Read creation date from each file without parsing the whole thing.
+           // This is much faster than reading and parsing the full YAML for every file.
+           const filesWithDates = await Promise.all(
+    patchStrategy: new-unified
+snapshot:
+  src/core/clipboard.ts: |-
+    import clipboardy from 'clipboardy';
+    import { logger, getErrorMessage } from '../utils/logger';
+    import fs from 'fs';
+    import path from 'path';
+    import { exec } from 'child_process';
+
+    type ClipboardCallback = (content: string) => void;
+    type ClipboardReader = () => Promise<string>;
+
+
+    // Direct Windows clipboard reader that uses the executable directly
+    const createDirectWindowsClipboardReader = (): ClipboardReader => {
+      return () => new Promise((resolve) => {
+        try {
+          const localExePath = path.join(process.cwd(), 'fallbacks', 'windows', 'clipboard_x86_64.exe');
+          if (!fs.existsSync(localExePath)) {
+            logger.error('Windows clipboard executable not found. Cannot watch clipboard on Windows.');
+            // Resolve with empty string to avoid stopping the watcher loop, but log an error.
+            return resolve('');
+          }
+          
+          const command = `"${localExePath}" --paste`;
+          
+          exec(command, { encoding: 'utf8' }, (error, stdout, stderr) => {
+            if (error) {
+              // It's common for the clipboard executable to fail if the clipboard is empty
+              // or contains non-text data (e.g., an image). We can treat this as "no content".
+              // We don't log this as an error to avoid spamming the console during normal use.
+              logger.debug(`Windows clipboard read command failed (this is often normal): ${stderr.trim()}`);
+              resolve('');
+            } else {
+              resolve(stdout);
+            }
+          });
+        } catch (syncError) {
+          // Catch synchronous errors during setup (e.g., path issues).
+          logger.error(`A synchronous error occurred while setting up clipboard reader: ${getErrorMessage(syncError)}`);
+          resolve('');
+        }
+      });
+    };
+
+    // Check if the clipboard executable exists and fix path issues on Windows
+    const ensureClipboardExecutable = () => {
+      if (process.platform === 'win32') {
+        try {
+          // Try to find clipboard executables in common locations
+          const possiblePaths = [
+            // Global installation path
+            path.join(process.env.HOME || '', '.bun', 'install', 'global', 'node_modules', 'relaycode', 'fallbacks', 'windows'),
+            // Local installation paths
+            path.join(process.cwd(), 'node_modules', 'clipboardy', 'fallbacks', 'windows'),
+            path.join(process.cwd(), 'fallbacks', 'windows')
+          ];
+          
+          // Create fallbacks directory in the current project if it doesn't exist
+          const localFallbacksDir = path.join(process.cwd(), 'fallbacks', 'windows');
+          if (!fs.existsSync(localFallbacksDir)) {
+            fs.mkdirSync(localFallbacksDir, { recursive: true });
+          }
+          
+          // Find an existing executable
+          let sourceExePath = null;
+          for (const dir of possiblePaths) {
+            const exePath = path.join(dir, 'clipboard_x86_64.exe');
+            if (fs.existsSync(exePath)) {
+              sourceExePath = exePath;
+              break;
+            }
+          }
+          
+          // Copy the executable to the local fallbacks directory if found
+          if (sourceExePath && sourceExePath !== path.join(localFallbacksDir, 'clipboard_x86_64.exe')) {
+            fs.copyFileSync(sourceExePath, path.join(localFallbacksDir, 'clipboard_x86_64.exe'));
+            logger.info('Copied Windows clipboard executable to local fallbacks directory');
+          } else if (!sourceExePath) {
+            logger.error('Windows clipboard executable not found in any location');
+          }
+        } catch (error) {
+          logger.warn('Error ensuring clipboard executable: ' + getErrorMessage(error));
+        }
+      }
+    };
+
+    export const createClipboardWatcher = (
+      pollInterval: number,
+      callback: ClipboardCallback,
+      reader?: ClipboardReader,
+    ) => {
+      // Ensure clipboard executable exists before starting
+      ensureClipboardExecutable();
+      
+      // On Windows, use the direct Windows reader
+      // Otherwise use the provided reader or clipboardy
+      const clipboardReader = process.platform === 'win32' ? 
+        createDirectWindowsClipboardReader() : 
+        reader || clipboardy.read;
+      
+      let lastContent = '';
+      let intervalId: NodeJS.Timeout | null = null;
+
+      const checkClipboard = async () => {
+        try {
+          const content = await clipboardReader();
+          if (content && content !== lastContent) {
+            lastContent = content;
+            callback(content);
+          }
+        } catch (error) {
+          // It's common for clipboard access to fail occasionally (e.g., on VM focus change)
+          // So we log a warning but don't stop the watcher.
+          logger.warn('Could not read from clipboard: ' + getErrorMessage(error));
+        }
+      };
+
+      const start = () => {
+        if (intervalId) {
+          return;
+        }
+        logger.info(`Starting clipboard watcher (polling every ${pollInterval}ms)`);
+        // Immediately check once, then start the interval
+        checkClipboard();
+        intervalId = setInterval(checkClipboard, pollInterval);
+      };
+
+      const stop = () => {
+        if (intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+          logger.info('Clipboard watcher stopped.');
+        }
+      };
+
+      start();
+      
+      return { stop };
+    };
+  src/core/state.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { StateFile, StateFileSchema } from '../types';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+
+    import { fileExists, safeRename } from './executor';
+
+
+    const stateDirectoryCache = new Map<string, boolean>();
+
+
+    const getStateDirectory = (cwd: string) => path.resolve(cwd,
+    STATE_DIRECTORY_NAME);
+
+
+    export const getStateFilePath = (cwd: string, uuid: string, isPending:
+    boolean): string => {
+      const fileName = isPending ? `${uuid}.pending.yml` : `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd), fileName);
+    };
+
+
+    export const getUndoneStateFilePath = (cwd: string, uuid: string): string =>
+    {
+      const fileName = `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd),'undone', fileName);
+    };
+
+
+    // Ensure state directory exists with caching for performance
+
+    const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      const dirPath = getStateDirectory(cwd);
+      if (!stateDirectoryCache.has(dirPath)) {
+        await fs.mkdir(dirPath, { recursive: true });
+        stateDirectoryCache.set(dirPath, true);
+      }
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      const undonePath = getUndoneStateFilePath(cwd, uuid);
+      // Check if a transaction has been committed or undone.
+      // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+      // because we don't check for `.pending.yml` files.
+      return (await fileExists(committedPath)) || (await fileExists(undonePath));
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const validatedState = StateFileSchema.parse(state);
+      const yamlString = yaml.dump(validatedState);
+      const filePath = getStateFilePath(cwd, state.uuid, true);
+      
+      // Ensure directory exists (cached)
+      await ensureStateDirectory(cwd);
+      
+      // Write file
+      await fs.writeFile(filePath, yamlString, 'utf-8');
+    };
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      await safeRename(pendingPath, committedPath);
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      try {
+        await fs.unlink(pendingPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // Already gone, that's fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      try {
+        const fileContent = await fs.readFile(committedPath, 'utf-8');
+        const yamlContent = yaml.load(fileContent);
+        const parsed = StateFileSchema.safeParse(yamlContent);
+        if (parsed.success) {
+          return parsed.data;
+        }
+        logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);
+        return null;
+      } catch (error) {
+        // Can be file not found or YAML parsing error.
+        // In any case, we can't get the state file.
+        return null;
+      }
+    };
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd()):
+    Promise<StateFile[] | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null; // No state directory, so no transactions
+        }
+
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+
+        const promises = transactionFiles.map(async (file) => {
+            const stateFile = await readStateFile(cwd, file.replace('.yml', ''));
+            if (!stateFile) {
+                logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+            }
+            return stateFile;
+        });
+
+        const results = await Promise.all(promises);
+        const validResults = results.filter((sf): sf is StateFile => !!sf);
+
+        // Sort transactions by date, most recent first
+        validResults.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return validResults;
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd()):
+    Promise<StateFile | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null;
+        }
+
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+
+        if (transactionFiles.length === 0) {
+            return null;
+        }
+
+        // Read creation date from each file without parsing the whole thing.
+        // This is much faster than reading and parsing the full YAML for every file.
+        const filesWithDates = await Promise.all(
+            transactionFiles.map(async (file) => {
+                const filePath = path.join(stateDir, file);
+                let createdAt: Date | null = null;
+                try {
+                    // Read only the first 512 bytes to find `createdAt`. This is an optimization.
+                    const fileHandle = await fs.open(filePath, 'r');
+                    const buffer = Buffer.alloc(512);
+                    await fileHandle.read(buffer, 0, 512, 0);
+                    await fileHandle.close();
+                    const content = buffer.toString('utf-8');
+                    // Extract date from a line like 'createdAt: 2023-01-01T00:00:00.000Z'
+                    const match = content.match(/^createdAt:\s*['"]?(.+?)['"]?$/m);
+                    if (match && match[1]) {
+                        createdAt = new Date(match[1]);
+                    }
+                } catch (error) {
+                    if (!isEnoentError(error)) {
+                      logger.debug(`Could not read partial date from ${file}: ${getErrorMessage(error)}`);
+                    }
+                }
+                return { file, createdAt };
+            })
+        );
+
+        const validFiles = filesWithDates.filter(f => f.createdAt instanceof Date) as { file: string; createdAt: Date }[];
+
+        if (validFiles.length === 0) {
+            // Fallback for safety, though it should be rare.
+            const transactions = await readAllStateFiles(cwd);
+            return transactions?.[0] ?? null;
+        }
+
+        validFiles.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+        const latestFile = validFiles[0];
+        if (!latestFile) {
+            return null;
+        }
+
+        // Now read the full content of only the latest file
+        return readStateFile(cwd, latestFile.file.replace('.yml', ''));
+    };
+approved: true

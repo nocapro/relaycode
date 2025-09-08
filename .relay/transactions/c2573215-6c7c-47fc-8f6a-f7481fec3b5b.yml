@@ -1,0 +1,304 @@
+uuid: c2573215-6c7c-47fc-8f6a-f7481fec3b5b
+projectId: relaycode
+createdAt: '2025-09-03T03:42:47.871Z'
+linesAdded: 10
+linesRemoved: 3
+gitCommitMsg: 'fix(types): handle undefined vs null and add patcher content check'
+promptSummary: >-
+  Fix TypeScript errors by converting undefined to null for database
+  compatibility and adding a defensive check for patcher return content to
+  satisfy the compiler.
+reasoning:
+  - >-
+    Got it. More TS errors. The first one is tricky, suggests a type mismatch
+    across packages that isn't obvious from the definitions. The second one is a
+    classic `undefined` vs `null` issue between Zod and a database library. I'll
+    fix both.
+  - >-
+    First, I'll address the `undefined` vs `null` problem in `src/core/db.ts`.
+    The `StateFile` type from Zod uses `optional()`, resulting in `T |
+    undefined`, but the `konro` database schema expects `T | null`. I'll
+    explicitly convert `undefined` values to `null`.
+  - >-
+    Now for the weird error in `packages/relaycode-core/src/patch.ts`. The
+    compiler thinks `result.content` can be `undefined` even though the types
+    say it should be a `string` on success. This can sometimes happen with
+    complex type inference in a monorepo. I'll add a defensive check to satisfy
+    the compiler and make the code safer against unexpected patcher behavior.
+  - These changes should resolve the reported errors.
+operations:
+  - type: write
+    path: src/core/db.ts
+    content: |-
+      --- src/core/db.ts
+      +++ src/core/db.ts
+      @@ -23,9 +23,13 @@
+       }
+       
+       export function fromStateFile(stateFile: StateFile): Omit<TransactionRecord, 'id' | 'status'> {
+      -  const { ...rest } = stateFile;
+      -  // status will be added separately
+      -  return rest;
+      +  return {
+      +    ...stateFile,
+      +    linesAdded: stateFile.linesAdded ?? null,
+      +    linesRemoved: stateFile.linesRemoved ?? null,
+      +    gitCommitMsg: stateFile.gitCommitMsg ?? null,
+      +    promptSummary: stateFile.promptSummary ?? null,
+      +  };
+       }
+       
+       let dbInstance: OnDemandDbContext<RelaySchema> | undefined;
+    patchStrategy: new-unified
+  - type: write
+    path: packages/relaycode-core/src/patch.ts
+    content: >-
+      --- packages/relaycode-core/src/patch.ts
+
+      +++ packages/relaycode-core/src/patch.ts
+
+      @@ -67,7 +67,10 @@
+                       
+                       const result = await patcher(diffParams);
+                       if (result.success) {
+      -                    finalContent = result.content;
+
+      +                    if (typeof result.content !== 'string') {
+
+      +                        return { success: false, error: `Patch for
+      ${op.path} succeeded but returned no content.` };
+
+      +                    }
+
+      +                    finalContent = result.content;
+                       } else {
+                           return { success: false, error: `Patch failed for ${op.path}: ${result.error}` };
+                       }
+    patchStrategy: new-unified
+snapshot:
+  src/core/db.ts: >-
+    import { konro } from 'konro';
+
+    import type { FileOperation, FileSnapshot, StateFile } from
+    'relaycode-core';
+
+    import path from 'path';
+
+    import { getStateDirectory } from './config';
+
+    import type { OnDemandDbContext } from 'konro';
+
+
+    export const relaySchema = konro.createSchema({
+      tables: {
+        transactions: {
+          id: konro.id(),
+          uuid: konro.string({ unique: true }),
+          projectId: konro.string(),
+          createdAt: konro.string(), // store as ISO string
+          linesAdded: konro.number({ optional: true }),
+          linesRemoved: konro.number({ optional: true }),
+          gitCommitMsg: konro.string({ optional: true }),
+          promptSummary: konro.string({ optional: true }),
+          reasoning: konro.object<string[]>(),
+          operations: konro.object<FileOperation[]>(),
+          snapshot: konro.object<FileSnapshot>(),
+          approved: konro.boolean(),
+          status: konro.string(), // 'pending', 'committed', 'undone'
+        },
+      },
+      relations: () => ({}),
+    });
+
+
+    export type RelaySchema = typeof relaySchema;
+
+    // This is the type inferred by konro for a base record.
+
+    export type TransactionRecord = RelaySchema['base']['transactions'];
+
+
+    // We need to convert between TransactionRecord and StateFile because
+    StateFile is a Zod-validated type
+
+    // and TransactionRecord is konro's inferred type. They should be
+    structurally identical.
+
+    // This function also handles type casting for complex object types.
+
+    export function toStateFile(record: TransactionRecord): StateFile {
+      return record as unknown as StateFile;
+    }
+
+
+    export function fromStateFile(stateFile: StateFile): Omit<TransactionRecord,
+    'id' | 'status'> {
+      const { ...rest } = stateFile;
+      // status will be added separately
+      return rest;
+    }
+
+
+    let dbInstance: OnDemandDbContext<RelaySchema> | undefined;
+
+
+    export function getDb(cwd: string): OnDemandDbContext<RelaySchema> {
+      if (dbInstance) {
+        return dbInstance;
+      }
+
+      const dbDir = path.join(getStateDirectory(cwd), 'db');
+
+      const adapter = konro.createFileAdapter({
+        format: 'json',
+        perRecord: { dir: dbDir },
+        mode: 'on-demand',
+      });
+
+      const db = konro.createDatabase({ schema: relaySchema, adapter });
+      dbInstance = db as OnDemandDbContext<RelaySchema>; // cast because createDatabase returns a generic DbContext
+      return dbInstance;
+    }
+  packages/relaycode-core/src/patch.ts: |-
+    import { FileOperation } from './types';
+    import { applyStandardDiff, applySearchReplace } from 'apply-multi-diff';
+
+    const patchStrategies = {
+      'new-unified': async (p: { originalContent: string; diffContent: string; }) => {
+        const result = applyStandardDiff(p.originalContent, p.diffContent);
+        if (result.success) return { success: true, content: result.content };
+        return { success: false, error: result.error.message };
+      },
+      'multi-search-replace': async (p: { originalContent: string; diffContent: string; }) => {
+        const result = applySearchReplace(p.originalContent, p.diffContent);
+        if (result.success) return { success: true, content: result.content };
+        return { success: false, error: result.error.message };
+      },
+      'unified': async (p: { originalContent: string; diffContent: string; }) => {
+        const result = applyStandardDiff(p.originalContent, p.diffContent);
+        if (result.success) return { success: true, content: result.content };
+        return { success: false, error: result.error.message };
+      },
+    };
+
+    export type ApplyOperationsResult = 
+        | { success: true; newFileStates: Map<string, string | null> }
+        | { success: false; error: string };
+
+    export const applyOperations = async (
+        operations: FileOperation[],
+        originalFiles: Map<string, string | null>
+    ): Promise<ApplyOperationsResult> => {
+        const fileStates = new Map<string, string | null>(originalFiles);
+
+        for (const op of operations) {
+            if (op.type === 'delete') {
+                fileStates.set(op.path, null);
+                continue;
+            }
+            if (op.type === 'rename') {
+                const content = fileStates.get(op.from);
+                if (content === undefined) {
+                    return { success: false, error: `Cannot rename non-existent or untracked file: ${op.from}` };
+                }
+                fileStates.set(op.from, null);
+                fileStates.set(op.to, content);
+                continue;
+            }
+
+            let finalContent: string;
+            const currentContent = fileStates.get(op.path) ?? null;
+
+            if (op.patchStrategy === 'replace') {
+                finalContent = op.content;
+            } else {
+                if (currentContent === null && op.patchStrategy === 'multi-search-replace') {
+                    return { success: false, error: `Cannot use 'multi-search-replace' on a new file: ${op.path}` };
+                }
+
+                try {
+                    const diffParams = {
+                        originalContent: currentContent ?? '',
+                        diffContent: op.content,
+                    };
+                    
+                    const patcher = patchStrategies[op.patchStrategy as keyof typeof patchStrategies];
+                    if (!patcher) {
+                        return { success: false, error: `Unknown patch strategy: '${op.patchStrategy}'` };
+                    }
+                    
+                    const result = await patcher(diffParams);
+                    if (result.success) {
+                        finalContent = result.content;
+                    } else {
+                        return { success: false, error: `Patch failed for ${op.path}: ${result.error}` };
+                    }
+                } catch (e) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    return { success: false, error: `Error applying patch for ${op.path} with strategy '${op.patchStrategy}': ${message}` };
+                }
+            }
+            fileStates.set(op.path, finalContent);
+        }
+
+        return { success: true, newFileStates: fileStates };
+    };
+
+    const calculateLcsLength = (a: string[], b: string[]): number => {
+        let s1 = a;
+        let s2 = b;
+        if (s1.length < s2.length) {
+            [s1, s2] = [s2, s1];
+        }
+        const m = s1.length;
+        const n = s2.length;
+        
+        const dp = Array(n + 1).fill(0);
+
+        for (let i = 1; i <= m; i++) {
+            let prev = 0;
+            for (let j = 1; j <= n; j++) {
+                const temp = dp[j];
+                if (s1[i - 1] === s2[j - 1]) {
+                    dp[j] = prev + 1;
+                } else {
+                    dp[j] = Math.max(dp[j], dp[j - 1]);
+                }
+                prev = temp;
+            }
+        }
+        return dp[n];
+    };
+
+    export const calculateLineChanges = (
+        op: FileOperation,
+        originalFiles: Map<string, string | null>,
+        newFiles: Map<string, string | null>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = originalFiles.get(op.path) ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newFiles.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        const lcsLength = calculateLcsLength(oldLines, newLines);
+        return {
+            added: newLines.length - lcsLength,
+            removed: oldLines.length - lcsLength,
+        };
+    };
+approved: true

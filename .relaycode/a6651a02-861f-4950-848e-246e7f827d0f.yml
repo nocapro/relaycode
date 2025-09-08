@@ -1,0 +1,307 @@
+uuid: a6651a02-861f-4950-848e-246e7f827d0f
+projectId: relaycode
+createdAt: '2025-06-21T19:07:38.449Z'
+reasoning:
+  - >-
+    Of course! I can help with these improvements. Based on your request, I'll
+    make the following changes:
+  - >-
+    1.  **Enable Shorthand Commands:** I'll add aliases to the commands in
+    `src/cli.ts` (e.g., `w` for `watch`, `l` for `log`) so you can use them more
+    quickly.
+  - >-
+    2.  **Display Timing Before Approval:** I will adjust
+    `src/core/transaction.ts` to calculate and display the performance metrics
+    (like "ms took" and line changes) *before* it asks for your approval. This
+    gives you a clear summary of the changes and how long the checks took, so
+    you can make an informed decision.
+  - >-
+    3.  **Fix Approval Logic:** I'll modify the approval logic in
+    `src/core/transaction.ts`. The configuration `approval: "no"` will now
+    correctly bypass the confirmation prompt and automatically commit the
+    changes, which I believe is the behavior you're looking for with "approval
+    off".
+  - 'Here are the code modifications:'
+  - First, I'll add command aliases to `src/cli.ts` to enable shorthands.
+  - >-
+    Next, I'll update the transaction logic to show metrics before the approval
+    prompt and to handle the `approval: "no"` setting correctly.
+  - >-
+    These changes should address all the issues you mentioned. Let me know if
+    there is anything else I can help with!
+operations:
+  - type: write
+    path: src/cli.ts
+    content: |-
+      --- src/cli.ts
+      +++ src/cli.ts
+      @@ -52,37 +52,43 @@
+       
+       program
+         .command('init')
+      +  .alias('i')
+         .description('Initializes relaycode in the current project.')
+         .action(() => initCommand());
+       
+       program
+         .command('watch')
+      +  .alias('w')
+         .description('Starts watching the clipboard for code changes to apply.')
+         .action(watchCommand);
+       
+       program
+         .command('apply')
+      +  .alias('a')
+         .description('Applies a patch from a specified file.')
+         .argument('<filePath>', 'The path to the file containing the patch.')
+         .action(applyCommand);
+       
+       program
+         .command('log')
+      +  .alias('l')
+         .description('Displays a log of all committed transactions.')
+         .action(() => logCommand());
+       
+       program
+         .command('undo')
+      +  .alias('u')
+         .description('Reverts the last successfully committed transaction.')
+         .action(() => undoCommand());
+       
+       program
+         .command('revert')
+      +  .alias('r')
+         .description('Reverts a committed transaction by its UUID.')
+         .argument('<uuid>', 'The UUID of the transaction to revert.')
+         .action(revertCommand);
+       
+       program.parse(process.argv);
+       
+       if (!process.argv.slice(2).length) {
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -32,20 +32,16 @@
+       
+       const logCompletionSummary = (
+           uuid: string,
+           startTime: number,
+      -    operations: FileOperation[],
+
+      -    opStats: Array<{ added: number; removed: number }>
+
+      +    operations: FileOperation[]
+       ) => {
+           const duration = performance.now() - startTime;
+      -    const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+
+      -    const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+       
+           logger.log('\nSummary:');
+           logger.log(`Applied ${operations.length} file operation(s) successfully.`);
+      -    logger.success(`Lines changed: +${totalAdded}, -${totalRemoved}`);
+
+      -    logger.log(`Completed in ${duration.toFixed(2)}ms`);
+
+      +    logger.log(`Total time from start to commit:
+      ${duration.toFixed(2)}ms`);
+           logger.success(`✅ Transaction ${uuid} committed successfully!`);
+       };
+       
+       const rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnapshot, reason: string): Promise<void> => {
+           logger.warn(`Rolling back changes: ${reason}`);
+      @@ -134,26 +130,42 @@
+                   }
+               }
+       
+      +        // Log summary before asking for approval
+
+      +        const checksDuration = performance.now() - startTime;
+
+      +        const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+
+      +        const totalRemoved = opStats.reduce((sum, s) => sum + s.removed,
+      0);
+
+      +
+
+      +        logger.log('\nPre-flight summary:');
+
+      +        logger.success(`Lines changed: +${totalAdded},
+      -${totalRemoved}`);
+
+      +        logger.log(`Checks completed in ${checksDuration.toFixed(2)}ms`);
+
+      +
+               // Check for approval
+               const finalErrorCount = await getErrorCount(config.linter, cwd);
+               logger.log(`  - Final linter error count: ${finalErrorCount}`);
+      -        const canAutoApprove = config.approval === 'yes' &&
+      finalErrorCount <= config.approvalOnErrorCount;
+               
+               let isApproved: boolean;
+      -        if (canAutoApprove) {
+
+      -            logger.success('  - Changes automatically approved based on
+      your configuration.');
+
+      +        if (config.approval === 'no') {
+
+      +            logger.warn('  - Bypassing approval step because "approval"
+      is set to "no". Committing changes directly.');
+                   isApproved = true;
+      -        } else {
+
+      -            notifyApprovalRequired(config.projectId);
+
+      -            isApproved = await prompter('Changes applied. Do you want to
+      approve and commit them? (y/N)');
+
+      +        } else { // config.approval === 'yes'
+
+      +            const canAutoApprove = finalErrorCount <=
+      config.approvalOnErrorCount;
+
+      +
+
+      +            if (canAutoApprove) {
+
+      +                logger.success('  - Changes automatically approved based
+      on your configuration.');
+
+      +                isApproved = true;
+
+      +            } else {
+
+      +                notifyApprovalRequired(config.projectId);
+
+      +                isApproved = await prompter('Changes applied. Do you want
+      to approve and commit them? (y/N)');
+
+      +            }
+               }
+       
+               if (isApproved) {
+                   stateFile.approved = true;
+                   await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                   await commitState(cwd, uuid);
+      -            logCompletionSummary(uuid, startTime, operations, opStats);
+
+      +            logCompletionSummary(uuid, startTime, operations);
+                   notifySuccess(uuid);
+               } else {
+                   throw new Error('Changes were not approved.');
+               }
+           } catch (error) {
+               const reason = error instanceof Error ? error.message : String(error);
+    patchStrategy: new-unified
+snapshot:
+  src/cli.ts: |-
+    #!/usr/bin/env node
+    import { Command } from 'commander';
+    import { initCommand } from './commands/init';
+    import { watchCommand } from './commands/watch';
+    import { logCommand } from './commands/log';
+    import { undoCommand } from './commands/undo';
+    import { revertCommand } from './commands/revert';
+    import { applyCommand } from './commands/apply';
+    import { createRequire } from 'node:module';
+    import { fileURLToPath } from 'node:url';
+    import { dirname, join, resolve } from 'node:path';
+    import fs from 'node:fs';
+
+    // Default version in case we can't find the package.json
+    let version = '0.0.0';
+
+    try {
+      // Try multiple strategies to find the package.json
+      const require = createRequire(import.meta.url);
+      let pkg;
+      
+      // Strategy 1: Try to find package.json relative to the current file
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      
+      // Try different possible locations
+      const possiblePaths = [
+        join(__dirname, 'package.json'),
+        join(__dirname, '..', 'package.json'),
+        join(__dirname, '..', '..', 'package.json'),
+        resolve(process.cwd(), 'package.json')
+      ];
+      
+      for (const path of possiblePaths) {
+        if (fs.existsSync(path)) {
+          pkg = require(path);
+          break;
+        }
+      }
+      
+      // Strategy 2: If we still don't have it, try to get it from the npm package name
+      if (!pkg) {
+        try {
+          pkg = require('relaycode/package.json');
+        } catch (e) {
+          // Ignore this error
+        }
+      }
+      
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+    const program = new Command();
+
+    program
+      .name('relay')
+      .version(version)
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    program
+      .command('init')
+      .description('Initializes relaycode in the current project.')
+      .action(() => initCommand());
+
+    program
+      .command('watch')
+      .description('Starts watching the clipboard for code changes to apply.')
+      .action(watchCommand);
+
+    program
+      .command('apply')
+      .description('Applies a patch from a specified file.')
+      .argument('<filePath>', 'The path to the file containing the patch.')
+      .action(applyCommand);
+
+    program
+      .command('log')
+      .description('Displays a log of all committed transactions.')
+      .action(() => logCommand());
+
+    program
+      .command('undo')
+      .description('Reverts the last successfully committed transaction.')
+      .action(() => undoCommand());
+
+    program
+      .command('revert')
+      .description('Reverts a committed transaction by its UUID.')
+      .argument('<uuid>', 'The UUID of the transaction to revert.')
+      .action(revertCommand);
+
+    program.parse(process.argv);
+
+    if (!process.argv.slice(2).length) {
+        program.outputHelp();
+    }
+  src/core/transaction.ts: "import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation } from '../types';\r\nimport { logger } from '../utils/logger';\r\nimport { getErrorCount, executeShellCommand } from '../utils/shell';\r\nimport { createSnapshot, restoreSnapshot, applyOperations, readFileContent } from './executor';\r\nimport { hasBeenProcessed, writePendingState, commitState, deletePendingState } from './state';\r\nimport { getConfirmation } from '../utils/prompt';\r\nimport { notifyApprovalRequired, notifyFailure, notifySuccess } from '../utils/notifier';\r\n\r\ntype Prompter = (question: string) => Promise<boolean>;\r\n\r\ntype ProcessPatchOptions = {\r\n    prompter?: Prompter;\r\n    cwd?: string;\r\n};\r\n\r\nconst calculateLineChanges = async (op: FileOperation, snapshot: FileSnapshot, cwd: string): Promise<{ added: number; removed: number }> => {\r\n    if (op.type === 'rename') {\n        return { added: 0, removed: 0 };\n    }\n    const oldContent = snapshot[op.path] ?? null;\r\n\r\n    if (op.type === 'delete') {\r\n        const oldLines = oldContent ? oldContent.split('\\n') : [];\r\n        return { added: 0, removed: oldLines.length };\r\n    }\r\n\r\n    // After applyOperations, the new content is on disk\r\n    const newContent = await readFileContent(op.path, cwd);\r\n    if (oldContent === newContent) return { added: 0, removed: 0 };\r\n\r\n    const oldLines = oldContent ? oldContent.split('\\n') : [];\r\n    const newLines = newContent ? newContent.split('\\n') : [];\r\n\r\n    if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };\r\n    if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };\r\n    \r\n    const oldSet = new Set(oldLines);\r\n    const newSet = new Set(newLines);\r\n    \r\n    const added = newLines.filter(line => !oldSet.has(line)).length;\r\n    const removed = oldLines.filter(line => !newSet.has(line)).length;\r\n    \r\n    return { added, removed };\r\n};\r\n\r\nconst logCompletionSummary = (\r\n    uuid: string,\r\n    startTime: number,\r\n    operations: FileOperation[],\r\n    opStats: Array<{ added: number; removed: number }>\r\n) => {\r\n    const duration = performance.now() - startTime;\r\n    const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);\r\n    const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);\r\n\r\n    logger.log('\\nSummary:');\r\n    logger.log(`Applied ${operations.length} file operation(s) successfully.`);\r\n    logger.success(`Lines changed: +${totalAdded}, -${totalRemoved}`);\r\n    logger.log(`Completed in ${duration.toFixed(2)}ms`);\r\n    logger.success(`✅ Transaction ${uuid} committed successfully!`);\r\n};\r\n\r\nconst rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnapshot, reason: string): Promise<void> => {\r\n    logger.warn(`Rolling back changes: ${reason}`);\r\n    try {\r\n        await restoreSnapshot(snapshot, cwd);\r\n        logger.success('  - Files restored to original state.');\r\n    } catch (error) {\r\n        logger.error(`Fatal: Rollback failed: ${error instanceof Error ? error.message : String(error)}`);\r\n        // Do not rethrow; we're already in a final error handling state.\r\n    } finally {\r\n        try {\r\n            await deletePendingState(cwd, uuid);\r\n            logger.success(`↩️ Transaction ${uuid} rolled back.`);\r\n            notifyFailure(uuid);\r\n        } catch (cleanupError) {\r\n            logger.error(`Fatal: Could not clean up pending state for ${uuid}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);\r\n        }\r\n    }\r\n};\r\n\r\nexport const processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {\r\n    const cwd = options?.cwd || process.cwd();\r\n    const prompter = options?.prompter || getConfirmation;\r\n    const { control, operations, reasoning } = parsedResponse;\r\n    const { uuid, projectId } = control;\r\n    const startTime = performance.now();\r\n\r\n    // 1. Validation\r\n    if (projectId !== config.projectId) {\r\n        logger.warn(`Skipping patch: projectId mismatch (expected '${config.projectId}', got '${projectId}').`);\r\n        return;\r\n    }\r\n    if (await hasBeenProcessed(cwd, uuid)) {\r\n        logger.info(`Skipping patch: uuid '${uuid}' has already been processed.`);\r\n        return;\r\n    }\r\n\r\n    // 2. Pre-flight checks\r\n    if (config.preCommand) {\r\n        logger.log(`  - Running pre-command: ${config.preCommand}`);\r\n        const { exitCode, stderr } = await executeShellCommand(config.preCommand, cwd);\r\n        if (exitCode !== 0) {\r\n            logger.error(`Pre-command failed with exit code ${exitCode}, aborting transaction.`);\r\n            if (stderr) logger.error(`Stderr: ${stderr}`);\r\n            return;\r\n        }\r\n    }\r\n\r\n    logger.info(`🚀 Starting transaction for patch ${uuid}...`);\r\n    logger.log(`Reasoning:\\n  ${reasoning.join('\\n  ')}`);\r\n\r\n    const affectedFilePaths = operations.reduce<string[]>((acc, op) => {\n        if (op.type === 'rename') {\n            acc.push(op.from, op.to);\n        } else {\n            acc.push(op.path);\n        }\n        return acc;\n    }, []);\r\n    const snapshot = await createSnapshot(affectedFilePaths, cwd);\r\n    \r\n    const stateFile: StateFile = {\r\n        uuid, projectId, createdAt: new Date().toISOString(), reasoning, operations, snapshot, approved: false,\r\n    };\r\n\r\n    try {\r\n        await writePendingState(cwd, stateFile);\r\n        logger.success('  - Staged changes to .pending.yml file.');\r\n\r\n        // Apply changes\r\n        logger.log('  - Applying file operations...');\r\n        await applyOperations(operations, cwd);\r\n        logger.success('  - File operations complete.');\r\n\r\n        const opStatsPromises = operations.map(async op => {\r\n            const stats = await calculateLineChanges(op, snapshot, cwd);\r\n            if (op.type === 'write') {\r\n                logger.success(`✔ Written: ${op.path} (+${stats.added}, -${stats.removed})`);\r\n            } else if (op.type === 'delete') {\r\n                logger.success(`✔ Deleted: ${op.path}`);\r\n            } else if (op.type === 'rename') {\n                logger.success(`✔ Renamed: ${op.from} -> ${op.to}`);\n            }\r\n            return stats;\r\n        });\r\n        const opStats = await Promise.all(opStatsPromises);\r\n\r\n        // Run post-command\r\n        if (config.postCommand) {\r\n            logger.log(`  - Running post-command: ${config.postCommand}`);\r\n            const postResult = await executeShellCommand(config.postCommand, cwd);\r\n            if (postResult.exitCode !== 0) {\r\n                logger.error(`Post-command failed with exit code ${postResult.exitCode}.`);\r\n                if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);\r\n                throw new Error('Post-command failed, forcing rollback.');\r\n            }\r\n        }\r\n\r\n        // Check for approval\r\n        const finalErrorCount = await getErrorCount(config.linter, cwd);\r\n        logger.log(`  - Final linter error count: ${finalErrorCount}`);\r\n        const canAutoApprove = config.approval === 'yes' && finalErrorCount <= config.approvalOnErrorCount;\r\n        \r\n        let isApproved: boolean;\r\n        if (canAutoApprove) {\r\n            logger.success('  - Changes automatically approved based on your configuration.');\r\n            isApproved = true;\r\n        } else {\r\n            notifyApprovalRequired(config.projectId);\r\n            isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');\r\n        }\r\n\r\n        if (isApproved) {\r\n            stateFile.approved = true;\r\n            await writePendingState(cwd, stateFile); // Update state with approved: true before commit\r\n            await commitState(cwd, uuid);\r\n            logCompletionSummary(uuid, startTime, operations, opStats);\r\n            notifySuccess(uuid);\r\n        } else {\r\n            throw new Error('Changes were not approved.');\r\n        }\r\n    } catch (error) {\r\n        const reason = error instanceof Error ? error.message : String(error);\r\n        await rollbackTransaction(cwd, uuid, snapshot, reason);\r\n    }\r\n};"
+approved: true

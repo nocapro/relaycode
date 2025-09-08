@@ -1,0 +1,265 @@
+uuid: a1f1262d-0b73-4557-b2ac-6f4e1f74dd7e
+projectId: relaycode
+createdAt: '2025-06-21T13:37:48.622Z'
+reasoning:
+  - >-
+    Of course. I will implement the `relay undo` command to provide a simple way
+    to revert the last committed transaction. Here are the changes I'll make:
+  - >-
+    1.  **Create `src/commands/undo.ts`**: This new file will contain the core
+    logic for the `undo` command. It will find the most recent transaction, ask
+    for confirmation, restore the files from the snapshot, and then archive the
+    transaction log.
+  - >-
+    2.  **Update `src/cli.ts`**: I will register the new `undo` command, making
+    it available on the command line as `relay undo`.
+  - 'Here are the code modifications:'
+  - >-
+    I'll start by creating the new command file `src/commands/undo.ts` which
+    will house the logic for this new feature.
+  - >-
+    Next, I'll update the main CLI entry point to include the new `undo`
+    command. I'll place it logically alongside the `log` and `revert` commands.
+  - >-
+    These changes introduce the `relay undo` command as requested, providing a
+    quick and safe way to roll back the most recent change.
+operations:
+  - type: write
+    path: src/commands/undo.ts
+    content: >-
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import { logger } from '../utils/logger';
+
+      import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+      import { readStateFile } from '../core/state';
+
+      import { restoreSnapshot } from '../core/executor';
+
+      import { getConfirmation } from '../utils/prompt';
+
+      import { StateFile } from '../types';
+
+
+      const getStateDirectory = (cwd: string) => path.resolve(cwd,
+      STATE_DIRECTORY_NAME);
+
+
+      // This function will find the most recent transaction file
+
+      const findLatestTransaction = async (cwd: string): Promise<StateFile |
+      null> => {
+          const stateDir = getStateDirectory(cwd);
+          try {
+              await fs.access(stateDir);
+          } catch (e) {
+              return null; // No state directory, so no transactions
+          }
+
+          const files = await fs.readdir(stateDir);
+          const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+
+          if (transactionFiles.length === 0) {
+              return null;
+          }
+
+          const transactions: StateFile[] = [];
+          for (const file of transactionFiles) {
+              try {
+                  // readStateFile expects a UUID, which is the filename without extension
+                  const stateFile = await readStateFile(cwd, file.replace('.yml', ''));
+                  if (stateFile) {
+                      transactions.push(stateFile);
+                  }
+              } catch (error) {
+                  // Ignore files that can't be parsed, readStateFile should return null but defensive
+                  logger.debug(`Could not read or parse state file ${file}: ${error}`);
+              }
+          }
+
+          if (transactions.length === 0) {
+              return null;
+          }
+
+          // Sort by createdAt date, descending (most recent first)
+          transactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+          return transactions[0] || null;
+      };
+
+
+
+      export const undoCommand = async (cwd: string = process.cwd()):
+      Promise<void> => {
+          logger.info('Attempting to undo the last transaction...');
+
+          const latestTransaction = await findLatestTransaction(cwd);
+
+          if (!latestTransaction) {
+              logger.warn('No committed transactions found to undo.');
+              return;
+          }
+
+          logger.log(`The last transaction to be undone is:`);
+          logger.info(`- UUID: ${latestTransaction.uuid}`);
+          logger.log(`  Date: ${new Date(latestTransaction.createdAt).toLocaleString()}`);
+          if (latestTransaction.reasoning && latestTransaction.reasoning.length > 0) {
+              logger.log('  Reasoning:');
+              latestTransaction.reasoning.forEach(r => logger.log(`    - ${r}`));
+          }
+          logger.log('');
+
+          const confirmed = await getConfirmation('Are you sure you want to undo this transaction? (y/N)');
+
+          if (!confirmed) {
+              logger.info('Undo operation cancelled.');
+              return;
+          }
+          
+          logger.info(`Undoing transaction ${latestTransaction.uuid}...`);
+
+          try {
+              await restoreSnapshot(latestTransaction.snapshot, cwd);
+              logger.success('  - Successfully restored file snapshot.');
+
+              const stateDir = getStateDirectory(cwd);
+              const undoneDir = path.join(stateDir, 'undone');
+              await fs.mkdir(undoneDir, { recursive: true });
+
+              const oldPath = path.join(stateDir, `${latestTransaction.uuid}.yml`);
+              const newPath = path.join(undoneDir, `${latestTransaction.uuid}.yml`);
+
+              await fs.rename(oldPath, newPath);
+              logger.success(`  - Moved transaction file to 'undone' directory.`);
+              logger.success(`✅ Last transaction successfully undone.`);
+
+          } catch (error) {
+              logger.error(`Failed to undo transaction: ${error instanceof Error ? error.message : String(error)}`);
+              logger.error('Your file system may be in a partially restored state. Please check your files.');
+          }
+      };
+    patchStrategy: replace
+  - type: write
+    path: src/cli.ts
+    content: |-
+      --- src/cli.ts
+      +++ src/cli.ts
+      @@ -3,6 +3,7 @@
+       import { initCommand } from './commands/init';
+       import { watchCommand } from './commands/watch';
+       import { logCommand } from './commands/log';
+      +import { undoCommand } from './commands/undo';
+       import { revertCommand } from './commands/revert';
+       import { createRequire } from 'node:module';
+       import { fileURLToPath } from 'node:url';
+      @@ -58,6 +59,11 @@
+         .description('Displays a log of all committed transactions.')
+         .action(logCommand);
+       
+      +program
+      +  .command('undo')
+      +  .description('Reverts the last successfully committed transaction.')
+      +  .action(undoCommand);
+      +
+       program
+         .command('revert')
+         .description('Reverts a committed transaction by its UUID.')
+         .argument('<uuid>', 'The UUID of the transaction to revert.')
+    patchStrategy: new-unified
+snapshot:
+  src/commands/undo.ts: null
+  src/cli.ts: |-
+    #!/usr/bin/env node
+    import { Command } from 'commander';
+    import { initCommand } from './commands/init';
+    import { watchCommand } from './commands/watch';
+    import { logCommand } from './commands/log';
+    import { revertCommand } from './commands/revert';
+    import { createRequire } from 'node:module';
+    import { fileURLToPath } from 'node:url';
+    import { dirname, join, resolve } from 'node:path';
+    import fs from 'node:fs';
+
+    // Default version in case we can't find the package.json
+    let version = '0.0.0';
+
+    try {
+      // Try multiple strategies to find the package.json
+      const require = createRequire(import.meta.url);
+      let pkg;
+      
+      // Strategy 1: Try to find package.json relative to the current file
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      
+      // Try different possible locations
+      const possiblePaths = [
+        join(__dirname, 'package.json'),
+        join(__dirname, '..', 'package.json'),
+        join(__dirname, '..', '..', 'package.json'),
+        resolve(process.cwd(), 'package.json')
+      ];
+      
+      let foundPath = null;
+      for (const path of possiblePaths) {
+        if (fs.existsSync(path)) {
+          foundPath = path;
+          pkg = require(path);
+          break;
+        }
+      }
+      
+      // Strategy 2: If we still don't have it, try to get it from the npm package name
+      if (!pkg) {
+        try {
+          pkg = require('relaycode/package.json');
+        } catch (e) {
+          // Ignore this error
+        }
+      }
+      
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+    const program = new Command();
+
+    program
+      .name('relay')
+      .version(version)
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    program
+      .command('init')
+      .description('Initializes relaycode in the current project.')
+      .action(() => initCommand());
+
+    program
+      .command('watch')
+      .description('Starts watching the clipboard for code changes to apply.')
+      .action(watchCommand);
+
+    program
+      .command('log')
+      .description('Displays a log of all committed transactions.')
+      .action(logCommand);
+
+    program
+      .command('revert')
+      .description('Reverts a committed transaction by its UUID.')
+      .argument('<uuid>', 'The UUID of the transaction to revert.')
+      .action(revertCommand);
+
+    program.parse(process.argv);
+
+    if (!process.argv.slice(2).length) {
+        program.outputHelp();
+    }
+approved: true

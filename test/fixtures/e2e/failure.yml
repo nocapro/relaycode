@@ -1,0 +1,62 @@
+e2e_patch_tests:
+  - name: fail-on-search-replace-no-match
+    description: Should fail transaction if search-replace content is not found
+    markdown_content: |
+      ```typescript // src/index.js search-replace
+      <<<<<<< SEARCH
+      const version = 2; // This content does not exist
+      =======
+      const version = 3;
+      >>>>>>> REPLACE
+      ```
+    initial_state:
+      - path: "src/index.js"
+        content: 'const version = 1;'
+    expected_outcome: failure
+
+  - name: fail-on-standard-diff-no-match
+    description: Should fail transaction if standard-diff context does not match
+    markdown_content: |
+      ```diff // src/index.js standard-diff
+      --- a/src/index.js
+      +++ b/src/index.js
+      @@ -1,1 +1,1 @@
+      -const version = 2;
+      +const version = 3;
+      ```
+    initial_state:
+      - path: "src/index.js"
+        content: 'const version = 1;'
+    expected_outcome: failure
+
+  - name: fail-on-invalid-strategy
+    description: Should fail transaction if an invalid patch strategy is provided
+    markdown_content: |
+      ```typescript // src/index.js invalid-strategy
+      console.log("this will fail");
+      ```
+    initial_state:
+      - path: "src/index.js"
+        content: 'console.log("hello");'
+    expected_outcome: failure
+
+  - name: fail-on-rename-source-not-found
+    description: Should fail transaction if renaming a file that does not exist
+    markdown_content: |
+      ```json // rename-file
+      {
+        "from": "src/non-existent.js",
+        "to": "src/new-name.js"
+      }
+      ```
+    initial_state: []
+    expected_outcome: failure
+
+  - name: fail-on-delete-non-existent-file
+    description: Should fail transaction if deleting a file that does not exist
+    markdown_content: |
+      ```typescript // src/non-existent.js
+      //TODO: delete this file
+      ```
+    initial_state: []
+    expected_outcome: failure

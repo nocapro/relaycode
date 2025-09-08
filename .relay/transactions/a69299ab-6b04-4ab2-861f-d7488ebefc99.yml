@@ -1,0 +1,809 @@
+uuid: a69299ab-6b04-4ab2-861f-d7488ebefc99
+projectId: relaycode
+createdAt: '2025-09-04T00:58:47.880Z'
+linesAdded: 410
+linesRemoved: 163
+gitCommitMsg: 'refactor(tests): split e2e test fixtures into multiple files'
+promptSummary: Refactor relaycode test fixtures into multiple files and add more test cases.
+reasoning:
+  - >-
+    ayoo what up, it's anton. let's get this test refactor done. splitting up
+    those fixture files is a good move, makes it way easier to manage and add
+    new tests. also dropping in more test cases to make sure we're
+    battle-tested. let's cook.
+  - >-
+    First, I'm gonna lay down the new structure by creating the individual
+    fixture files. We'll have separate files for success cases, failures, file
+    operations, complex scenarios, and edge cases. Solid organization.
+  - >-
+    Now, gotta yeet that old monolithic fixture file. It served its purpose, but
+    we're leveling up.
+  - >-
+    Finally, let's wire up the test runner to slurp all these new YAML files. A
+    quick change to `patcher.test.ts` will have it reading from the whole
+    directory instead of a single file. EZ PZ.
+  - >-
+    Alright, that's a wrap. Test fixtures are now clean, modular, and beefed up
+    with more cases. Ship it.
+operations:
+  - type: write
+    path: test/fixtures/e2e/complex-scenarios.yml
+    content: |-
+      e2e_patch_tests:
+        - name: multiple-operations
+          description: Should handle multiple operations (edit, delete, new) in one transaction
+          markdown_content: |
+            I'm performing a few operations.
+
+            First, editing `main.ts`.
+            ```typescript // src/main.ts
+            console.log("Updated main");
+            ```
+
+            Second, deleting `utils.ts`.
+            ```typescript // src/utils.ts
+            //TODO: delete this file
+            ```
+
+            Finally, adding a new component.
+            ```typescript // "src/components/New Component.tsx"
+            export const NewComponent = () => {
+              return <div>New!</div>;
+            };
+            ```
+          initial_state:
+            - path: "src/main.ts"
+              content: 'console.log("Original main");'
+            - path: "src/utils.ts"
+              content: 'export const util = {};'
+          expected_state:
+            - path: "src/main.ts"
+              content: |
+                console.log("Updated main");
+            - path: "src/utils.ts"
+              exists: false
+            - path: "src/components/New Component.tsx"
+              content: |
+                export const NewComponent = () => {
+                  return <div>New!</div>;
+                };
+
+        - name: transaction-with-all-operation-types
+          description: Should handle a single transaction with new, edit, rename, and delete operations
+          markdown_content: |
+            Here is a complex set of file modifications.
+
+            First, I'll create a new config file.
+            ```typescript // src/config.ts
+            export const config = { timeout: 5000 };
+            ```
+
+            Next, I'll edit the main entrypoint to use this config.
+            ```diff // src/main.ts new-unified
+            --- src/main.ts
+            +++ src/main.ts
+            @@ ... @@
+            -console.log("Starting...");
+            +import { config } from './config';
+            +console.log(`Starting with timeout ${config.timeout}...`);
+            ```
+
+            Then, I'll rename an old utility file.
+            ```json // rename-file
+            {
+              "from": "src/utils.ts",
+              "to": "src/lib/helpers.ts"
+            }
+            ```
+
+            Finally, I'm removing a deprecated file.
+            ```typescript // src/deprecated.ts
+            //TODO: delete this file
+            ```
+          initial_state:
+            - path: "src/main.ts"
+              content: 'console.log("Starting...");'
+            - path: "src/utils.ts"
+              content: 'export function oldUtil() {}'
+            - path: "src/deprecated.ts"
+              content: '// This is old'
+          expected_state:
+            - path: "src/config.ts"
+              content: |
+                export const config = { timeout: 5000 };
+            - path: "src/main.ts"
+              content: |
+                import { config } from './config';
+                console.log(`Starting with timeout ${config.timeout}...`);
+            - path: "src/utils.ts"
+              exists: false
+            - path: "src/lib/helpers.ts"
+              content: "export function oldUtil() {}"
+            - path: "src/deprecated.ts"
+              exists: false
+    patchStrategy: replace
+  - type: write
+    path: test/fixtures/e2e/edge-cases.yml
+    content: |-
+      e2e_patch_tests:
+        - name: edit-file-with-spaces-in-path
+          description: Should correctly edit a file that has spaces in its path
+          markdown_content: |
+            ```diff // "src/components/My Component.tsx" new-unified
+            --- "src/components/My Component.tsx"
+            +++ "src/components/My Component.tsx"
+            @@ ... @@
+             export const MyComponent = () => (
+            -  <div>Hello</div>
+            +  <div>Hello World</div>
+             );
+            ```
+          initial_state:
+            - path: "src/components/My Component.tsx"
+              content: |
+                export const MyComponent = () => (
+                  <div>Hello</div>
+                );
+          expected_state:
+            - path: "src/components/My Component.tsx"
+              content: |
+                export const MyComponent = () => (
+                  <div>Hello World</div>
+                );
+
+        - name: edit-empty-file
+          description: Should correctly add content to an empty file
+          markdown_content: |
+            ```typescript // src/empty.js
+            // This file is no longer empty.
+            export const ready = true;
+            ```
+          initial_state:
+            - path: "src/empty.js"
+              content: ""
+          expected_state:
+            - path: "src/empty.js"
+              content: |
+                // This file is no longer empty.
+                export const ready = true;
+
+        - name: create-and-then-edit-file
+          description: Should handle creating a file and then editing it in the same transaction
+          markdown_content: |
+            First, create a new file.
+            ```typescript // src/service.ts
+            export class Service {
+              run() { console.log('running'); }
+            }
+            ```
+
+            Now, add a method to it.
+            ```diff // src/service.ts new-unified
+            --- src/service.ts
+            +++ src/service.ts
+            @@ ... @@
+             export class Service {
+            +  stop() { console.log('stopping'); }
+               run() { console.log('running'); }
+             }
+            ```
+          initial_state: []
+          expected_state:
+            - path: "src/service.ts"
+              content: |
+                export class Service {
+                  stop() { console.log('stopping'); }
+                  run() { console.log('running'); }
+                }
+    patchStrategy: replace
+  - type: write
+    path: test/fixtures/e2e/failure.yml
+    content: |-
+      e2e_patch_tests:
+        - name: fail-on-search-replace-no-match
+          description: Should fail transaction if search-replace content is not found
+          markdown_content: |
+            ```typescript // src/index.js search-replace
+            <<<<<<< SEARCH
+            const version = 2; // This content does not exist
+            =======
+            const version = 3;
+            >>>>>>> REPLACE
+            ```
+          initial_state:
+            - path: "src/index.js"
+              content: 'const version = 1;'
+          expected_outcome: failure
+
+        - name: fail-on-standard-diff-no-match
+          description: Should fail transaction if standard-diff context does not match
+          markdown_content: |
+            ```diff // src/index.js standard-diff
+            --- a/src/index.js
+            +++ b/src/index.js
+            @@ -1,1 +1,1 @@
+            -const version = 2;
+            +const version = 3;
+            ```
+          initial_state:
+            - path: "src/index.js"
+              content: 'const version = 1;'
+          expected_outcome: failure
+
+        - name: fail-on-invalid-strategy
+          description: Should fail transaction if an invalid patch strategy is provided
+          markdown_content: |
+            ```typescript // src/index.js invalid-strategy
+            console.log("this will fail");
+            ```
+          initial_state:
+            - path: "src/index.js"
+              content: 'console.log("hello");'
+          expected_outcome: failure
+
+        - name: fail-on-rename-source-not-found
+          description: Should fail transaction if renaming a file that does not exist
+          markdown_content: |
+            ```json // rename-file
+            {
+              "from": "src/non-existent.js",
+              "to": "src/new-name.js"
+            }
+            ```
+          initial_state: []
+          expected_outcome: failure
+
+        - name: fail-on-delete-non-existent-file
+          description: Should fail transaction if deleting a file that does not exist
+          markdown_content: |
+            ```typescript // src/non-existent.js
+            //TODO: delete this file
+            ```
+          initial_state: []
+          expected_outcome: failure
+    patchStrategy: replace
+  - type: write
+    path: test/fixtures/e2e/file-operations.yml
+    content: |-
+      e2e_patch_tests:
+        - name: create-file-with-replace
+          description: Should create a new file using the replace strategy (default)
+          markdown_content: |
+            ```typescript // src/new.ts
+            export const newFunction = () => {
+                console.log("new file");
+            };
+            ```
+          initial_state: []
+          expected_state:
+            - path: "src/new.ts"
+              content: |
+                export const newFunction = () => {
+                    console.log("new file");
+                };
+
+        - name: delete-file
+          description: Should delete an existing file
+          markdown_content: |
+            ```typescript // src/old-helper.ts
+            //TODO: delete this file
+            ```
+          initial_state:
+            - path: "src/old-helper.ts"
+              content: "export const oldHelper = () => {};"
+          expected_state:
+            - path: "src/old-helper.ts"
+              exists: false
+
+        - name: rename-file
+          description: Should rename an existing file
+          markdown_content: |
+            ```json // rename-file
+            {
+              "from": "src/old-name.ts",
+              "to": "src/new-name.ts"
+            }
+            ```
+          initial_state:
+            - path: "src/old-name.ts"
+              content: "export const oldName = {};"
+          expected_state:
+            - path: "src/old-name.ts"
+              exists: false
+            - path: "src/new-name.ts"
+              content: "export const oldName = {};"
+
+        - name: create-file-with-spaces-in-path
+          description: Should create a file with spaces in its path
+          markdown_content: |
+            ```typescript // "src/components/My Component.tsx"
+            export const MyComponent = () => <div>Hello</div>;
+            ```
+          initial_state: []
+          expected_state:
+            - path: "src/components/My Component.tsx"
+              content: |
+                export const MyComponent = () => <div>Hello</div>;
+
+        - name: rename-file-with-spaces-in-path
+          description: Should correctly rename a file to a path with spaces
+          markdown_content: |
+            ```json // rename-file
+            {
+              "from": "src/components/MyComponent.tsx",
+              "to": "src/components/My New Component.tsx"
+            }
+            ```
+          initial_state:
+            - path: "src/components/MyComponent.tsx"
+              content: "export const MyComponent = () => {};"
+          expected_state:
+            - path: "src/components/MyComponent.tsx"
+              exists: false
+            - path: "src/components/My New Component.tsx"
+              content: "export const MyComponent = () => {};"
+    patchStrategy: replace
+  - type: write
+    path: test/fixtures/e2e/success.yml
+    content: |-
+      e2e_patch_tests:
+        - name: apply-search-replace
+          description: Should correctly apply a patch using the search-replace strategy
+          markdown_content: |
+            ```json // src/config.js search-replace
+            <<<<<<< SEARCH
+                port: 3000,
+            =======
+                port: 8080,
+            >>>>>>> REPLACE
+            <<<<<<< SEARCH
+                enableLogging: true,
+            =======
+                enableLogging: false,
+            >>>>>>> REPLACE
+            ```
+          initial_state:
+            - path: "src/config.js"
+              content: |
+                const config = {
+                    port: 3000,
+                    host: 'localhost',
+                    enableLogging: true,
+                };
+          expected_state:
+            - path: "src/config.js"
+              content: |
+                const config = {
+                    port: 8080,
+                    host: 'localhost',
+                    enableLogging: false,
+                };
+
+        - name: apply-standard-diff
+          description: Should correctly apply a patch using the standard-diff strategy
+          markdown_content: |
+            ```diff // src/utils.js standard-diff
+            --- a/src/utils.js
+            +++ b/src/utils.js
+            @@ -2,4 +2,5 @@
+                 const a = 1;
+                 const b = 2;
+            -    return a + b;
+            +    // A more complex calculation
+            +    return (a + b) * 2;
+             }
+            ```
+          initial_state:
+            - path: "src/utils.js"
+              content: |
+                function calculate() {
+                    const a = 1;
+                    const b = 2;
+                    return a + b;
+                }
+          expected_state:
+            - path: "src/utils.js"
+              content: |
+                function calculate() {
+                    const a = 1;
+                    const b = 2;
+                    // A more complex calculation
+                    return (a + b) * 2;
+                }
+
+        - name: apply-new-unified-diff
+          description: Should correctly apply a patch using the new-unified strategy
+          markdown_content: |
+            ```diff // src/app.js new-unified
+            --- src/app.js
+            +++ src/app.js
+            @@ ... @@
+             function main() {
+            -  console.log("Hello World");
+            +  console.log("Hello, Universe!");
+             }
+            ```
+          initial_state:
+            - path: "src/app.js"
+              content: |
+                function main() {
+                  console.log("Hello World");
+                }
+          expected_state:
+            - path: "src/app.js"
+              content: |
+                function main() {
+                  console.log("Hello, Universe!");
+                }
+    patchStrategy: replace
+  - type: delete
+    path: test/fixtures/e2e/patcher.yml
+  - type: write
+    path: test/e2e/patcher.test.ts
+    content: >-
+      --- test/e2e/patcher.test.ts
+
+      +++ test/e2e/patcher.test.ts
+
+      @@ -23,8 +23,26 @@
+         e2e_patch_tests: E2ETestCase[];
+       }
+       
+      -const fixturePath = path.join(__dirname, '../fixtures/e2e/patcher.yml');
+
+      -const fixtures = yaml.load(fsSync.readFileSync(fixturePath, 'utf-8')) as
+      TestFixtures;
+
+      +const loadFixturesFromDir = (dirPath: string): TestFixtures => {
+
+      +  const allFixtures: TestFixtures = {
+
+      +    e2e_patch_tests: [],
+
+      +  };
+
+      +  const files = fsSync.readdirSync(dirPath);
+
+      +  for (const file of files) {
+
+      +    if (path.extname(file) === '.yml' || path.extname(file) === '.yaml')
+      {
+
+      +      const filePath = path.join(dirPath, file);
+
+      +      const fixture = yaml.load(
+
+      +        fsSync.readFileSync(filePath, 'utf-8')
+
+      +      ) as Partial<TestFixtures>;
+
+      +      if (fixture.e2e_patch_tests) {
+
+      +        allFixtures.e2e_patch_tests.push(...fixture.e2e_patch_tests);
+
+      +      }
+
+      +    }
+
+      +  }
+
+      +  return allFixtures;
+
+      +};
+
+      +const fixturePath = path.join(__dirname, '../fixtures/e2e');
+
+      +const fixtures = loadFixturesFromDir(fixturePath);
+       
+       describe('e2e/patcher (from fixtures)', () => {
+         let context: E2ETestContext;
+    patchStrategy: new-unified
+snapshot:
+  test/fixtures/e2e/complex-scenarios.yml: null
+  test/fixtures/e2e/edge-cases.yml: null
+  test/fixtures/e2e/failure.yml: null
+  test/fixtures/e2e/file-operations.yml: null
+  test/fixtures/e2e/success.yml: null
+  test/fixtures/e2e/patcher.yml: |
+    e2e_patch_tests:
+      # From original patcher.test.ts
+      - name: apply-search-replace
+        description: Should correctly apply a patch using the search-replace strategy
+        markdown_content: |
+          ```json // src/config.js search-replace
+          <<<<<<< SEARCH
+              port: 3000,
+          =======
+              port: 8080,
+          >>>>>>> REPLACE
+          <<<<<<< SEARCH
+              enableLogging: true,
+          =======
+              enableLogging: false,
+          >>>>>>> REPLACE
+          ```
+        initial_state:
+          - path: "src/config.js"
+            content: |
+              const config = {
+                  port: 3000,
+                  host: 'localhost',
+                  enableLogging: true,
+              };
+        expected_state:
+          - path: "src/config.js"
+            content: |
+              const config = {
+                  port: 8080,
+                  host: 'localhost',
+                  enableLogging: false,
+              };
+
+      - name: apply-standard-diff
+        description: Should correctly apply a patch using the standard-diff strategy
+        markdown_content: |
+          ```diff // src/utils.js standard-diff
+          --- a/src/utils.js
+          +++ b/src/utils.js
+          @@ -2,4 +2,5 @@
+               const a = 1;
+               const b = 2;
+          -    return a + b;
+          +    // A more complex calculation
+          +    return (a + b) * 2;
+           }
+          ```
+        initial_state:
+          - path: "src/utils.js"
+            content: |
+              function calculate() {
+                  const a = 1;
+                  const b = 2;
+                  return a + b;
+              }
+        expected_state:
+          - path: "src/utils.js"
+            content: |
+              function calculate() {
+                  const a = 1;
+                  const b = 2;
+                  // A more complex calculation
+                  return (a + b) * 2;
+              }
+
+      - name: fail-on-search-replace-no-match
+        description: Should fail transaction if search-replace content is not found
+        markdown_content: |
+          ```typescript // src/index.js search-replace
+          <<<<<<< SEARCH
+          const version = 2; // This content does not exist
+          =======
+          const version = 3;
+          >>>>>>> REPLACE
+          ```
+        initial_state:
+          - path: "src/index.js"
+            content: 'const version = 1;'
+        expected_outcome: failure
+
+      # From *.md fixtures
+      - name: create-file-with-replace
+        description: Should create a new file using the replace strategy
+        markdown_content: |
+          ```typescript // src/new.ts
+          export const newFunction = () => {
+              console.log("new file");
+          };
+          ```
+        initial_state: []
+        expected_state:
+          - path: "src/new.ts"
+            content: |
+              export const newFunction = () => {
+                  console.log("new file");
+              };
+
+      - name: create-file-with-spaces-in-path
+        description: Should create a file with spaces in its path
+        markdown_content: |
+          ```typescript // "src/components/My Component.tsx"
+          export const MyComponent = () => <div>Hello</div>;
+          ```
+        initial_state: []
+        expected_state:
+          - path: "src/components/My Component.tsx"
+            content: |
+              export const MyComponent = () => <div>Hello</div>;
+
+      - name: delete-file
+        description: Should delete a file
+        markdown_content: |
+          ```typescript // src/old-helper.ts
+          //TODO: delete this file
+          ```
+        initial_state:
+          - path: "src/old-helper.ts"
+            content: "export const oldHelper = () => {};"
+        expected_state:
+          - path: "src/old-helper.ts"
+            exists: false
+
+      - name: multiple-operations
+        description: Should handle multiple operations (edit, delete, new) in one transaction
+        markdown_content: |
+          I'm performing a few operations.
+
+          First, editing `main.ts`.
+          ```typescript // src/main.ts
+          console.log("Updated main");
+          ```
+
+          Second, deleting `utils.ts`.
+          ```typescript // src/utils.ts
+          //TODO: delete this file
+          ```
+
+          Finally, adding a new component.
+          ```typescript // "src/components/New Component.tsx"
+          export const NewComponent = () => {
+            return <div>New!</div>;
+          };
+          ```
+        initial_state:
+          - path: "src/main.ts"
+            content: 'console.log("Original main");'
+          - path: "src/utils.ts"
+            content: 'export const util = {};'
+        expected_state:
+          - path: "src/main.ts"
+            content: |
+              console.log("Updated main");
+          - path: "src/utils.ts"
+            exists: false
+          - path: "src/components/New Component.tsx"
+            content: |
+              export const NewComponent = () => {
+                return <div>New!</div>;
+              };
+  test/e2e/patcher.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import fsSync from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+    from '../test.util';
+
+    import { parseLLMResponse } from 'relaycode-core';
+
+    import { readStateFile } from '../../src';
+
+
+    interface FileState {
+      path: string;
+      content?: string;
+      exists?: boolean;
+    }
+
+
+    interface E2ETestCase {
+      name: string;
+      description: string;
+      markdown_content: string;
+      initial_state: FileState[];
+      expected_state?: FileState[];
+      expected_outcome?: 'success' | 'failure';
+    }
+
+
+    interface TestFixtures {
+      e2e_patch_tests: E2ETestCase[];
+    }
+
+
+    const fixturePath = path.join(__dirname, '../fixtures/e2e/patcher.yml');
+
+    const fixtures = yaml.load(fsSync.readFileSync(fixturePath, 'utf-8')) as
+    TestFixtures;
+
+
+    describe('e2e/patcher (from fixtures)', () => {
+      let context: E2ETestContext;
+
+      beforeEach(async () => {
+        context = await setupE2ETest();
+      });
+
+      afterEach(async () => {
+        if (context) await context.cleanup();
+      });
+
+      fixtures.e2e_patch_tests.forEach(testCase => {
+        it(testCase.description, async () => {
+          // 1. Set up initial state
+          for (const file of testCase.initial_state) {
+            await createTestFile(context.testDir.path, file.path, file.content ?? '');
+          }
+
+          // 2. Parse the markdown to get operations
+          // Dynamically add the required YAML control block to the test case markdown.
+          // The parser now requires this block to be present.
+          const projectId = path.basename(context.testDir.path);
+          const markdownWithYaml = `${testCase.markdown_content}
+
+    projectId: ${projectId}
+
+    uuid: 00000000-0000-0000-0000-000000000000
+
+    `;
+          const parsedResponse = parseLLMResponse(markdownWithYaml);
+          expect(parsedResponse).not.toBeNull();
+          if (!parsedResponse) throw new Error('Test case markdown failed to parse');
+
+          // Map FileOperation from core to the TestOperation type expected by the test utility.
+          // This is needed because the test utility has a different 'type' for write operations ('edit'/'new')
+          // and uses 'strategy' instead of 'patchStrategy'.
+          const initialFilePaths = new Set(testCase.initial_state.map(file => file.path));
+          const operations = parsedResponse.operations.map(op => {
+            if (op.type === 'write') {
+              return {
+                type: initialFilePaths.has(op.path) ? ('edit' as const) : ('new' as const),
+                path: op.path,
+                content: op.content,
+                strategy: op.patchStrategy,
+              };
+            }
+            return op;
+          });
+
+          // 3. Run the patch process
+          // We can't destructure `success` as it's not returned. We determine success by checking the state file later.
+          const { uuid } = await runProcessPatch(context, {}, operations, {
+            responseOverrides: { reasoning: [] },
+          });
+
+          const expectedSuccess = testCase.expected_outcome !== 'failure';
+          const committedState = await readStateFile(context.testDir.path, uuid);
+          const success = !!committedState;
+          expect(success).toBe(expectedSuccess);
+
+          // 4. Verify the final state
+          if (expectedSuccess) {
+            const stateToVerify = testCase.expected_state ?? testCase.initial_state;
+
+            for (const file of stateToVerify) {
+              const filePath = path.join(context.testDir.path, file.path);
+              const fileExists = await fs
+                .access(filePath)
+                .then(() => true)
+                .catch(() => false);
+
+              if (file.exists === false) {
+                expect(fileExists).toBe(false);
+              } else {
+                expect(fileExists).toBe(true);
+                const finalContent = await fs.readFile(filePath, 'utf-8');
+                const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+                expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+              }
+            }
+          } else {
+            // Expected failure
+
+            // Verify that initial state is unchanged
+            for (const file of testCase.initial_state) {
+              const filePath = path.join(context.testDir.path, file.path);
+              const finalContent = await fs.readFile(filePath, 'utf-8');
+              const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+              expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+            }
+          }
+        });
+      });
+    });
+approved: true

@@ -1,0 +1,296 @@
+uuid: e466c4c9-c128-4e86-aa15-055700754388
+projectId: relaycode
+createdAt: '2025-06-21T23:43:42.843Z'
+reasoning:
+  - >-
+    Of course. Adding tests for the `revert` command is a great idea to ensure
+    it behaves as expected.
+  - >-
+    First, I'll make a small change to the `revert` command to allow passing a
+    working directory, which makes it easier to test.
+  - >-
+    Now, I will create a new end-to-end test file for the `revert` command with
+    comprehensive test cases.
+  - >-
+    These new tests cover reverting simple and complex transactions, handling
+    non-existent transaction UUIDs, and even reverting a previous revert
+    operation.
+operations:
+  - type: write
+    path: src/commands/revert.ts
+    content: >-
+      --- src/commands/revert.ts
+
+      +++ src/commands/revert.ts
+
+      @@ -4,9 +4,7 @@
+       import { logger } from '../utils/logger';
+       import { FileOperation, ParsedLLMResponse } from '../types';
+       import { v4 as uuidv4 } from 'uuid';
+       
+      -export const revertCommand = async (uuidToRevert: string): Promise<void>
+      => {
+
+      -    const cwd = process.cwd();
+
+      -
+
+      +export const revertCommand = async (uuidToRevert: string, cwd: string =
+      process.cwd()): Promise<void> => {
+           const config = await loadConfigOrExit(cwd);
+       
+           // 2. Load the state file for the transaction to revert
+    patchStrategy: new-unified
+  - type: write
+    path: test/e2e/revert.test.ts
+    content: |-
+      import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+      import { promises as fs } from 'fs';
+      import path from 'path';
+      import {
+          setupE2ETest,
+          E2ETestContext,
+          createTestFile,
+          runProcessPatch,
+          createTestConfig,
+      } from '../test.util';
+      import { revertCommand } from '../../src/commands/revert';
+      import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+      import { logger } from '../../src/utils/logger';
+      import { findLatestStateFile } from '../../src/core/state';
+
+      describe('e2e/revert', () => {
+          let context: E2ETestContext;
+
+          beforeEach(async () => {
+              context = await setupE2ETest();
+              // We need an initialized project for revert to work
+              await createTestConfig(context.testDir.path);
+              await fs.mkdir(path.join(context.testDir.path, STATE_DIRECTORY_NAME), { recursive: true });
+          });
+
+          afterEach(async () => {
+              if (context) await context.cleanup();
+          });
+
+          it('should successfully revert a simple file modification', async () => {
+              const testFile = 'src/index.ts';
+              const originalContent = 'console.log("v1");';
+              const modifiedContent = 'console.log("v2");';
+              await createTestFile(context.testDir.path, testFile, originalContent);
+
+              // 1. Apply a patch to create a transaction (T1)
+              const { uuid: t1_uuid } = await runProcessPatch(
+                  context,
+                  {},
+                  [{ type: 'edit', path: testFile, content: modifiedContent }]
+              );
+
+              // Verify file was modified
+              const contentAfterPatch = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+              expect(contentAfterPatch).toBe(modifiedContent);
+
+              // 2. Revert T1
+              await revertCommand(t1_uuid, context.testDir.path);
+
+              // 3. Verify changes
+              const contentAfterRevert = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+              expect(contentAfterRevert).toBe(originalContent);
+
+              // 4. Verify that a new transaction (T2) was created for the revert
+              const t2 = await findLatestStateFile(context.testDir.path);
+              expect(t2).not.toBeNull();
+              expect(t2!.uuid).not.toBe(t1_uuid);
+              expect(t2!.reasoning.join(' ')).toContain(`Reverting transaction ${t1_uuid}`);
+
+              // 5. Verify T1 and T2 state files exist
+              const t1StatePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${t1_uuid}.yml`);
+              const t2StatePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${t2!.uuid}.yml`);
+              expect(await fs.access(t1StatePath).then(() => true).catch(() => false)).toBe(true);
+              expect(await fs.access(t2StatePath).then(() => true).catch(() => false)).toBe(true);
+          });
+
+          it('should correctly revert a complex transaction (edit, delete, create)', async () => {
+              const fileToModify = 'src/modify.ts';
+              const originalModifyContent = 'export const a = 1;';
+              await createTestFile(context.testDir.path, fileToModify, originalModifyContent);
+              
+              const fileToDelete = 'src/delete.ts';
+              const originalDeleteContent = 'export const b = 2;';
+              await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+              
+              const newFilePath = 'src/components/new.ts';
+              const newFileContent = 'export const c = 3;';
+          
+              // 1. Apply a complex patch (T1)
+              const { uuid: t1_uuid } = await runProcessPatch(
+                  context, {},
+                  [
+                      { type: 'edit', path: fileToModify, content: 'export const a = 100;' },
+                      { type: 'delete', path: fileToDelete },
+                      { type: 'new', path: newFilePath, content: newFileContent }
+                  ]
+              );
+              
+              // 2. Revert T1
+              await revertCommand(t1_uuid, context.testDir.path);
+
+              // 3. Verify rollback
+              const restoredModifyContent = await fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+              expect(restoredModifyContent).toBe(originalModifyContent);
+              
+              const restoredDeleteFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+              expect(restoredDeleteFileExists).toBe(true);
+              const restoredDeleteContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+              expect(restoredDeleteContent).toBe(originalDeleteContent);
+              
+              const newFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+              expect(newFileExistsAfterRevert).toBe(false);
+
+              // 4. Verify a new transaction (T2) was created
+              const t2 = await findLatestStateFile(context.testDir.path);
+              expect(t2).not.toBeNull();
+              expect(t2!.uuid).not.toBe(t1_uuid);
+          });
+
+          it('should log an error and do nothing if UUID does not exist', async () => {
+              let errorLog = '';
+              (logger as any).error = (msg: string) => { errorLog = msg; };
+
+              const fakeUuid = '00000000-0000-0000-0000-000000000000';
+              await revertCommand(fakeUuid, context.testDir.path);
+              
+              expect(errorLog).toContain(`Transaction with UUID '${fakeUuid}' not found`);
+          });
+
+          it('should be possible to revert a revert', async () => {
+              const testFile = 'src/index.ts';
+              const v1 = 'v1';
+              const v2 = 'v2';
+              await createTestFile(context.testDir.path, testFile, v1);
+
+              // 1. Apply patch to go from v1 -> v2 (T1)
+              const { uuid: t1_uuid } = await runProcessPatch(
+                  context, {},
+                  [{ type: 'edit', path: testFile, content: v2 }]
+              );
+              let content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+              expect(content).toBe(v2);
+
+              // 2. Revert T1 to go from v2 -> v1 (T2)
+              await revertCommand(t1_uuid, context.testDir.path);
+              content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+              expect(content).toBe(v1);
+
+              // 3. Get T2's UUID and revert it to go from v1 -> v2 (T3)
+              const t2 = await findLatestStateFile(context.testDir.path);
+              expect(t2).not.toBeNull();
+              await revertCommand(t2!.uuid, context.testDir.path);
+              content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+              expect(content).toBe(v2);
+
+              // 4. Check that we have 3 state files
+              const stateDir = path.join(context.testDir.path, STATE_DIRECTORY_NAME);
+              const files = (await fs.readdir(stateDir)).filter(f => f.endsWith('.yml'));
+              expect(files.length).toBe(3);
+          });
+      });
+    patchStrategy: replace
+snapshot:
+  src/commands/revert.ts: >-
+    import { loadConfigOrExit } from '../core/config';
+
+    import { readStateFile } from '../core/state';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, ParsedLLMResponse } from '../types';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+
+    export const revertCommand = async (uuidToRevert: string): Promise<void> =>
+    {
+        const cwd = process.cwd();
+
+        const config = await loadConfigOrExit(cwd);
+
+        // 2. Load the state file for the transaction to revert
+        logger.info(`Attempting to revert transaction: ${uuidToRevert}`);
+        const stateToRevert = await readStateFile(cwd, uuidToRevert);
+        if (!stateToRevert) {
+            logger.error(`Transaction with UUID '${uuidToRevert}' not found or is invalid.`);
+            return;
+        }
+
+        // 3. Generate inverse operations
+        const inverse_operations: FileOperation[] = [];
+        // Process operations in reverse order to handle dependencies correctly
+        for (const op of [...stateToRevert.operations].reverse()) {
+            switch (op.type) {
+                case 'rename':
+                    inverse_operations.push({ type: 'rename', from: op.to, to: op.from });
+                    break;
+                case 'delete':
+                    const deletedContent = stateToRevert.snapshot[op.path];
+                    if (deletedContent === null || typeof deletedContent === 'undefined') {
+                        logger.warn(`Cannot revert deletion of ${op.path}, original content not found in snapshot. Skipping.`);
+                        continue;
+                    }
+                    inverse_operations.push({
+                        type: 'write',
+                        path: op.path,
+                        content: deletedContent,
+                        patchStrategy: 'replace',
+                    });
+                    break;
+                case 'write':
+                    const originalContent = stateToRevert.snapshot[op.path];
+                    if (typeof originalContent === 'undefined') {
+                        logger.warn(`Cannot find original state for ${op.path} in snapshot. Skipping revert for this operation.`);
+                        continue;
+                    }
+                    if (originalContent === null) {
+                        // This was a new file. The inverse is to delete it.
+                        inverse_operations.push({ type: 'delete', path: op.path });
+                    } else {
+                        // This was a file modification. The inverse is to restore original content.
+                        inverse_operations.push({
+                            type: 'write',
+                            path: op.path,
+                            content: originalContent,
+                            patchStrategy: 'replace',
+                        });
+                    }
+                    break;
+            }
+        }
+
+        if (inverse_operations.length === 0) {
+            logger.warn('No operations to revert for this transaction.');
+            return;
+        }
+
+        // 4. Create and process a new "revert" transaction
+        const newUuid = uuidv4();
+        const reasoning = [
+            `Reverting transaction ${uuidToRevert}.`,
+            `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+        ];
+
+        const parsedResponse: ParsedLLMResponse = {
+            control: {
+                projectId: config.projectId,
+                uuid: newUuid,
+            },
+            operations: inverse_operations,
+            reasoning,
+        };
+
+        logger.info(`Creating new transaction ${newUuid} to perform the revert.`);
+        await processPatch(config, parsedResponse, { cwd });
+    };
+  test/e2e/revert.test.ts: null
+approved: true

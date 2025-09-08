@@ -1,0 +1,89 @@
+e2e_patch_tests:
+  - name: apply-search-replace
+    description: Should correctly apply a patch using the search-replace strategy
+    markdown_content: |
+      ```json // src/config.js search-replace
+      <<<<<<< SEARCH
+          port: 3000,
+      =======
+          port: 8080,
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+          enableLogging: true,
+      =======
+          enableLogging: false,
+      >>>>>>> REPLACE
+      ```
+    initial_state:
+      - path: "src/config.js"
+        content: |
+          const config = {
+              port: 3000,
+              host: 'localhost',
+              enableLogging: true,
+          };
+    expected_state:
+      - path: "src/config.js"
+        content: |
+          const config = {
+              port: 8080,
+              host: 'localhost',
+              enableLogging: false,
+          };
+
+  - name: apply-standard-diff
+    description: Should correctly apply a patch using the standard-diff strategy
+    markdown_content: |
+      ```diff // src/utils.js standard-diff
+      --- a/src/utils.js
+      +++ b/src/utils.js
+      @@ -2,4 +2,5 @@
+           const a = 1;
+           const b = 2;
+      -    return a + b;
+      +    // A more complex calculation
+      +    return (a + b) * 2;
+       }
+      ```
+    initial_state:
+      - path: "src/utils.js"
+        content: |
+          function calculate() {
+              const a = 1;
+              const b = 2;
+              return a + b;
+          }
+    expected_state:
+      - path: "src/utils.js"
+        content: |
+          function calculate() {
+              const a = 1;
+              const b = 2;
+              // A more complex calculation
+              return (a + b) * 2;
+          }
+
+  - name: apply-standard-diff-with-fuzzy-hunk-header
+    description: Should correctly apply a standard-diff patch with a fuzzy hunk header like '@@ ... @@'
+    markdown_content: |
+      ```diff // src/app.js standard-diff
+      --- src/app.js
+      +++ src/app.js
+      @@ ... @@
+       function main() {
+      -  console.log("Hello World");
+      +  console.log("Hello, Universe!");
+       }
+      ```
+    initial_state:
+      - path: "src/app.js"
+        content: |
+          function main() {
+            console.log("Hello World");
+          }
+    expected_state:
+      - path: "src/app.js"
+        content: |
+          function main() {
+            console.log("Hello, Universe!");
+          }

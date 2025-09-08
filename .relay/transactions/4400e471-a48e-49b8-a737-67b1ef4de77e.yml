@@ -1,0 +1,420 @@
+uuid: 4400e471-a48e-49b8-a737-67b1ef4de77e
+projectId: relaycode
+createdAt: '2025-09-03T13:42:58.811Z'
+linesAdded: 23
+linesRemoved: 27
+gitCommitMsg: 'fix(parser): refactor content extraction to fix newline errors'
+promptSummary: >-
+  Fixing failing e2e tests by refactoring the code block parser to handle
+  newlines more consistently.
+reasoning:
+  - >-
+    Alright, my bad. The parser logic was definitely the problem. Third time's
+    the charm.
+  - >-
+    The previous fixes were dancing around the real issue. The way the parser
+    was handling content from code blocks was inconsistent, especially with
+    newlines. The `extractCodeBetweenMarkers` function was doing one thing, but
+    simple `replace` operations did another. This caused those weird leading
+    newline errors.
+  - >-
+    I've ripped out `extractCodeBetweenMarkers` and moved the logic directly
+    into `parseCodeBlock` to make it crystal clear what's happening.
+  - 'Here''s the breakdown:'
+  - >-
+    1.  The main regex now uses `\r?\n` to correctly handle different line
+    endings (LF vs CRLF), which was a potential source of bugs.
+  - >-
+    2.  I've simplified the content parsing. If it finds `// START` and `// END`
+    markers, it extracts the content between them and trims whitespace.
+  - >-
+    3.  For regular code blocks (like `replace` operations), I'm now explicitly
+    stripping a single leading newline. This directly targets the bug shown in
+    the test failures where content was being prefixed with an unwanted newline.
+  - >-
+    This should fix the `create-file` and `multiple-operations` tests. It's also
+    possible the `create-file-with-spaces-in-path` parsing error was a side
+    effect of the regex being brittle, so this more robust approach might fix
+    that one too.
+operations:
+  - type: write
+    path: packages/relaycode-core/src/parser.ts
+    content: >-
+      --- packages/relaycode-core/src/parser.ts
+
+      +++ packages/relaycode-core/src/parser.ts
+
+      @@ -10,25 +10,7 @@
+           RENAME_FILE_OPERATION
+       } from './constants';
+       
+      -const CODE_BLOCK_REGEX = /```(?:\w+)?\s*([^\r\n]*?)[\r\n]([\s\S]*?)```/g;
+
+      -
+
+      -type ParsedHeader = {
+
+      -    filePath: string;
+
+      -    patchStrategy: PatchStrategy | null;
+
+      -};
+
+      -
+
+      -const extractCodeBetweenMarkers = (content: string): string => {
+
+      -    const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);
+
+      -    const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);
+
+      -
+
+      -    if (startMarkerIndex !== -1 && endMarkerIndex !== -1 &&
+      endMarkerIndex > startMarkerIndex) {
+
+      -        let relevantContent = content.substring(startMarkerIndex +
+      CODE_BLOCK_START_MARKER.length, endMarkerIndex);
+
+      -        // After extracting content between markers, we typically want to
+      remove the
+
+      -        // newline immediately following START and preceding END.
+
+      -        relevantContent = relevantContent.replace(/^\r?\n/,
+      '').replace(/\r?\n\s*$/, '');
+
+      -        return relevantContent.replace(/\r\n/g, '\n');
+
+      -    }
+
+      -    // If no START/END markers, return content as is, just normalizing
+      line endings.
+
+      -    return content.replace(/\r\n/g, '\n');
+
+      -};
+
+      +const CODE_BLOCK_REGEX = /```(?:\w+)?\s*([^\r\n]*?)\r?\n([\s\S]*?)```/g;
+       
+       const mapStrategyAlias = (strategy: string): string => {
+           if (strategy === 'new-unified') return 'standard-diff';
+      @@ -36,6 +18,11 @@
+           return strategy;
+       };
+       
+      +type ParsedHeader = {
+
+      +    filePath: string;
+
+      +    patchStrategy: PatchStrategy | null;
+
+      +};
+
+      +
+       const parseCodeBlockHeader = (headerLine: string): ParsedHeader | null => {
+           const quotedMatch = headerLine.match(/^"(.+?)"(?:\s+(.*))?$/);
+           if (quotedMatch) {
+      @@ -109,8 +96,10 @@
+       
+       const parseCodeBlock = (match: RegExpExecArray): { operation: FileOperation, fullMatch: string } | null => {
+           const [fullMatch, rawHeader, rawContent] = match;
+           let headerLine = (rawHeader || '').trim();
+      -    const content = (rawContent || '');
+
+      +    // The regex is non-greedy and will match until the first ``` it
+      sees.
+
+      +    // This often captures a trailing newline before the fence that isn't
+      part of the content.
+
+      +    const content = (rawContent || '').replace(/\r?\n$/, '');
+       
+           if (headerLine.startsWith('//')) {
+               headerLine = headerLine.substring(2).trim();
+      @@ -137,11 +126,20 @@
+               return { operation: { type: 'delete', path: filePath }, fullMatch };
+           }
+       
+      -    const patchStrategy = inferPatchStrategy(content,
+      parsedHeader.patchStrategy);
+
+      -    // The regex is non-greedy and will match until the first ``` it
+      sees.
+
+      -    // This means it might capture a trailing newline that was intended
+      to be part of the fence.
+
+      -    // So, we strip it before cleaning.
+
+      -    const cleanContent = extractCodeBetweenMarkers(content);
+
+      +    const patchStrategy = inferPatchStrategy(content,
+      parsedHeader.patchStrategy);    
+
+      +
+
+      +    let cleanContent = content;
+
+      +    const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);
+
+      +    const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);
+
+      +
+
+      +    if (startMarkerIndex !== -1 && endMarkerIndex !== -1 &&
+      endMarkerIndex > startMarkerIndex) {
+
+      +        const relevantContent = content.substring(startMarkerIndex +
+      CODE_BLOCK_START_MARKER.length, endMarkerIndex);
+
+      +        // Strip newlines immediately after START and before END
+
+      +        cleanContent = relevantContent.replace(/^\r?\n/,
+      '').replace(/\r?\n\s*$/, '');
+
+      +    } else {
+
+      +        // For simple replacements, strip the leading newline that the
+      regex might capture after the header.
+
+      +        cleanContent = content.replace(/^\r?\n/, '');
+
+      +    }
+       
+           return {
+               operation: { type: 'write', path: filePath, content: cleanContent, patchStrategy },
+    patchStrategy: new-unified
+snapshot:
+  packages/relaycode-core/src/parser.ts: >-
+    import yaml from 'js-yaml';
+
+    import { z } from 'zod';
+
+    import {
+        ControlYamlSchema,
+        FileOperation,
+        ParsedLLMResponse,
+        ParsedLLMResponseSchema,
+        PatchStrategy,
+        PatchStrategySchema,
+    } from './types';
+
+    import {
+        CODE_BLOCK_START_MARKER,
+        CODE_BLOCK_END_MARKER,
+        DELETE_FILE_MARKER,
+        RENAME_FILE_OPERATION
+    } from './constants';
+
+
+    const CODE_BLOCK_REGEX = /```(?:\w+)?\s*([^\r\n]*?)[\r\n]([\s\S]*?)```/g;
+
+
+    type ParsedHeader = {
+        filePath: string;
+        patchStrategy: PatchStrategy | null;
+    };
+
+
+    const extractCodeBetweenMarkers = (content: string): string => {
+        const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);
+        const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);
+
+        if (startMarkerIndex !== -1 && endMarkerIndex !== -1 && endMarkerIndex > startMarkerIndex) {
+            let relevantContent = content.substring(startMarkerIndex + CODE_BLOCK_START_MARKER.length, endMarkerIndex);
+            // After extracting content between markers, we typically want to remove the
+            // newline immediately following START and preceding END.
+            relevantContent = relevantContent.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+            return relevantContent.replace(/\r\n/g, '\n');
+        }
+        // If no START/END markers, return content as is, just normalizing line endings.
+        return content.replace(/\r\n/g, '\n');
+    };
+
+
+    const mapStrategyAlias = (strategy: string): string => {
+        if (strategy === 'new-unified') return 'standard-diff';
+        if (strategy === 'multi-search-replace') return 'search-replace';
+        return strategy;
+    };
+
+
+    const parseCodeBlockHeader = (headerLine: string): ParsedHeader | null => {
+        const quotedMatch = headerLine.match(/^"(.+?)"(?:\s+(.*))?$/);
+        if (quotedMatch) {
+            const filePath = quotedMatch[1]!;
+            const strategyStr = (quotedMatch[2] || '').trim();
+            if (strategyStr) {
+                const mappedStrategy = mapStrategyAlias(strategyStr);
+                const parsedStrategy = PatchStrategySchema.safeParse(mappedStrategy);
+                if (!parsedStrategy.success) {
+                    return null;
+                }
+                return { filePath, patchStrategy: parsedStrategy.data };
+            }
+            return { filePath, patchStrategy: null };
+        }
+
+        const parts = headerLine.split(/\s+/);
+        if (parts.length === 1 && parts[0]) {
+            return { filePath: parts[0], patchStrategy: null };
+        }
+        if (parts.length === 2 && parts[0] && parts[1]) {
+            const mappedStrategy = mapStrategyAlias(parts[1]);
+            const parsedStrategy = PatchStrategySchema.safeParse(mappedStrategy);
+            if (parsedStrategy.success) {
+                return { filePath: parts[0], patchStrategy: parsedStrategy.data };
+            } else {
+                return { filePath: headerLine, patchStrategy: null };
+            }
+        }
+
+        if (parts.length > 2) {
+            return null;
+        }
+
+        return null; // For empty or invalid header
+    };
+
+
+    const inferPatchStrategy = (content: string, providedStrategy: PatchStrategy
+    | null): PatchStrategy => {
+        if (providedStrategy) return providedStrategy;
+        if (/^<<<<<<< SEARCH\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) return 'search-replace';
+        if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) return 'standard-diff';
+        return 'replace';
+    };
+
+
+    const extractAndParseYaml = (rawText: string) => {
+        // Strategy 1: Find all fenced YAML blocks and try to parse the last one.
+        const yamlBlockMatches = [...rawText.matchAll(/```\s*(?:yaml|yml)[\r\n]([\s\S]+?)```/gi)];
+
+        if (yamlBlockMatches.length > 0) {
+            const lastMatch = yamlBlockMatches[yamlBlockMatches.length - 1]!;
+            try {
+                const yamlContent: unknown = yaml.load(lastMatch[1]!);
+                const control = ControlYamlSchema.parse(yamlContent);
+                // Success! This is our control block.
+                const textWithoutYaml = rawText.substring(0, lastMatch.index) + rawText.substring(lastMatch.index! + lastMatch[0].length);
+                return { control, textWithoutYaml: textWithoutYaml.trim() };
+            } catch (e) {
+                // The last block was not a valid control block.
+                // We will now fall through to the non-fenced strategy, assuming the fenced block was just an example.
+            }
+        }
+
+        // Strategy 2: Look for a non-fenced block at the end.
+        const lines = rawText.trim().split('\n');
+        let yamlStartIndex = -1;
+        // Heuristic: project ID is required, so we look for that.
+        const searchLimit = Math.max(0, lines.length - 20);
+        for (let i = lines.length - 1; i >= searchLimit; i--) {
+            if (lines[i]?.trim().match(/^projectId:/)) {
+                yamlStartIndex = i;
+                break;
+            }
+        }
+
+        if (yamlStartIndex !== -1) {
+            const yamlText = lines.slice(yamlStartIndex).join('\n');
+            try {
+                const yamlContent: unknown = yaml.load(yamlText);
+                const control = ControlYamlSchema.parse(yamlContent);
+                // Success!
+                const textWithoutYaml = lines.slice(0, yamlStartIndex).join('\n');
+                return { control, textWithoutYaml: textWithoutYaml.trim() };
+            } catch (e) {
+                // Non-fenced YAML block at the end was not a valid control block.
+            }
+        }
+        
+        // If both strategies fail, there's no valid control block.
+        return { control: null, textWithoutYaml: rawText };
+    };
+
+
+    const parseCodeBlock = (match: RegExpExecArray): { operation: FileOperation,
+    fullMatch: string } | null => {
+        const [fullMatch, rawHeader, rawContent] = match;
+        let headerLine = (rawHeader || '').trim();
+        const content = (rawContent || '');
+
+        if (headerLine.startsWith('//')) {
+            headerLine = headerLine.substring(2).trim();
+        }
+
+        if (!headerLine) return null;
+
+        if (headerLine === RENAME_FILE_OPERATION) {
+            try {
+                const { from, to } = z.object({ from: z.string().min(1), to: z.string().min(1) }).parse(JSON.parse(content));
+                return { operation: { type: 'rename', from, to }, fullMatch };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        const parsedHeader = parseCodeBlockHeader(headerLine);
+        if (!parsedHeader) {
+            return null;
+        }
+
+        const { filePath } = parsedHeader;
+
+        if (content.trim() === DELETE_FILE_MARKER) {
+            return { operation: { type: 'delete', path: filePath }, fullMatch };
+        }
+
+        const patchStrategy = inferPatchStrategy(content, parsedHeader.patchStrategy);
+        // The regex is non-greedy and will match until the first ``` it sees.
+        // This means it might capture a trailing newline that was intended to be part of the fence.
+        // So, we strip it before cleaning.
+        const cleanContent = extractCodeBetweenMarkers(content);
+
+        return {
+            operation: { type: 'write', path: filePath, content: cleanContent, patchStrategy }, 
+            fullMatch
+        };
+    };
+
+
+    export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null
+    => {
+        const { control, textWithoutYaml } = extractAndParseYaml(rawText);
+
+        if (!control) {
+            return null;
+        }
+
+        const operations: FileOperation[] = [];
+        const matchedBlocks: string[] = [];
+        let match;
+
+        while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+            const result = parseCodeBlock(match);
+            if (result) {
+                operations.push(result.operation);
+                matchedBlocks.push(result.fullMatch);
+            }
+        }
+
+        if (operations.length === 0) {
+            return null;
+        }
+
+        let reasoningText = textWithoutYaml;
+        for (const block of matchedBlocks) {
+            reasoningText = reasoningText.replace(block, '');
+        }
+        const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+
+        try {
+            const parsedResponse = ParsedLLMResponseSchema.parse({ control, operations, reasoning });
+            return parsedResponse;
+        } catch (e) {
+            return null;
+        }
+    };
+approved: true

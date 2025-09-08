@@ -1,0 +1,1076 @@
+uuid: a3875321-4f18-4592-95f2-9548483b169b
+projectId: relaycode
+createdAt: '2025-06-22T14:26:24.428Z'
+reasoning:
+  - >-
+    This is a great idea to improve maintainability. I will move all the
+    constants to `src/utils/constants.ts` and update the files that use them.
+  - >-
+    First, I'll update `src/utils/constants.ts` with all the new constants I've
+    identified.
+  - >-
+    Now, I'll update the `init` command to use the new `GITIGNORE_COMMENT`
+    constant.
+  - Next, I'll update the notifier to use the `APP_NAME` constant.
+  - I'll update the CLI entrypoint to use the `COMMAND_NAME` constant.
+  - >-
+    Now for the clipboard logic, to replace hardcoded Windows-specific paths and
+    executable names.
+  - I'll update the parser to use the `RENAME_FILE_OPERATION` constant.
+  - >-
+    Finally, I'll update the state management logic to use the new constants for
+    file suffixes and directory names.
+  - >-
+    This completes the requested refactoring. All the magic strings and
+    constants have been moved to a central file.
+operations:
+  - type: write
+    path: src/utils/constants.ts
+    content: |-
+      ';
+      export const CODE_BLOCK_END_MARKER = '
+    patchStrategy: replace
+  - type: write
+    path: src/commands/init.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { findConfig, createConfig, ensureStateDirExists, getProjectId }
+      from '../core/config';
+
+      import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+
+      import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME }
+      from '../utils/constants';
+
+      =======
+
+      import { findConfig, createConfig, ensureStateDirExists, getProjectId }
+      from '../core/config';
+
+      import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+
+      import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME,
+      GITIGNORE_COMMENT } from '../utils/constants';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const updateGitignore = async (cwd: string): Promise<void> => {
+          const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+          const entry = `\n# relaycode state\n/${STATE_DIRECTORY_NAME}/\n`;
+
+          try {
+      =======
+
+      const updateGitignore = async (cwd: string): Promise<void> => {
+          const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+          const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
+
+          try {
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/utils/notifier.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      const notifier = require('toasted-notifier');
+
+
+      const appName = 'Relaycode';
+
+
+      // This is a "fire-and-forget" utility. If notifications fail for any
+      reason
+
+      =======
+
+      const notifier = require('toasted-notifier');
+
+      import { APP_NAME } from './constants';
+
+
+      // This is a "fire-and-forget" utility. If notifications fail for any
+      reason
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const createNotifier = (messageTemplate: (param: string) => string) => {
+          return (param: string, enableNotifications: boolean = true) => {
+              sendNotification({
+                  title: appName,
+                  message: messageTemplate(param),
+                  enableNotifications,
+              });
+          };
+      };
+
+      =======
+
+      const createNotifier = (messageTemplate: (param: string) => string) => {
+          return (param: string, enableNotifications: boolean = true) => {
+              sendNotification({
+                  title: APP_NAME,
+                  message: messageTemplate(param),
+                  enableNotifications,
+              });
+          };
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/cli.ts
+    content: |-
+      <<<<<<< SEARCH
+      import { initCommand } from './commands/init';
+      import { watchCommand } from './commands/watch';
+      import { logCommand } from './commands/log';
+      =======
+      import { initCommand } from './commands/init';
+      import { watchCommand } from './commands/watch';
+      import { logCommand } from './commands/log';
+      import { COMMAND_NAME } from './utils/constants';
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+      const program = new Command();
+
+      program
+        .name('relay')
+        .version(version)
+        .description('A developer assistant that automates applying code changes from LLMs.');
+      =======
+      const program = new Command();
+
+      program
+        .name(COMMAND_NAME)
+        .version(version)
+        .description('A developer assistant that automates applying code changes from LLMs.');
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/clipboard.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import clipboardy from 'clipboardy';
+
+      import { logger, getErrorMessage } from '../utils/logger';
+
+      import fs from 'fs';
+
+      import path from 'path';
+
+      import { exec } from 'child_process';
+
+      import { executeShellCommand } from '../utils/shell';
+
+      =======
+
+      import clipboardy from 'clipboardy';
+
+      import { logger, getErrorMessage } from '../utils/logger';
+
+      import fs from 'fs';
+
+      import path from 'path';
+
+      import { exec } from 'child_process';
+
+      import { executeShellCommand } from '../utils/shell';
+
+      import { FALLBACKS_DIR, WINDOWS_CLIPBOARD_EXE_NAME, WINDOWS_DIR } from
+      '../utils/constants';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const WINDOWS_FALLBACK_DIR = path.join(process.cwd(), 'fallbacks',
+      'windows');
+
+      const WINDOWS_CLIPBOARD_EXE = 'clipboard_x86_64.exe';
+
+      const WINDOWS_CLIPBOARD_PATH = path.join(WINDOWS_FALLBACK_DIR,
+      WINDOWS_CLIPBOARD_EXE);
+
+      =======
+
+      const WINDOWS_FALLBACK_DIR = path.join(process.cwd(), FALLBACKS_DIR,
+      WINDOWS_DIR);
+
+      const WINDOWS_CLIPBOARD_PATH = path.join(WINDOWS_FALLBACK_DIR,
+      WINDOWS_CLIPBOARD_EXE_NAME);
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+            // Global installation path
+            path.join(process.env.HOME || '', '.bun', 'install', 'global', 'node_modules', 'relaycode', 'fallbacks', 'windows'),
+            // Local installation paths
+            path.join(process.cwd(), 'node_modules', 'clipboardy', 'fallbacks', 'windows'),
+            WINDOWS_FALLBACK_DIR,
+      =======
+            // Global installation path
+            path.join(process.env.HOME || '', '.bun', 'install', 'global', 'node_modules', 'relaycode', FALLBACKS_DIR, WINDOWS_DIR),
+            // Local installation paths
+            path.join(process.cwd(), 'node_modules', 'clipboardy', FALLBACKS_DIR, WINDOWS_DIR),
+            WINDOWS_FALLBACK_DIR,
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+            // Find an existing executable
+            let sourceExePath = null;
+            for (const dir of possiblePaths) {
+              const exePath = path.join(dir, WINDOWS_CLIPBOARD_EXE);
+              if (fs.existsSync(exePath)) {
+                sourceExePath = exePath;
+                break;
+              }
+            }
+      =======
+            // Find an existing executable
+            let sourceExePath = null;
+            for (const dir of possiblePaths) {
+              const exePath = path.join(dir, WINDOWS_CLIPBOARD_EXE_NAME);
+              if (fs.existsSync(exePath)) {
+                sourceExePath = exePath;
+                break;
+              }
+            }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/parser.ts
+    content: |-
+      <<<<<<< SEARCH
+      import {
+          CODE_BLOCK_START_MARKER,
+          CODE_BLOCK_END_MARKER,
+          DELETE_FILE_MARKER
+      } from '../utils/constants';
+      =======
+      import {
+          CODE_BLOCK_START_MARKER,
+          CODE_BLOCK_END_MARKER,
+          DELETE_FILE_MARKER,
+          RENAME_FILE_OPERATION
+      } from '../utils/constants';
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+                  // Handle rename operation as a special case
+                  if (headerLine === 'rename-file') {
+                      logger.debug(`Found rename-file operation`);
+                      matchedBlocks.push(fullMatch);
+      =======
+                  // Handle rename operation as a special case
+                  if (headerLine === RENAME_FILE_OPERATION) {
+                      logger.debug(`Found rename-file operation`);
+                      matchedBlocks.push(fullMatch);
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import yaml from 'js-yaml';
+
+      import { StateFile, StateFileSchema } from '../types';
+
+      import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+      import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+
+      import { fileExists, safeRename } from './executor';
+
+      =======
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import yaml from 'js-yaml';
+
+      import { StateFile, StateFileSchema } from '../types';
+
+      import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX,
+      STATE_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME } from '../utils/constants';
+
+      import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+
+      import { fileExists, safeRename } from './executor';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const getStateFilePath = (cwd: string, uuid: string, isPending:
+      boolean): string => {
+        const fileName = isPending ? `${uuid}.pending.yml` : `${uuid}.yml`;
+        return path.join(getStateDirectory(cwd), fileName);
+      };
+
+      =======
+
+      export const getStateFilePath = (cwd: string, uuid: string, isPending:
+      boolean): string => {
+        const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` : `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+        return path.join(getStateDirectory(cwd), fileName);
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const getUndoneStateFilePath = (cwd: string, uuid: string): string
+      => {
+        const fileName = `${uuid}.yml`;
+        return path.join(getStateDirectory(cwd),'undone', fileName);
+      };
+
+      =======
+
+      export const getUndoneStateFilePath = (cwd: string, uuid: string): string
+      => {
+        const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+        return path.join(getStateDirectory(cwd), UNDONE_DIRECTORY_NAME, fileName);
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const getCommittedTransactionFiles = async (cwd: string): Promise<{
+      stateDir: string; files: string[] } | null> => {
+          const stateDir = getStateDirectory(cwd);
+          try {
+              await fs.access(stateDir);
+          } catch (e) {
+              return null;
+          }
+          const files = await fs.readdir(stateDir);
+          const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+          return { stateDir, files: transactionFiles };
+      };
+
+      =======
+
+      const getCommittedTransactionFiles = async (cwd: string): Promise<{
+      stateDir: string; files: string[] } | null> => {
+          const stateDir = getStateDirectory(cwd);
+          try {
+              await fs.access(stateDir);
+          } catch (e) {
+              return null;
+          }
+          const files = await fs.readdir(stateDir);
+          const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));
+          return { stateDir, files: transactionFiles };
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const readAllStateFiles = async (cwd: string = process.cwd()):
+      Promise<StateFile[] | null> => {
+          const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+          if (!transactionFileInfo) {
+              return null;
+          }
+          const { files: transactionFiles } = transactionFileInfo;
+          
+          const promises = transactionFiles.map(async (file) => {
+              const stateFile = await readStateFile(cwd, file.replace('.yml', ''));
+              if (!stateFile) {
+                  logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+              }
+              return stateFile;
+          });
+      =======
+
+      export const readAllStateFiles = async (cwd: string = process.cwd()):
+      Promise<StateFile[] | null> => {
+          const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+          if (!transactionFileInfo) {
+              return null;
+          }
+          const { files: transactionFiles } = transactionFileInfo;
+          
+          const promises = transactionFiles.map(async (file) => {
+              const stateFile = await readStateFile(cwd, file.replace(COMMITTED_STATE_FILE_SUFFIX, ''));
+              if (!stateFile) {
+                  logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+              }
+              return stateFile;
+          });
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const latestFile = validFiles[0];
+          if (!latestFile) {
+              return null;
+          }
+
+          // Now read the full content of only the latest file
+          return readStateFile(cwd, latestFile.file.replace('.yml', ''));
+      };
+
+      =======
+          const latestFile = validFiles[0];
+          if (!latestFile) {
+              return null;
+          }
+
+          // Now read the full content of only the latest file
+          return readStateFile(cwd, latestFile.file.replace(COMMITTED_STATE_FILE_SUFFIX, ''));
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/utils/constants.ts: "export const CONFIG_FILE_NAME = 'relaycode.config.json';\r\nexport const STATE_DIRECTORY_NAME = '.relaycode';\r\nexport const GITIGNORE_FILE_NAME = '.gitignore';\r\n\r\nexport const CODE_BLOCK_START_MARKER = '// START';\r\nexport const CODE_BLOCK_END_MARKER = '// END';\r\nexport const DELETE_FILE_MARKER = '//TODO: delete this file';"
+  src/commands/init.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { findConfig, createConfig, ensureStateDirExists, getProjectId } from
+    '../core/config';
+
+    import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+
+    import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME } from
+    '../utils/constants';
+
+
+    const getInitMessage = (projectId: string): string => `
+
+    ✅ relaycode has been initialized for this project.
+
+
+    Configuration file created: ${CONFIG_FILE_NAME}
+
+
+    Project ID: ${projectId}
+
+
+    Next steps:
+
+    1. (Optional) Open ${CONFIG_FILE_NAME} to customize settings like
+    'preferredStrategy' to control how the AI generates code patches.
+       - 'auto' (default): The AI can choose the best patch strategy.
+       - 'new-unified': Forces the AI to use diffs, great for most changes.
+       - 'replace': Forces the AI to replace entire files, good for new files or small changes.
+       - 'multi-search-replace': Forces the AI to perform precise search and replace operations.
+
+    2. Run 'relay watch' in your terminal. This will start the service and
+    display the system prompt tailored to your configuration.
+
+
+    3. Copy the system prompt provided by 'relay watch' and paste it into your
+    AI assistant's "System Prompt" or "Custom Instructions".
+
+    `;
+
+
+
+    const updateGitignore = async (cwd: string): Promise<void> => {
+        const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+        const entry = `\n# relaycode state\n/${STATE_DIRECTORY_NAME}/\n`;
+
+        try {
+            let content = await fs.readFile(gitignorePath, 'utf-8');
+            if (!content.includes(STATE_DIRECTORY_NAME)) {
+                content += entry;
+                await fs.writeFile(gitignorePath, content);
+                logger.info(`Updated ${GITIGNORE_FILE_NAME} to ignore ${STATE_DIRECTORY_NAME}/`);
+            }
+        } catch (error) {
+            if (isEnoentError(error)) {
+                await fs.writeFile(gitignorePath, entry.trim());
+                logger.info(`Created ${GITIGNORE_FILE_NAME} and added ${STATE_DIRECTORY_NAME}/`);
+            } else {
+                logger.error(`Failed to update ${GITIGNORE_FILE_NAME}: ${getErrorMessage(error)}`);
+            }
+        }
+    };
+
+
+    export const initCommand = async (cwd: string = process.cwd()):
+    Promise<void> => {
+        logger.info('Initializing relaycode in this project...');
+
+        const config = await findConfig(cwd);
+        if (config) {
+            logger.warn(`${CONFIG_FILE_NAME} already exists. Initialization skipped.`);
+            logger.log(`
+    To use relaycode, please run 'relay watch'.
+
+    It will display a system prompt to copy into your LLM assistant.
+
+    You can review your configuration in ${CONFIG_FILE_NAME}.
+
+    `);
+            return;
+        }
+        
+        const projectId = await getProjectId(cwd);
+        await createConfig(projectId, cwd);
+        logger.success(`Created configuration file: ${CONFIG_FILE_NAME}`);
+        
+        await ensureStateDirExists(cwd);
+        logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+
+        await updateGitignore(cwd);
+
+        logger.log(getInitMessage(projectId));
+    };
+  src/utils/notifier.ts: >-
+    const notifier = require('toasted-notifier');
+
+
+    const appName = 'Relaycode';
+
+
+    // This is a "fire-and-forget" utility. If notifications fail for any reason
+
+    // (e.g., unsupported OS, DND mode, permissions), it should not crash the
+    app.
+
+    const sendNotification = (options: { title: string; message: string;
+    enableNotifications?: boolean }) => {
+        // Skip notification if explicitly disabled
+        if (options.enableNotifications === false) {
+            return;
+        }
+        
+        try {
+            notifier.notify(
+                {
+                    title: options.title,
+                    message: options.message,
+                    sound: false, // Keep it quiet by default
+                    wait: false,
+                },
+                (err: any) => {
+                    if (err) {
+                        // Silently ignore errors. This is a non-critical feature.
+                    }
+                }
+            );
+        } catch (err) {
+            // Silently ignore errors.
+        }
+    };
+
+
+    const createNotifier = (messageTemplate: (param: string) => string) => {
+        return (param: string, enableNotifications: boolean = true) => {
+            sendNotification({
+                title: appName,
+                message: messageTemplate(param),
+                enableNotifications,
+            });
+        };
+    };
+
+
+    export const notifyPatchDetected = createNotifier(
+        (projectId: string) => `New patch detected for project \`${projectId}\`.`
+    );
+
+
+    export const notifyApprovalRequired = createNotifier(
+        (projectId: string) => `Action required to approve changes for \`${projectId}\`.`
+    );
+
+
+    export const notifySuccess = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` applied successfully.`
+    );
+
+
+    export const notifyFailure = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` failed and was rolled back.`
+    );
+  src/cli.ts: |-
+    #!/usr/bin/env node
+    import { Command } from 'commander';
+    import { initCommand } from './commands/init';
+    import { watchCommand } from './commands/watch';
+    import { logCommand } from './commands/log';
+    import { undoCommand } from './commands/undo';
+    import { revertCommand } from './commands/revert';
+    import { applyCommand } from './commands/apply';
+    import { createRequire } from 'node:module';
+    import { fileURLToPath } from 'node:url';
+    import { dirname, join } from 'node:path';
+
+    // Default version in case we can't find the package.json
+    let version = '0.0.0';
+
+    try {
+      const require = createRequire(import.meta.url);
+      let pkg;
+      try {
+        // This works when installed as a package
+        pkg = require('relaycode/package.json');
+      } catch (e) {
+        // Fallback for local development
+        try {
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+          pkg = require(join(__dirname, '..', 'package.json'));
+        } catch (e2) {
+          // ignore
+        }
+      }
+      
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+    const program = new Command();
+
+    program
+      .name('relay')
+      .version(version)
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    const commands = [
+      { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: initCommand },
+      { name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.', action: () => { watchCommand(); } },
+      { name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.', args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' }, action: applyCommand },
+      { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: logCommand },
+      { name: 'undo', alias: 'u', description: 'Reverts the last successfully committed transaction.', action: undoCommand },
+      { name: 'revert', alias: 'r', description: 'Reverts a committed transaction by its UUID.', args: { syntax: '<uuid>', description: 'The UUID of the transaction to revert.' }, action: revertCommand },
+    ];
+
+    commands.forEach(cmdInfo => {
+      const command = program
+        .command(cmdInfo.name)
+        .alias(cmdInfo.alias)
+        .description(cmdInfo.description);
+
+      if (cmdInfo.args) {
+        command.argument(cmdInfo.args.syntax, cmdInfo.args.description);
+      }
+
+      command.action(cmdInfo.action);
+    });
+
+    program.parse(process.argv);
+
+    if (!process.argv.slice(2).length) {
+        program.outputHelp();
+    }
+  src/core/clipboard.ts: >-
+    import clipboardy from 'clipboardy';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+    import { exec } from 'child_process';
+
+    import { executeShellCommand } from '../utils/shell';
+
+
+    type ClipboardCallback = (content: string) => void;
+
+    type ClipboardReader = () => Promise<string>;
+
+
+    const checkLinuxClipboardDependencies = async () => {
+      if (process.platform === 'linux') {
+          logger.debug('Checking for clipboard dependencies on Linux (xsel or xclip)...');
+          try {
+              // Using `command -v` is more portable than `which`. Redirect stdout/stderr to keep it clean.
+              const { exitCode } = await executeShellCommand('command -v xsel >/dev/null 2>&1 || command -v xclip >/dev/null 2>&1');
+              if (exitCode !== 0) {
+                  logger.error('-----------------------------------------------------------------------');
+                  logger.error('ACTION REQUIRED: Clipboard support on Linux requires `xsel` or `xclip`.');
+                  logger.error('Please install one of these tools to enable clipboard monitoring.');
+                  logger.error('Example on Debian/Ubuntu: sudo apt install xsel');
+                  logger.error('Example on Fedora/CentOS: sudo dnf install xsel');
+                  logger.error('Example on Arch Linux:    sudo pacman -S xsel');
+                  logger.error('-----------------------------------------------------------------------');
+              } else {
+                  logger.debug('Linux clipboard dependency check passed.');
+              }
+          } catch (error) {
+              logger.warn(`An error occurred while checking for clipboard dependencies: ${getErrorMessage(error)}`);
+          }
+      }
+    };
+
+
+    const WINDOWS_FALLBACK_DIR = path.join(process.cwd(), 'fallbacks',
+    'windows');
+
+    const WINDOWS_CLIPBOARD_EXE = 'clipboard_x86_64.exe';
+
+    const WINDOWS_CLIPBOARD_PATH = path.join(WINDOWS_FALLBACK_DIR,
+    WINDOWS_CLIPBOARD_EXE);
+
+
+    // Direct Windows clipboard reader that uses the executable directly
+
+    const createDirectWindowsClipboardReader = (): ClipboardReader => {
+      return () => new Promise((resolve) => {
+        try {
+          if (!fs.existsSync(WINDOWS_CLIPBOARD_PATH)) {
+            logger.error('Windows clipboard executable not found. Cannot watch clipboard on Windows.');
+            // Resolve with empty string to avoid stopping the watcher loop, but log an error.
+            return resolve('');
+          }
+          
+          const command = `"${WINDOWS_CLIPBOARD_PATH}" --paste`;
+          
+          exec(command, { encoding: 'utf8' }, (error, stdout, stderr) => {
+            if (error) {
+              // It's common for the clipboard executable to fail if the clipboard is empty
+              // or contains non-text data (e.g., an image). We can treat this as "no content".
+              // We don't log this as an error to avoid spamming the console during normal use.
+              logger.debug(`Windows clipboard read command failed (this is often normal): ${stderr.trim()}`);
+              resolve('');
+            } else {
+              resolve(stdout);
+            }
+          });
+        } catch (syncError) {
+          // Catch synchronous errors during setup (e.g., path issues).
+          logger.error(`A synchronous error occurred while setting up clipboard reader: ${getErrorMessage(syncError)}`);
+          resolve('');
+        }
+      });
+    };
+
+
+    // Check if the clipboard executable exists and fix path issues on Windows
+
+    const ensureClipboardExecutable = () => {
+      if (process.platform === 'win32') {
+        try {
+          // Try to find clipboard executables in common locations
+          const possiblePaths = [
+            // Global installation path
+            path.join(process.env.HOME || '', '.bun', 'install', 'global', 'node_modules', 'relaycode', 'fallbacks', 'windows'),
+            // Local installation paths
+            path.join(process.cwd(), 'node_modules', 'clipboardy', 'fallbacks', 'windows'),
+            WINDOWS_FALLBACK_DIR,
+          ];
+          
+          // Create fallbacks directory in the current project if it doesn't exist
+          if (!fs.existsSync(WINDOWS_FALLBACK_DIR)) {
+            fs.mkdirSync(WINDOWS_FALLBACK_DIR, { recursive: true });
+          }
+          
+          // Find an existing executable
+          let sourceExePath = null;
+          for (const dir of possiblePaths) {
+            const exePath = path.join(dir, WINDOWS_CLIPBOARD_EXE);
+            if (fs.existsSync(exePath)) {
+              sourceExePath = exePath;
+              break;
+            }
+          }
+          
+          // Copy the executable to the local fallbacks directory if found
+          if (sourceExePath && sourceExePath !== WINDOWS_CLIPBOARD_PATH) {
+            fs.copyFileSync(sourceExePath, WINDOWS_CLIPBOARD_PATH);
+            logger.info('Copied Windows clipboard executable to local fallbacks directory');
+          } else if (!sourceExePath) {
+            logger.error('Windows clipboard executable not found in any location');
+          }
+        } catch (error) {
+          logger.warn('Error ensuring clipboard executable: ' + getErrorMessage(error));
+        }
+      }
+    };
+
+
+    export const createClipboardWatcher = (
+      pollInterval: number,
+      callback: ClipboardCallback,
+      reader?: ClipboardReader,
+    ) => {
+      // Ensure clipboard executable exists before starting
+      ensureClipboardExecutable();
+      // Check for Linux dependencies. This is fire-and-forget.
+      checkLinuxClipboardDependencies();
+      
+      // On Windows, use the direct Windows reader
+      // Otherwise use the provided reader or clipboardy
+      const clipboardReader = process.platform === 'win32' ? 
+        createDirectWindowsClipboardReader() : 
+        reader || clipboardy.read;
+      
+      let lastContent = '';
+      let intervalId: NodeJS.Timeout | null = null;
+
+      const checkClipboard = async () => {
+        try {
+          const content = await clipboardReader();
+          if (content && content !== lastContent) {
+            lastContent = content;
+            callback(content);
+          }
+        } catch (error) {
+          // It's common for clipboard access to fail occasionally (e.g., on VM focus change)
+          // So we log a warning but don't stop the watcher.
+          logger.warn('Could not read from clipboard: ' + getErrorMessage(error));
+        }
+      };
+
+      const start = () => {
+        if (intervalId) {
+          return;
+        }
+        logger.info(`Starting clipboard watcher (polling every ${pollInterval}ms)`);
+        // Immediately check once, then start the interval
+        checkClipboard();
+        intervalId = setInterval(checkClipboard, pollInterval);
+      };
+
+      const stop = () => {
+        if (intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+          logger.info('Clipboard watcher stopped.');
+        }
+      };
+
+      start();
+      
+      return { stop };
+    };
+  src/core/parser.ts: "import yaml from 'js-yaml';\r\nimport { z } from 'zod';\r\nimport {\r\n    ControlYamlSchema,\r\n    FileOperation,\r\n    ParsedLLMResponse,\r\n    ParsedLLMResponseSchema,\r\n    PatchStrategy,\r\n    PatchStrategySchema,\r\n} from '../types';\r\nimport {\r\n    CODE_BLOCK_START_MARKER,\r\n    CODE_BLOCK_END_MARKER,\r\n    DELETE_FILE_MARKER\r\n} from '../utils/constants';\r\nimport { logger } from '../utils/logger';\r\n\r\nconst CODE_BLOCK_REGEX = /```(?:\\w+)?(?:\\s*\\/\\/\\s*(.*?)|\\s+(.*?))?[\\r\\n]([\\s\\S]*?)[\\r\\n]```/g;\r\nconst YAML_BLOCK_REGEX = /```yaml[\\r\\n]([\\s\\S]+?)```/;\r\n\r\nconst extractCodeBetweenMarkers = (content: string): string => {\r\n    const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);\r\n    const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);\r\n\r\n    if (startMarkerIndex === -1 || endMarkerIndex === -1 || endMarkerIndex <= startMarkerIndex) {\r\n        // Normalize line endings to Unix-style \\n for consistency\r\n        return content.trim().replace(/\\r\\n/g, '\\n');\r\n    }\r\n\r\n    const startIndex = startMarkerIndex + CODE_BLOCK_START_MARKER.length;\r\n    // Normalize line endings to Unix-style \\n for consistency\r\n    return content.substring(startIndex, endMarkerIndex).trim().replace(/\\r\\n/g, '\\n');\r\n};\r\n\r\nexport const parseLLMResponse = (rawText: string): ParsedLLMResponse | null => {\r\n    try {\r\n        logger.debug('Parsing LLM response...');\r\n        let yamlText: string | null = null;\r\n        let textWithoutYaml: string = rawText;\r\n\r\n        const yamlBlockMatch = rawText.match(YAML_BLOCK_REGEX);\r\n        if (yamlBlockMatch && yamlBlockMatch[1]) {\r\n            logger.debug('Found YAML code block.');\r\n            yamlText = yamlBlockMatch[1];\r\n            textWithoutYaml = rawText.replace(YAML_BLOCK_REGEX, '').trim();\r\n        } else {\r\n            logger.debug('No YAML code block found. Looking for raw YAML content at the end.');\r\n            const lines = rawText.trim().split('\\n');\r\n            let yamlStartIndex = -1;\r\n            // Search from the end, but not too far, maybe last 15 lines\r\n            const searchLimit = Math.max(0, lines.length - 15);\r\n            for (let i = lines.length - 1; i >= searchLimit; i--) {\r\n                const trimmedLine = lines[i]?.trim();\r\n                if (trimmedLine && trimmedLine.match(/^projectId:\\s*['\"]?[\\w.-]+['\"]?$/)) {\r\n                    yamlStartIndex = i;\r\n                    break;\r\n                }\r\n            }\r\n\r\n            if (yamlStartIndex !== -1) {\r\n                logger.debug(`Found raw YAML starting at line ${yamlStartIndex}.`);\r\n                const yamlLines = lines.slice(yamlStartIndex);\r\n                const textWithoutYamlLines = lines.slice(0, yamlStartIndex);\r\n                yamlText = yamlLines.join('\\n');\r\n                textWithoutYaml = textWithoutYamlLines.join('\\n').trim();\r\n            }\r\n        }\r\n        \r\n        logger.debug(`YAML content: ${yamlText ? 'Found' : 'Not found'}`);\r\n        if (!yamlText) {\r\n            logger.debug('No YAML content found');\r\n            return null;\r\n        }\r\n\r\n        let control;\r\n        try {\r\n            const yamlContent = yaml.load(yamlText);\r\n            logger.debug(`YAML content parsed: ${JSON.stringify(yamlContent)}`);\r\n            control = ControlYamlSchema.parse(yamlContent);\r\n            logger.debug(`Control schema parsed: ${JSON.stringify(control)}`);\r\n        } catch (e) {\r\n            logger.debug(`Error parsing YAML or control schema: ${e}`);\r\n            return null;\r\n        }\r\n        \r\n        const operations: FileOperation[] = [];\r\n        const matchedBlocks: string[] = [];\r\n        \r\n        let match;\r\n        logger.debug('Looking for code blocks...');\r\n        let blockCount = 0;\r\n        while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {\r\n            blockCount++;\r\n            logger.debug(`Found code block #${blockCount}`);\r\n            const [fullMatch, commentHeaderLine, spaceHeaderLine, rawContent] = match;\r\n\r\n            // Get the header line from either the comment style or space style\r\n            const headerLineUntrimmed = commentHeaderLine || spaceHeaderLine || '';\r\n            \r\n            if (typeof headerLineUntrimmed !== 'string' || typeof rawContent !== 'string') {\r\n                logger.debug('Header line or raw content is not a string, skipping');\r\n                continue;\r\n            }\r\n\r\n            const headerLine = headerLineUntrimmed.trim();\r\n            const content = rawContent.trim();\r\n\r\n            // Handle rename operation as a special case\r\n            if (headerLine === 'rename-file') {\r\n                logger.debug(`Found rename-file operation`);\r\n                matchedBlocks.push(fullMatch);\r\n                try {\r\n                    const renameData = JSON.parse(content);\r\n                    const RenameFileContentSchema = z.object({ from: z.string().min(1), to: z.string().min(1) });\r\n                    const renameOp = RenameFileContentSchema.parse(renameData);\r\n                    operations.push({ type: 'rename', from: renameOp.from, to: renameOp.to });\r\n                } catch (e) {\r\n                    logger.debug(`Invalid rename operation content, skipping: ${e instanceof Error ? e.message : String(e)}`);\r\n                }\r\n                continue;\r\n            }\r\n\r\n\r\n            if (headerLine === '') {\r\n                logger.debug('Empty header line, skipping');\r\n                continue;\r\n            }\r\n\r\n            logger.debug(`Header line: ${headerLine}`);\r\n            matchedBlocks.push(fullMatch);\r\n            \r\n            let filePath = '';\r\n            let strategyProvided = false;\r\n            let patchStrategy: PatchStrategy = 'replace'; // Default\r\n            \r\n            const quotedMatch = headerLine.match(/^\"(.+?)\"(?:\\s+(.*))?$/);\r\n            if (quotedMatch) {\r\n                filePath = quotedMatch[1]!;\r\n                const strategyStr = (quotedMatch[2] || '').trim();\r\n                if (strategyStr) {\r\n                    const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);\r\n                    if (!parsedStrategy.success) {\r\n                        logger.debug('Invalid patch strategy for quoted path, skipping');\r\n                        continue;\r\n                    }\r\n                    patchStrategy = parsedStrategy.data;\r\n                    strategyProvided = true;\r\n                }\r\n            } else {\r\n                const parts = headerLine.split(/\\s+/);\r\n                if (parts.length > 1) {\r\n                    const potentialStrategy = parts[parts.length - 1]; // peek\r\n                    const parsedStrategy = PatchStrategySchema.safeParse(potentialStrategy);\r\n                    if (!parsedStrategy.success) {\r\n                        filePath = parts.join(' ');\r\n                    } else {\r\n                        parts.pop(); // consume\r\n                        patchStrategy = parsedStrategy.data;\r\n                        strategyProvided = true;\r\n                        filePath = parts.join(' ');\r\n                    }\r\n                } else {\r\n                    filePath = headerLine;\r\n                }\r\n            }\r\n\r\n            if (!strategyProvided) {\r\n                // Check for multi-search-replace format with a more precise pattern\r\n                // Looking for the exact pattern at the start of a line AND the ending marker\r\n                if (/^<<<<<<< SEARCH\\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) {\r\n                    patchStrategy = 'multi-search-replace';\r\n                    logger.debug('Inferred patch strategy: multi-search-replace');\r\n                } \r\n                // Check for new-unified format with more precise pattern\r\n                else if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) {\r\n                    patchStrategy = 'new-unified';\r\n                    logger.debug('Inferred patch strategy: new-unified');\r\n                }\r\n                // If neither pattern is detected, keep the default 'replace' strategy\r\n                else {\r\n                    logger.debug('No specific patch format detected, using default replace strategy');\r\n                }\r\n            }\r\n\r\n            logger.debug(`File path: ${filePath}`);\r\n            logger.debug(`Patch strategy: ${patchStrategy}`);\r\n            \r\n            if (!filePath) {\r\n                logger.debug('Empty file path, skipping');\r\n                continue;\r\n            }\r\n\r\n            if (content === DELETE_FILE_MARKER) {\r\n                logger.debug(`Adding delete operation for: ${filePath}`);\r\n                operations.push({ type: 'delete', path: filePath });\r\n            } else {\r\n                const cleanContent = extractCodeBetweenMarkers(content);\r\n                logger.debug(`Adding write operation for: ${filePath}`);\r\n                operations.push({ \r\n                    type: 'write', \r\n                    path: filePath, \r\n                    content: cleanContent, \r\n                    patchStrategy \r\n                });\r\n            }\r\n        }\r\n        \r\n        logger.debug(`Found ${blockCount} code blocks, ${operations.length} operations`);\r\n        \r\n        let reasoningText = textWithoutYaml;\r\n        for (const block of matchedBlocks) {\r\n            reasoningText = reasoningText.replace(block, '');\r\n        }\r\n        const reasoning = reasoningText.split('\\n').map(line => line.trim()).filter(Boolean);\r\n\r\n        if (operations.length === 0) {\r\n            logger.debug('No operations found, returning null');\r\n            return null;\r\n        }\r\n\r\n        try {\r\n            const parsedResponse = ParsedLLMResponseSchema.parse({\r\n                control,\r\n                operations,\r\n                reasoning,\r\n            });\r\n            logger.debug('Successfully parsed LLM response');\r\n            return parsedResponse;\r\n        } catch (e) {\r\n            logger.debug(`Error parsing final response schema: ${e}`);\r\n            return null;\r\n        }\r\n    } catch (e) {\r\n        if (e instanceof z.ZodError) {\r\n            logger.debug(`ZodError: ${JSON.stringify(e.errors)}`);\r\n        } else {\r\n            logger.debug(`Unexpected error: ${e}`);\r\n        }\r\n        return null;\r\n    }\r\n};"
+  src/core/state.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { StateFile, StateFileSchema } from '../types';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+
+    import { fileExists, safeRename } from './executor';
+
+
+    const stateDirectoryCache = new Map<string, boolean>();
+
+
+    const getStateDirectory = (cwd: string) => path.resolve(cwd,
+    STATE_DIRECTORY_NAME);
+
+
+    export const getStateFilePath = (cwd: string, uuid: string, isPending:
+    boolean): string => {
+      const fileName = isPending ? `${uuid}.pending.yml` : `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd), fileName);
+    };
+
+
+    export const getUndoneStateFilePath = (cwd: string, uuid: string): string =>
+    {
+      const fileName = `${uuid}.yml`;
+      return path.join(getStateDirectory(cwd),'undone', fileName);
+    };
+
+
+    // Helper to get all committed transaction file names.
+
+    const getCommittedTransactionFiles = async (cwd: string): Promise<{
+    stateDir: string; files: string[] } | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null;
+        }
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith('.yml') && !f.endsWith('.pending.yml'));
+        return { stateDir, files: transactionFiles };
+    };
+
+
+    // Ensure state directory exists with caching for performance
+
+    const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      const dirPath = getStateDirectory(cwd);
+      if (!stateDirectoryCache.has(dirPath)) {
+        await fs.mkdir(dirPath, { recursive: true });
+        stateDirectoryCache.set(dirPath, true);
+      }
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      const undonePath = getUndoneStateFilePath(cwd, uuid);
+      // Check if a transaction has been committed or undone.
+      // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+      // because we don't check for `.pending.yml` files.
+      return (await fileExists(committedPath)) || (await fileExists(undonePath));
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const validatedState = StateFileSchema.parse(state);
+      const yamlString = yaml.dump(validatedState);
+      const filePath = getStateFilePath(cwd, state.uuid, true);
+      
+      // Ensure directory exists (cached)
+      await ensureStateDirectory(cwd);
+      
+      // Write file
+      await fs.writeFile(filePath, yamlString, 'utf-8');
+    };
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      await safeRename(pendingPath, committedPath);
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      try {
+        await fs.unlink(pendingPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // Already gone, that's fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      try {
+        const fileContent = await fs.readFile(committedPath, 'utf-8');
+        const yamlContent = yaml.load(fileContent);
+        const parsed = StateFileSchema.safeParse(yamlContent);
+        if (parsed.success) {
+          return parsed.data;
+        }
+        logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);
+        return null;
+      } catch (error) {
+        // Can be file not found or YAML parsing error.
+        // In any case, we can't get the state file.
+        return null;
+      }
+    };
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd()):
+    Promise<StateFile[] | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo) {
+            return null;
+        }
+        const { files: transactionFiles } = transactionFileInfo;
+        
+        const promises = transactionFiles.map(async (file) => {
+            const stateFile = await readStateFile(cwd, file.replace('.yml', ''));
+            if (!stateFile) {
+                logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+            }
+            return stateFile;
+        });
+
+        const results = await Promise.all(promises);
+        const validResults = results.filter((sf): sf is StateFile => !!sf);
+
+        // Sort transactions by date, most recent first
+        validResults.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return validResults;
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd()):
+    Promise<StateFile | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo || transactionFileInfo.files.length === 0) {
+            return null;
+        }
+        const { stateDir, files: transactionFiles } = transactionFileInfo;
+        
+        // Read creation date from each file without parsing the whole thing.
+        // This is much faster than reading and parsing the full YAML for every file.
+        const filesWithDates = await Promise.all(
+            transactionFiles.map(async (file) => {
+                const filePath = path.join(stateDir, file);
+                let createdAt: Date | null = null;
+                try {
+                    // Read only the first 512 bytes to find `createdAt`. This is an optimization.
+                    const fileHandle = await fs.open(filePath, 'r');
+                    const buffer = Buffer.alloc(512);
+                    await fileHandle.read(buffer, 0, 512, 0);
+                    await fileHandle.close();
+                    const content = buffer.toString('utf-8');
+                    // Extract date from a line like 'createdAt: 2023-01-01T00:00:00.000Z'
+                    const match = content.match(/^createdAt:\s*['"]?(.+?)['"]?$/m);
+                    if (match && match[1]) {
+                        createdAt = new Date(match[1]);
+                    }
+                } catch (error) {
+                    if (!isEnoentError(error)) {
+                      logger.debug(`Could not read partial date from ${file}: ${getErrorMessage(error)}`);
+                    }
+                }
+                return { file, createdAt };
+            })
+        );
+
+        const validFiles = filesWithDates.filter(f => f.createdAt instanceof Date) as { file: string; createdAt: Date }[];
+
+        if (validFiles.length === 0) {
+            // Fallback for safety, though it should be rare.
+            const transactions = await readAllStateFiles(cwd);
+            return transactions?.[0] ?? null;
+        }
+
+        validFiles.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+        const latestFile = validFiles[0];
+        if (!latestFile) {
+            return null;
+        }
+
+        // Now read the full content of only the latest file
+        return readStateFile(cwd, latestFile.file.replace('.yml', ''));
+    };
+approved: false

@@ -1,0 +1,351 @@
+uuid: a6f95f03-605d-4f11-9258-00d92419c8f0
+projectId: relaycode
+createdAt: '2025-07-09T03:28:51.116Z'
+linesAdded: 35
+linesRemoved: 51
+gitCommitMsg: 'refactor(core): centralize path management logic to config'
+promptSummary: >-
+  Refactor the codebase to be radically DRY without regressions, aiming for
+  significant code reduction.
+reasoning:
+  - >-
+    This refactoring aims to make the codebase radically DRY by centralizing
+    path management logic, which is currently fragmented across
+    `src/core/state.ts` and `src/core/config.ts`. By consolidating these
+    functions, we reduce code duplication, improve maintainability, and create a
+    single source of truth for directory and file paths related to the
+    application's state.
+  - 'Here is the step-by-step reasoning for the changes:'
+  - '1.  **Centralize Path Helpers in `src/core/config.ts`**:'
+  - >-
+    -   I identified that functions for constructing state-related paths
+    (`.relaycode/transactions/`, `.relaycode/transactions/undone/`, etc.) were
+    defined in `src/core/state.ts`.
+  - >-
+    -   Similar logic for ensuring the state directory exists was present in
+    both `src/core/config.ts` (for `init`) and `src/core/state.ts` (for writing
+    state files).
+  - >-
+    -   To adhere to the DRY principle, I'm moving all path generation logic
+    into `src/core/config.ts`. This includes `getStateDirectory`,
+    `getTransactionsDirectory`, `getUndoneDirectory`, `getStateFilePath`, and
+    `getUndoneStateFilePath`.
+  - >-
+    -   The `ensureStateDirExists` function is enhanced to create the entire
+    necessary directory structure (including the `undone` sub-directory) and
+    incorporates the caching mechanism from `state.ts` for better performance.
+    This creates a single, robust function for directory setup.
+  - '2.  **Refactor `src/core/state.ts`**:'
+  - >-
+    -   With path logic centralized in `config.ts`, I'm removing the redundant
+    helper functions and cache from `state.ts`.
+  - >-
+    -   The file now imports these helpers from `config.ts`, significantly
+    reducing its size and complexity. For instance, `ensureStateDirectory` is
+    replaced by a call to the new `ensureStateDirExists`. This makes the code
+    cleaner and easier to understand.
+  - '3.  **Update `src/index.ts` Exports**:'
+  - >-
+    -   Since `getStateFilePath` and `getUndoneStateFilePath` are moved from
+    `state.ts` to `config.ts`, the main `index.ts` file must be updated to
+    export them from their new location. This ensures the public API of the
+    library remains unchanged for consumers.
+  - >-
+    This approach significantly improves the structure and reduces redundancy
+    without altering functionality, directly addressing the "radically DRY"
+    requirement.
+operations:
+  - type: write
+    path: src/core/config.ts
+    content: >-
+      --- src/core/config.ts
+
+      +++ src/core/config.ts
+
+      @@ -1,8 +1,8 @@
+       import { z } from 'zod';
+       import path from 'path';
+       import { promises as fs } from 'fs';
+      -import { Config, ConfigSchema, RelayCodeConfigInput } from '../types';
+
+      -import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME,
+      TRANSACTIONS_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON } from
+      '../utils/constants';
+
+      +import { Config, ConfigSchema } from '../types';
+
+      +import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME,
+      TRANSACTIONS_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON,
+      PENDING_STATE_FILE_SUFFIX, COMMITTED_STATE_FILE_SUFFIX } from
+      '../utils/constants';
+       import { logger, isEnoentError } from '../utils/logger';
+       import chalk from 'chalk';
+       
+      @@ -51,28 +51,40 @@
+         return config;
+       };
+       
+      -export const createConfig = async (projectId: string, cwd: string =
+      process.cwd()): Promise<Config> => {
+
+      -  
+
+      -  const defaultConfig = ConfigSchema.parse({ projectId });
+
+      +const stateDirectoryCache = new Map<string, boolean>();
+       
+      +export const getStateDirectory = (cwd: string) => path.resolve(cwd,
+      STATE_DIRECTORY_NAME);
+
+      +export const getTransactionsDirectory = (cwd: string) =>
+      path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME);
+
+      +export const getUndoneDirectory = (cwd: string) =>
+      path.join(getTransactionsDirectory(cwd), UNDONE_DIRECTORY_NAME);
+
+      +
+
+      +export const getStateFilePath = (cwd: string, uuid: string, isPending:
+      boolean): string => {
+
+      +  const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` :
+      `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+
+      +  return path.join(getTransactionsDirectory(cwd), fileName);
+
+      +};
+
+      +
+
+      +export const getUndoneStateFilePath = (cwd: string, uuid: string): string
+      => {
+
+      +  const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+
+      +  return path.join(getUndoneDirectory(cwd), fileName);
+
+      +};
+
+      +
+
+      +export const ensureStateDirExists = async (cwd: string = process.cwd()):
+      Promise<void> => {
+
+      +  const undoneDirPath = getUndoneDirectory(cwd);
+
+      +  if (!stateDirectoryCache.has(undoneDirPath)) {
+
+      +    await fs.mkdir(undoneDirPath, { recursive: true });
+
+      +    stateDirectoryCache.set(undoneDirPath, true);
+
+      +  }
+
+      +};
+
+      +
+
+      +export const createConfig = async (projectId: string, cwd: string =
+      process.cwd()): Promise<Config> => {  
+
+      +  const defaultConfig = ConfigSchema.parse({ projectId });
+         const configContent = {
+           $schema: "https://relay-code.dev/schema.json",
+           ...defaultConfig
+         };
+      -
+         const configPath = path.join(cwd, CONFIG_FILE_NAME_JSON);
+         await fs.writeFile(configPath, JSON.stringify(configContent, null, 2));
+       
+         return configContent;
+       };
+       
+      -export const ensureStateDirExists = async (cwd: string = process.cwd()):
+      Promise<void> => {
+
+      -  const stateDirPath = path.join(cwd, STATE_DIRECTORY_NAME);
+
+      -  await fs.mkdir(stateDirPath, { recursive: true });
+
+      -  
+
+      -  // Also create the transactions subdirectory
+
+      -  const transactionsDirPath = path.join(stateDirPath,
+      TRANSACTIONS_DIRECTORY_NAME);
+
+      -  await fs.mkdir(transactionsDirPath, { recursive: true });
+
+      -};
+
+      -
+       export const getProjectId = async (cwd: string = process.cwd()): Promise<string> => {
+         try {
+           const pkgJsonPath = path.join(cwd, 'package.json');
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      --- src/core/state.ts
+
+      +++ src/core/state.ts
+
+      @@ -1,20 +1,14 @@
+       import { promises as fs } from 'fs';
+       import path from 'path';
+       import yaml from 'js-yaml';
+       import { StateFile, StateFileSchema } from '../types';
+      -import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX,
+      STATE_DIRECTORY_NAME, TRANSACTIONS_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME }
+      from '../utils/constants';
+
+      +import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX } from
+      '../utils/constants';
+       import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+       import { fileExists, safeRename } from '../utils/fs';
+      +import { ensureStateDirExists, getStateFilePath,
+      getTransactionsDirectory, getUndoneStateFilePath } from './config';
+       
+      -const stateDirectoryCache = new Map<string, boolean>();
+
+      -
+
+      -const getStateDirectory = (cwd: string) => path.resolve(cwd,
+      STATE_DIRECTORY_NAME);
+
+      -
+       export const isRevertTransaction = (state: StateFile): boolean => {
+           return state.reasoning.some(r => r.startsWith('Reverting transaction'));
+       }
+      @@ -32,20 +26,6 @@
+           return null;
+       }
+       
+      -export const getStateFilePath = (cwd: string, uuid: string, isPending:
+      boolean): string => {
+
+      -  const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` :
+      `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+
+      -  return path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME,
+      fileName);
+
+      -};
+
+      -
+
+      -export const getUndoneStateFilePath = (cwd: string, uuid: string): string
+      => {
+
+      -  const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+
+      -  return path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME,
+      UNDONE_DIRECTORY_NAME, fileName);
+
+      -};
+
+      -
+       const getUuidFromFileName = (fileName: string): string => {
+         return fileName.replace(COMMITTED_STATE_FILE_SUFFIX, '');
+       };
+      @@ -56,7 +36,7 @@
+       
+       // Helper to get all committed transaction file names.
+       const getCommittedTransactionFiles = async (cwd: string): Promise<{ stateDir: string; files: string[] } | null> => {
+      -    const transactionsDir = path.join(getStateDirectory(cwd),
+      TRANSACTIONS_DIRECTORY_NAME);
+
+      +    const transactionsDir = getTransactionsDirectory(cwd);
+           try {
+               await fs.access(transactionsDir);
+           } catch (e) {
+      @@ -71,27 +51,16 @@
+           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+       };
+       
+      -// Ensure state directory exists with caching for performance
+
+      -const ensureStateDirectory = async (cwd: string): Promise<void> => {
+
+      -  const dirPath = path.join(getStateDirectory(cwd),
+      TRANSACTIONS_DIRECTORY_NAME);
+
+      -  if (!stateDirectoryCache.has(dirPath)) {
+
+      -    await fs.mkdir(dirPath, { recursive: true });
+
+      -    stateDirectoryCache.set(dirPath, true);
+
+      -  }
+
+      -};
+
+      -
+       export const hasBeenProcessed = async (cwd: string, uuid: string): Promise<boolean> => {
+         const committedPath = getStateFilePath(cwd, uuid, false);
+         const undonePath = getUndoneStateFilePath(cwd, uuid);
+         // Check if a transaction has been committed or undone.
+         // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+         // because we don't check for `.pending.yml` files.
+         return (await fileExists(committedPath)) || (await fileExists(undonePath));
+       };
+       
+       export const writePendingState = async (cwd: string, state: StateFile): Promise<void> => {
+         const validatedState = StateFileSchema.parse(state);
+         const yamlString = yaml.dump(validatedState);
+         const filePath = getStateFilePath(cwd, state.uuid, true);
+      -  
+
+      -  // Ensure directory exists (cached)
+
+      -  await ensureStateDirectory(cwd);
+
+      -  
+
+      -  // Write file
+
+      +  await ensureStateDirExists(cwd);
+         await fs.writeFile(filePath, yamlString, 'utf-8');
+       };
+    patchStrategy: new-unified
+  - type: write
+    path: src/index.ts
+    content: >-
+      --- src/index.ts
+
+      +++ src/index.ts
+
+      @@ -1,17 +1,17 @@
+       // Core logic
+       export { createClipboardWatcher } from './core/clipboard';
+      -export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+      loadConfigOrExit, findConfigPath } from './core/config';
+
+      +export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+      loadConfigOrExit, findConfigPath, getStateFilePath, getUndoneStateFilePath
+      } from './core/config';
+       export { applyOperations, createSnapshot, restoreSnapshot } from './core/executor';
+       export { parseLLMResponse } from './core/parser';
+       export {
+           commitState,
+           deletePendingState,
+           hasBeenProcessed,
+           findLatestStateFile,
+           findStateFileByIdentifier,
+           readStateFile,
+           readAllStateFiles,
+      -    writePendingState,
+
+      -    getStateFilePath,
+
+      -    getUndoneStateFilePath
+
+      +    writePendingState
+       } from './core/state';
+       export { processPatch } from './core/transaction';
+    patchStrategy: new-unified
+snapshot:
+  src/core/config.ts: "import { z } from 'zod';\r\nimport path from 'path';\r\nimport { promises as fs } from 'fs';\r\nimport { Config, ConfigSchema, RelayCodeConfigInput } from '../types';\r\nimport { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, TRANSACTIONS_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON } from '../utils/constants';\r\nimport { logger, isEnoentError } from '../utils/logger';\r\nimport chalk from 'chalk';\r\n\r\nexport const findConfigPath = async (cwd: string = process.cwd()): Promise<string | null> => {\r\n  for (const fileName of CONFIG_FILE_NAMES) {\r\n    const configPath = path.join(cwd, fileName);\r\n    try {\r\n      await fs.access(configPath);\r\n      return configPath;\r\n    } catch (error) {\r\n      if (!isEnoentError(error)) {\r\n        // ignore other errors for now to keep searching\r\n      }\r\n    }\r\n  }\r\n  return null;\r\n};\r\n\r\nexport const findConfig = async (cwd: string = process.cwd()): Promise<Config | null> => {\r\n  const configPath = await findConfigPath(cwd);\r\n  if (!configPath) {\r\n    return null;\r\n  }\r\n  try {\r\n    const fileContent = await fs.readFile(configPath, 'utf-8');\r\n    const configJson = JSON.parse(fileContent);\r\n    return ConfigSchema.parse(configJson);\r\n  } catch (error) {\r\n    if (isEnoentError(error)) {\r\n      return null;\r\n    }\r\n    if (error instanceof z.ZodError) {\r\n      throw new Error(`Invalid configuration in ${path.basename(configPath)}: ${error.message}`);\r\n    }\r\n    throw error;\r\n  }\r\n};\r\n\r\nexport const loadConfigOrExit = async (cwd: string = process.cwd()): Promise<Config> => {\r\n  const config = await findConfig(cwd);\r\n  if (!config) {\r\n    logger.error(`Configuration file ('${chalk.cyan(CONFIG_FILE_NAME_JSON)}') not found.`);\r\n    logger.info(`Please run ${chalk.magenta(\"'relay init'\")} to create one.`);\r\n    process.exit(1);\r\n  }\r\n  return config;\r\n};\r\n\r\nexport const createConfig = async (projectId: string, cwd: string = process.cwd()): Promise<Config> => {\r\n  \r\n  const defaultConfig = ConfigSchema.parse({ projectId });\r\n\r\n  const configContent = {\r\n    $schema: \"https://relay-code.dev/schema.json\",\r\n    ...defaultConfig\r\n  };\r\n\r\n  const configPath = path.join(cwd, CONFIG_FILE_NAME_JSON);\r\n  await fs.writeFile(configPath, JSON.stringify(configContent, null, 2));\r\n\r\n  return configContent;\r\n};\r\n\r\nexport const ensureStateDirExists = async (cwd: string = process.cwd()): Promise<void> => {\r\n  const stateDirPath = path.join(cwd, STATE_DIRECTORY_NAME);\r\n  await fs.mkdir(stateDirPath, { recursive: true });\r\n  \r\n  // Also create the transactions subdirectory\r\n  const transactionsDirPath = path.join(stateDirPath, TRANSACTIONS_DIRECTORY_NAME);\r\n  await fs.mkdir(transactionsDirPath, { recursive: true });\r\n};\r\n\r\nexport const getProjectId = async (cwd: string = process.cwd()): Promise<string> => {\r\n  try {\r\n    const pkgJsonPath = path.join(cwd, 'package.json');\r\n    const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');\r\n    const pkgJson = JSON.parse(fileContent);\r\n    if (pkgJson.name && typeof pkgJson.name === 'string') {\r\n      return pkgJson.name;\r\n    }\r\n  } catch (e) {\r\n    // Ignore if package.json doesn't exist or is invalid\r\n  }\r\n  return path.basename(cwd);\r\n};\r\n"
+  src/core/state.ts: "import { promises as fs } from 'fs';\r\nimport path from 'path';\r\nimport yaml from 'js-yaml';\r\nimport { StateFile, StateFileSchema } from '../types';\r\nimport { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX, STATE_DIRECTORY_NAME, TRANSACTIONS_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME } from '../utils/constants';\r\nimport { logger, isEnoentError, getErrorMessage } from '../utils/logger';\r\nimport { fileExists, safeRename } from '../utils/fs';\r\n\r\nconst stateDirectoryCache = new Map<string, boolean>();\r\n\r\nconst getStateDirectory = (cwd: string) => path.resolve(cwd, STATE_DIRECTORY_NAME);\r\n\r\nexport const isRevertTransaction = (state: StateFile): boolean => {\r\n    return state.reasoning.some(r => r.startsWith('Reverting transaction'));\r\n}\r\n\r\nexport const getRevertedTransactionUuid = (state: StateFile): string | null => {\r\n    if (!isRevertTransaction(state)) {\r\n        return null;\r\n    }\r\n    for (const r of state.reasoning) {\r\n        const match = r.match(/^Reverting transaction ([\\w-]+)\\./);\r\n        if (match && match[1]) {\r\n            return match[1];\r\n        }\r\n    }\r\n    return null;\r\n}\r\n\r\nexport const getStateFilePath = (cwd: string, uuid: string, isPending: boolean): string => {\r\n  const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` : `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;\r\n  return path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME, fileName);\r\n};\r\n\r\nexport const getUndoneStateFilePath = (cwd: string, uuid: string): string => {\r\n  const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;\r\n  return path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME, fileName);\r\n};\r\n\r\nconst getUuidFromFileName = (fileName: string): string => {\r\n  return fileName.replace(COMMITTED_STATE_FILE_SUFFIX, '');\r\n};\r\n\r\nconst isUUID = (str: string): boolean => {\r\n  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);\r\n};\r\n\r\n// Helper to get all committed transaction file names.\r\nconst getCommittedTransactionFiles = async (cwd: string): Promise<{ stateDir: string; files: string[] } | null> => {\r\n    const transactionsDir = path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME);\r\n    try {\r\n        await fs.access(transactionsDir);\r\n    } catch (e) {\r\n        return null;\r\n    }\r\n    const files = await fs.readdir(transactionsDir);\r\n    const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));\r\n    return { stateDir: transactionsDir, files: transactionFiles };\r\n};\r\n\r\nconst sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt: string | Date }) => {\r\n    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();\r\n};\r\n\r\n// Ensure state directory exists with caching for performance\r\nconst ensureStateDirectory = async (cwd: string): Promise<void> => {\r\n  const dirPath = path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME);\r\n  if (!stateDirectoryCache.has(dirPath)) {\r\n    await fs.mkdir(dirPath, { recursive: true });\r\n    stateDirectoryCache.set(dirPath, true);\r\n  }\r\n};\r\n\r\nexport const hasBeenProcessed = async (cwd: string, uuid: string): Promise<boolean> => {\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  const undonePath = getUndoneStateFilePath(cwd, uuid);\r\n  // Check if a transaction has been committed or undone.\r\n  // This allows re-processing a transaction that failed and left an orphaned .pending.yml\r\n  // because we don't check for `.pending.yml` files.\r\n  return (await fileExists(committedPath)) || (await fileExists(undonePath));\r\n};\r\n\r\nexport const writePendingState = async (cwd: string, state: StateFile): Promise<void> => {\r\n  const validatedState = StateFileSchema.parse(state);\r\n  const yamlString = yaml.dump(validatedState);\r\n  const filePath = getStateFilePath(cwd, state.uuid, true);\r\n  \r\n  // Ensure directory exists (cached)\r\n  await ensureStateDirectory(cwd);\r\n  \r\n  // Write file\r\n  await fs.writeFile(filePath, yamlString, 'utf-8');\r\n};\r\n\r\nexport const commitState = async (cwd: string, uuid: string): Promise<void> => {\r\n  const pendingPath = getStateFilePath(cwd, uuid, true);\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  await safeRename(pendingPath, committedPath);\r\n};\r\n\r\nexport const deletePendingState = async (cwd: string, uuid: string): Promise<void> => {\r\n  const pendingPath = getStateFilePath(cwd, uuid, true);\r\n  try {\r\n    await fs.unlink(pendingPath);\r\n  } catch (error) {\r\n    if (isEnoentError(error)) {\r\n      // Already gone, that's fine.\r\n      return;\r\n    }\r\n    throw error;\r\n  }\r\n};\r\n\r\nexport const readStateFile = async (cwd: string, uuid: string): Promise<StateFile | null> => {\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  try {\r\n    const fileContent = await fs.readFile(committedPath, 'utf-8');\r\n    const yamlContent = yaml.load(fileContent);\r\n    const parsed = StateFileSchema.safeParse(yamlContent);\r\n    if (parsed.success) {\r\n      return parsed.data;\r\n    }\r\n    logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);\r\n    return null;\r\n  } catch (error) {\r\n    // Can be file not found or YAML parsing error.\r\n    // In any case, we can't get the state file.\r\n    return null;\r\n  }\r\n};\r\n\r\ninterface ReadStateFilesOptions {\r\n    skipReverts?: boolean;\r\n}\r\n\r\nexport const readAllStateFiles = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile[] | null> => {\r\n    const transactionFileInfo = await getCommittedTransactionFiles(cwd);\r\n    if (!transactionFileInfo) {\r\n        return null;\r\n    }\r\n    const { files: transactionFiles } = transactionFileInfo;\r\n    \r\n    const promises = transactionFiles.map(async (file) => {\r\n        const stateFile = await readStateFile(cwd, getUuidFromFileName(file));\r\n        if (!stateFile) {\r\n            logger.warn(`Could not read or parse state file ${file}. Skipping.`);\r\n        }\r\n        return stateFile;\r\n    });\r\n\r\n    const results = await Promise.all(promises);\r\n    let validResults = results.filter((sf): sf is StateFile => !!sf);\r\n\r\n    if (options.skipReverts) {\r\n        const revertedUuids = new Set<string>();\r\n        validResults.forEach(sf => {\r\n            const revertedUuid = getRevertedTransactionUuid(sf);\r\n            if (revertedUuid) {\r\n                revertedUuids.add(revertedUuid);\r\n            }\r\n        });\r\n\r\n        validResults = validResults.filter(sf => \r\n            !isRevertTransaction(sf) && !revertedUuids.has(sf.uuid)\r\n        );\r\n    }\r\n\r\n    // Sort transactions by date, most recent first\r\n    validResults.sort(sortByDateDesc);\r\n\r\n    return validResults;\r\n}\r\n\r\nexport const findLatestStateFile = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {\r\n    // This is a case where using readAllStateFiles is simpler and the performance\r\n    // difference is negligible for finding just the latest.\r\n    // The optimization in the original `findLatestStateFile` is complex and this simplifies logic.\r\n    const allFiles = await readAllStateFiles(cwd, options);\r\n    return allFiles?.[0] ?? null;\r\n};\r\n\r\nexport const findStateFileByIdentifier = async (cwd: string, identifier: string, options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {\r\n    if (isUUID(identifier)) {\r\n        // When fetching by UUID, we always return it, regardless of whether it's a revert or not.\r\n        // The user is being explicit.\r\n        return readStateFile(cwd, identifier);\r\n    }\r\n    \r\n    if (/^-?\\d+$/.test(identifier)) {\r\n        const index = Math.abs(parseInt(identifier, 10));\r\n        if (isNaN(index) || index <= 0) {\r\n            return null;\r\n        }\r\n\r\n        const transactions = await readAllStateFiles(cwd, options);\r\n        if (transactions && transactions.length >= index) {\r\n            return transactions[index - 1] ?? null;\r\n        }\r\n        return null;\r\n    }\r\n\r\n    return null;\r\n};"
+  src/index.ts: "// Core logic\r\nexport { createClipboardWatcher } from './core/clipboard';\r\nexport { findConfig, createConfig, getProjectId, ensureStateDirExists, loadConfigOrExit, findConfigPath } from './core/config';\r\nexport { applyOperations, createSnapshot, restoreSnapshot } from './core/executor';\r\nexport { parseLLMResponse } from './core/parser';\r\nexport {\r\n    commitState,\r\n    deletePendingState,\r\n    hasBeenProcessed,\r\n    findLatestStateFile,\r\n    findStateFileByIdentifier,\r\n    readStateFile,\r\n    readAllStateFiles,\r\n    writePendingState,\r\n    getStateFilePath,\r\n    getUndoneStateFilePath\r\n} from './core/state';\r\nexport { processPatch } from './core/transaction';\r\n\r\n// Commands\r\nexport { initCommand } from './commands/init';\r\nexport { watchCommand } from './commands/watch';\r\nexport { logCommand } from './commands/log';\r\nexport { revertCommand } from './commands/revert';\r\nexport { applyCommand } from './commands/apply';\r\nexport { gitCommitCommand } from './commands/git-commit';\r\n\r\n// Types\r\nexport * from './types';\r\n\r\n// Utils\r\nexport { executeShellCommand, getErrorCount } from './utils/shell';\r\nexport { getTypeScriptErrorCount } from './utils/typescript';\r\nexport {\r\n    deleteFile,\r\n    readFileContent,\r\n    writeFileContent,\r\n    fileExists,\r\n    renameFile,\r\n    safeRename,\r\n} from './utils/fs';\r\nexport { logger, getErrorMessage, isEnoentError } from './utils/logger';\r\nexport { getConfirmation } from './utils/prompt';\r\nexport { formatTransactionDetails } from './utils/formatters';\r\nexport {\r\n    createNotifier,\r\n    notifyPatchDetected,\r\n    notifyApprovalRequired,\r\n    requestApprovalWithNotification,\r\n    notifySuccess,\r\n    notifyFailure,\r\n    notifyRollbackFailure,\r\n} from './utils/notifier';\r\nexport { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';"
+approved: true

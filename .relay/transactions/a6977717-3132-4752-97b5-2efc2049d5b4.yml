@@ -1,0 +1,382 @@
+uuid: a6977717-3132-4752-97b5-2efc2049d5b4
+projectId: relaycode
+createdAt: '2025-09-03T11:08:18.302Z'
+linesAdded: 20
+linesRemoved: 14
+gitCommitMsg: 'fix(tests): update e2e tests for new db persistence layer'
+promptSummary: >-
+  Fix failing e2e tests in `apply.test.ts` due to changes in the state
+  persistence layer.
+reasoning:
+  - >-
+    ok, got a couple failing e2e tests. looks like the state persistence layer
+    changed from yaml files to a json-based db, and the tests weren't updated.
+    classic. also, the db instantiation is a singleton, which is a no-go for
+    tests running in parallel with different contexts. easy fixes.
+  - >-
+    first, I'll patch the db module to handle multiple instances based on the
+    current working directory. this prevents tests from stomping on each other's
+    db connections.
+  - >-
+    next, I'll update the `apply.test.ts` file. it was looking for `.yml` files
+    in a `transactions` directory, which is the old way. i'll change it to use
+    the `readStateFile` helper which correctly queries the new db structure.
+    this makes the tests more robust since they're not tied to the specific file
+    layout of the persistence layer.
+  - '---'
+operations:
+  - type: write
+    path: src/core/db.ts
+    content: >-
+      --- src/core/db.ts
+
+      +++ src/core/db.ts
+
+      @@ -42,19 +42,21 @@
+         };
+       }
+       
+      -let dbInstance: OnDemandDbContext<RelaySchema> | undefined;
+
+      +const dbInstances = new Map<string, OnDemandDbContext<RelaySchema>>();
+       
+       export function getDb(cwd: string): OnDemandDbContext<RelaySchema> {
+      -  if (dbInstance) {
+
+      -    return dbInstance;
+
+      +  const resolvedCwd = path.resolve(cwd);
+
+      +  const existingInstance = dbInstances.get(resolvedCwd);
+
+      +  if (existingInstance) {
+
+      +    return existingInstance;
+         }
+       
+      -  const dbDir = path.join(getStateDirectory(cwd), 'db');
+
+      +  const dbDir = path.join(getStateDirectory(resolvedCwd), 'db');
+       
+         const adapter = konro.createFileAdapter({
+           format: 'json',
+           perRecord: { dir: dbDir },
+           mode: 'on-demand',
+         });
+       
+         const db = konro.createDatabase({ schema: relaySchema, adapter });
+      -  dbInstance = db as OnDemandDbContext<RelaySchema>; // cast because
+      createDatabase returns a generic DbContext
+
+      -  return dbInstance;
+
+      +  const newInstance = db as OnDemandDbContext<RelaySchema>;
+
+      +  dbInstances.set(resolvedCwd, newInstance);
+
+      +  return newInstance;
+       }
+    patchStrategy: new-unified
+  - type: write
+    path: test/e2e/apply.test.ts
+    content: >-
+      --- test/e2e/apply.test.ts
+
+      +++ test/e2e/apply.test.ts
+
+      @@ -10,6 +10,7 @@
+       import { applyCommand } from '../../src/commands/apply';
+       import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+       import { logger } from '../../src/utils/logger';
+      +import { readStateFile } from '../../src/core/state';
+       
+       describe('e2e/apply', () => {
+           let context: E2ETestContext;
+      @@ -23,7 +24,7 @@
+       
+               // We need an initialized project for apply to work
+               await createTestConfig(context.testDir.path);
+      -        await fs.mkdir(path.join(context.testDir.path,
+      STATE_DIRECTORY_NAME, 'transactions'), { recursive: true });
+
+      +        await fs.mkdir(path.join(context.testDir.path,
+      STATE_DIRECTORY_NAME), { recursive: true });
+               
+               // Clear logs from setup
+               logs.length = 0;
+      @@ -51,9 +52,9 @@
+               const modifiedContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+               expect(modifiedContent).toBe(newContent);
+       
+      -        const stateFilePath = path.join(context.testDir.path,
+      STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`);
+
+      -        const stateFileExists = await fs.access(stateFilePath).then(() =>
+      true).catch(() => false);
+
+      -        expect(stateFileExists).toBe(true);
+
+      +        const stateFile = await readStateFile(context.testDir.path,
+      uuid);
+
+      +        expect(stateFile).not.toBeNull();
+
+      +        expect(stateFile?.uuid).toBe(uuid);
+           });
+       
+           it('should apply a complex patch with new, edit, and delete operations', async () => {
+      @@ -87,9 +88,9 @@
+               expect(deletedFileExists).toBe(false);
+       
+               // Verify state file
+      -        const stateFilePath = path.join(context.testDir.path,
+      STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`);
+
+      -        const stateFileExists = await fs.access(stateFilePath).then(() =>
+      true).catch(() => false);
+
+      -        expect(stateFileExists).toBe(true);
+
+      +        const stateFile = await readStateFile(context.testDir.path,
+      uuid);
+
+      +        expect(stateFile).not.toBeNull();
+
+      +        expect(stateFile?.uuid).toBe(uuid);
+           });
+       
+           it('should do nothing and log an error if the patch file does not exist', async () => {
+      @@ -104,7 +105,9 @@
+               const patchFilePath = path.join(context.testDir.path, 'invalid.txt');
+               await fs.writeFile(patchFilePath, 'this is not a valid patch');
+       
+      -        const stateDir = path.join(context.testDir.path,
+      STATE_DIRECTORY_NAME, 'transactions');
+
+      +        // The db might not exist yet if no valid transaction was
+      processed.
+
+      +        const stateDir = path.join(context.testDir.path,
+      STATE_DIRECTORY_NAME, 'db', 'transactions');
+
+      +        await fs.mkdir(stateDir, { recursive: true });
+               const filesBefore = await fs.readdir(stateDir);
+       
+               await applyCommand(patchFilePath, {}, context.testDir.path);
+    patchStrategy: new-unified
+snapshot:
+  src/core/db.ts: >-
+    import { konro } from 'konro';
+
+    import type { FileOperation, FileSnapshot, StateFile } from
+    'relaycode-core';
+
+    import path from 'path';
+
+    import { getStateDirectory } from './config';
+
+    import type { OnDemandDbContext } from 'konro';
+
+
+    export const relaySchema = konro.createSchema({
+      tables: {
+        transactions: {
+          id: konro.id(),
+          uuid: konro.string({ unique: true }),
+          projectId: konro.string(),
+          createdAt: konro.string(), // store as ISO string
+          linesAdded: konro.number({ optional: true }),
+          linesRemoved: konro.number({ optional: true }),
+          gitCommitMsg: konro.string({ optional: true }),
+          promptSummary: konro.string({ optional: true }),
+          reasoning: konro.object<string[]>(),
+          operations: konro.object<FileOperation[]>(),
+          snapshot: konro.object<FileSnapshot>(),
+          approved: konro.boolean(),
+          status: konro.string(), // 'pending', 'committed', 'undone'
+        },
+      },
+      relations: () => ({}),
+    });
+
+
+    export type RelaySchema = typeof relaySchema;
+
+    // This is the type inferred by konro for a base record.
+
+    export type TransactionRecord = RelaySchema['base']['transactions'];
+
+
+    // We need to convert between TransactionRecord and StateFile because
+    StateFile is a Zod-validated type
+
+    // and TransactionRecord is konro's inferred type. They should be
+    structurally identical.
+
+    // This function also handles type casting for complex object types.
+
+    export function toStateFile(record: TransactionRecord): StateFile {
+      return record as unknown as StateFile;
+    }
+
+
+    export function fromStateFile(stateFile: StateFile): Omit<TransactionRecord,
+    'id' | 'status'> {
+      return {
+        ...stateFile,
+        linesAdded: stateFile.linesAdded ?? null,
+        linesRemoved: stateFile.linesRemoved ?? null,
+        gitCommitMsg: stateFile.gitCommitMsg ?? null,
+        promptSummary: stateFile.promptSummary ?? null,
+      };
+    }
+
+
+    let dbInstance: OnDemandDbContext<RelaySchema> | undefined;
+
+
+    export function getDb(cwd: string): OnDemandDbContext<RelaySchema> {
+      if (dbInstance) {
+        return dbInstance;
+      }
+
+      const dbDir = path.join(getStateDirectory(cwd), 'db');
+
+      const adapter = konro.createFileAdapter({
+        format: 'json',
+        perRecord: { dir: dbDir },
+        mode: 'on-demand',
+      });
+
+      const db = konro.createDatabase({ schema: relaySchema, adapter });
+      dbInstance = db as OnDemandDbContext<RelaySchema>; // cast because createDatabase returns a generic DbContext
+      return dbInstance;
+    }
+  test/e2e/apply.test.ts: |-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+    import { promises as fs } from 'fs';
+    import path from 'path';
+    import {
+        setupE2ETest,
+        E2ETestContext,
+        createTestFile,
+        createLLMResponseString,
+        createTestConfig,
+    } from '../test.util';
+    import { applyCommand } from '../../src/commands/apply';
+    import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+    import { logger } from '../../src/utils/logger';
+
+    describe('e2e/apply', () => {
+        let context: E2ETestContext;
+        let logs: string[];
+
+        beforeEach(async () => {
+            context = await setupE2ETest();
+            logs = [];
+            // Override the logger mock from setupE2ETest to capture logs for verification
+            (logger as any).error = (msg: string) => { logs.push(msg); };
+            (logger as any).info = (msg: string) => { logs.push(msg); };
+
+            // We need an initialized project for apply to work
+            await createTestConfig(context.testDir.path);
+            await fs.mkdir(path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions'), { recursive: true });
+            
+            // Clear logs from setup
+            logs.length = 0;
+        });
+
+        afterEach(async () => {
+            if (context) await context.cleanup();
+        });
+
+        it('should apply a simple patch to modify a file', async () => {
+            const testFile = 'src/index.ts';
+            const originalContent = 'console.log("hello");';
+            const newContent = 'console.log("hello world");';
+            await createTestFile(context.testDir.path, testFile, originalContent);
+
+            const { response, uuid } = createLLMResponseString([
+                { type: 'edit', path: testFile, content: newContent }
+            ]);
+
+            const patchFilePath = path.join(context.testDir.path, 'patch.txt');
+            await fs.writeFile(patchFilePath, response);
+
+            await applyCommand(patchFilePath, {}, context.testDir.path);
+
+            const modifiedContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(modifiedContent).toBe(newContent);
+
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(true);
+        });
+
+        it('should apply a complex patch with new, edit, and delete operations', async () => {
+            // Setup existing files
+            const fileToEdit = 'src/app.js';
+            const fileToDelete = 'src/utils.js';
+            await createTestFile(context.testDir.path, fileToEdit, 'v1');
+            await createTestFile(context.testDir.path, fileToDelete, 'old stuff');
+
+            // Define new file
+            const newFile = 'src/components/button.js';
+            const newFileContent = 'export default Button';
+            const editedFileContent = 'v2';
+
+            const { response, uuid } = createLLMResponseString([
+                { type: 'edit', path: fileToEdit, content: editedFileContent },
+                { type: 'new', path: newFile, content: newFileContent },
+                { type: 'delete', path: fileToDelete },
+            ]);
+
+            const patchFilePath = path.join(context.testDir.path, 'patch.txt');
+            await fs.writeFile(patchFilePath, response);
+
+            await applyCommand(patchFilePath, {}, context.testDir.path);
+
+            // Verify changes
+            const editedContent = await fs.readFile(path.join(context.testDir.path, fileToEdit), 'utf-8');
+            expect(editedContent).toBe(editedFileContent);
+
+            const newContent = await fs.readFile(path.join(context.testDir.path, newFile), 'utf-8');
+            expect(newContent).toBe(newFileContent);
+
+            const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(deletedFileExists).toBe(false);
+
+            // Verify state file
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(true);
+        });
+
+        it('should do nothing and log an error if the patch file does not exist', async () => {
+            const nonExistentPatchFile = path.join(context.testDir.path, 'no-such-file.txt');
+            
+            await applyCommand(nonExistentPatchFile, {}, context.testDir.path);
+
+            const errorLog = logs.find(log => log.includes('Failed to read patch file'));
+            expect(errorLog).toBeDefined();
+            expect(errorLog).toContain('Aborting');
+        });
+
+        it('should do nothing and log an error if the patch file has invalid content', async () => {
+            const patchFilePath = path.join(context.testDir.path, 'invalid.txt');
+            await fs.writeFile(patchFilePath, 'this is not a valid patch');
+
+            const stateDir = path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions');
+            const filesBefore = await fs.readdir(stateDir);
+
+            await applyCommand(patchFilePath, {}, context.testDir.path);
+            
+            const infoLog = logs.find(log => log.includes('not a valid relaycode patch. Aborting.'));
+            expect(infoLog).toBeDefined();
+
+            // No new state files should be created
+            const filesAfter = await fs.readdir(stateDir);
+            expect(filesAfter.length).toBe(filesBefore.length);
+        });
+    });
+approved: true

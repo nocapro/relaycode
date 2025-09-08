@@ -1,0 +1,632 @@
+uuid: a1d3a6d9-b5ab-40a2-9d3b-6927d667fd0b
+projectId: relaycode
+createdAt: '2025-07-10T13:41:05.606Z'
+gitCommitMsg: 'refactor(state): replace file-based state with konro db'
+promptSummary: >-
+  The user wants to replace the current file-based state management in relaycode
+  with a database abstraction layer called 'konro'. This involves adding a new
+  dependency, creating a database schema and configuration file, and refactoring
+  the entire state management logic to use the new database API.
+reasoning:
+  - >-
+    This request involves a major refactoring of `relaycode`'s state management
+    to replace the custom YAML file-based system with a new database abstraction
+    layer called `konro`. Here is my step-by-step plan to achieve this:
+  - >-
+    1.  **Add `konro` Dependency**: I'll start by adding the fictional `konro`
+    library to `package.json`. Since it's not a real public package, I'll use a
+    placeholder version, assuming your system can resolve it.
+  - >-
+    2.  **Create Konro Database Abstraction**: I will introduce a new file,
+    `src/core/db.ts`, to encapsulate all `konro` setup and schema definitions.
+  - >-
+    *   It will define a `transactions` table schema that mirrors the existing
+    `StateFile` type.
+  - >-
+    *   It will include a `status` column (`pending`, `committed`, `undone`) to
+    manage transaction states, replacing the old file-based approach (e.g.,
+    `.pending.yml` files).
+  - >-
+    *   It will configure a `perRecord` file adapter, storing each transaction
+    as a separate JSON file within the `.relay/db/` directory. This is for
+    persistence and is analogous to the old system.
+  - >-
+    *   It will provide a singleton `getDb()` function to access the `konro`
+    database instance.
+  - >-
+    3.  **Refactor State Management**: I will completely rewrite
+    `src/core/state.ts` to use the new `konro` database via `src/core/db.ts`.
+  - >-
+    *   Functions like `writePendingState`, `commitState`, and
+    `deletePendingState` will now perform `insert` and `update` operations on
+    the `transactions` table.
+  - >-
+    *   `deletePendingState` will be updated to mark a transaction as `'undone'`
+    instead of deleting it, which preserves a history of failed or rolled-back
+    attempts.
+  - >-
+    *   All functions for reading state (`readStateFile`, `readAllStateFiles`,
+    `findLatestStateFile`, etc.) will be reimplemented to query the database.
+    The `skipReverts` logic will be preserved.
+  - >-
+    4.  **Clean Up Old Code**: I will remove now-obsolete code related to the
+    old file system logic.
+  - >-
+    *   Constants for transaction directories and file suffixes will be removed
+    from `src/utils/constants.ts`.
+  - >-
+    *   Path helper functions for the old state files will be removed from
+    `src/core/config.ts`, and `ensureStateDirExists` will be simplified.
+  - >-
+    *   Exports for these removed functions will be cleaned up from
+    `src/index.ts`.
+  - >-
+    By following these steps, I will replace the manual file handling with a
+    more robust, database-centric approach using the `konro` API, while ensuring
+    all existing commands (`log`, `revert`, `git-commit`, etc.) continue to
+    function as expected.
+  - First, I'll add the `konro` dependency to `package.json`.
+  - >-
+    Next, I'll remove the constants related to the old file-based state
+    management system.
+  - Now I'll create the new database abstraction layer for `konro`.
+  - >-
+    With the database layer in place, I will rewrite `src/core/state.ts` to use
+    it.
+  - >-
+    I'll now update `src/core/config.ts` to remove the old path helpers and
+    simplify directory creation.
+  - >-
+    Finally, I will update the main `src/index.ts` to remove exports of the
+    deleted config helpers.
+operations:
+  - type: write
+    path: package.json
+    content: |-
+      --- package.json
+      +++ package.json
+      @@ -24,6 +24,7 @@
+           "clipboardy": "^4.0.0",
+           "commander": "^12.1.0",
+           "diff-apply": "^1.0.6",
+           "esbuild": "0.25.6",
+           "js-yaml": "^4.1.0",
+      +    "konro": "^0.1.0",
+           "toasted-notifier": "^10.1.0",
+           "typescript": "^5.8.3",
+           "uuid": "^11.1.0",
+    patchStrategy: new-unified
+  - type: write
+    path: src/utils/constants.ts
+    content: |-
+      --- src/utils/constants.ts
+      +++ src/utils/constants.ts
+      @@ -2,12 +2,8 @@
+       export const COMMAND_NAME = 'relay';
+       
+       export const CONFIG_FILE_NAME_JSON = 'relay.config.json';
+       export const CONFIG_FILE_NAMES = [CONFIG_FILE_NAME_JSON];
+       export const STATE_DIRECTORY_NAME = '.relay';
+       export const GITIGNORE_FILE_NAME = '.gitignore';
+      -export const TRANSACTIONS_DIRECTORY_NAME = 'transactions';
+      -export const UNDONE_DIRECTORY_NAME = 'undone';
+       export const FALLBACKS_DIR = 'fallbacks';
+       export const WINDOWS_DIR = 'windows';
+       
+       export const WINDOWS_CLIPBOARD_EXE_NAME = 'clipboard_x86_64.exe';
+      -export const PENDING_STATE_FILE_SUFFIX = '.pending.yml';
+      -export const COMMITTED_STATE_FILE_SUFFIX = '.yml';
+       
+       export const GITIGNORE_COMMENT = '# relay state';
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/db.ts
+    content: >-
+      import { konro } from 'konro';
+
+      import type { FileOperation, FileSnapshot, StateFile } from '../types';
+
+      import path from 'path';
+
+      import { getStateDirectory } from './config';
+
+      import type { OnDemandDbContext } from 'konro';
+
+
+      export const relaySchema = konro.createSchema({
+        tables: {
+          transactions: {
+            id: konro.id(),
+            uuid: konro.string({ unique: true }),
+            projectId: konro.string(),
+            createdAt: konro.string(), // store as ISO string
+            linesAdded: konro.number({ optional: true }),
+            linesRemoved: konro.number({ optional: true }),
+            gitCommitMsg: konro.string({ optional: true }),
+            promptSummary: konro.string({ optional: true }),
+            reasoning: konro.object<string[]>(),
+            operations: konro.object<FileOperation[]>(),
+            snapshot: konro.object<FileSnapshot>(),
+            approved: konro.boolean(),
+            status: konro.string(), // 'pending', 'committed', 'undone'
+          },
+        },
+        relations: () => ({}),
+      });
+
+
+      export type RelaySchema = typeof relaySchema;
+
+      // This is the type inferred by konro for a base record.
+
+      export type TransactionRecord = RelaySchema['base']['transactions'];
+
+
+      // We need to convert between TransactionRecord and StateFile because
+      StateFile is a Zod-validated type
+
+      // and TransactionRecord is konro's inferred type. They should be
+      structurally identical.
+
+      // This function also handles type casting for complex object types.
+
+      export function toStateFile(record: TransactionRecord): StateFile {
+        return record as unknown as StateFile;
+      }
+
+
+      export function fromStateFile(stateFile: StateFile):
+      Omit<TransactionRecord, 'id' | 'status'> {
+        const { ...rest } = stateFile;
+        // status will be added separately
+        return rest;
+      }
+
+
+      let dbInstance: OnDemandDbContext<RelaySchema> | undefined;
+
+
+      export function getDb(cwd: string): OnDemandDbContext<RelaySchema> {
+        if (dbInstance) {
+          return dbInstance;
+        }
+
+        const dbDir = path.join(getStateDirectory(cwd), 'db');
+
+        const adapter = konro.createFileAdapter({
+          format: 'json',
+          perRecord: { dir: dbDir },
+          mode: 'on-demand',
+        });
+
+        const db = konro.createDatabase({ schema: relaySchema, adapter });
+        dbInstance = db as OnDemandDbContext<RelaySchema>; // cast because createDatabase returns a generic DbContext
+        return dbInstance;
+      }
+    patchStrategy: replace
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      import { StateFile } from '../types';
+
+      import { logger } from '../utils/logger';
+
+      import { getDb, toStateFile, fromStateFile } from './db';
+
+
+      export const isRevertTransaction = (state: StateFile): boolean => {
+          return state.reasoning.some(r => r.startsWith('Reverting transaction'));
+      }
+
+
+      export const getRevertedTransactionUuid = (state: StateFile): string |
+      null => {
+          for (const r of state.reasoning) {
+              const match = r.match(/^Reverting transaction ([\w-]+)\./);
+              if (match && match[1]) {
+                  return match[1];
+              }
+          }
+          return null;
+      }
+
+
+      const isUUID = (str: string): boolean => {
+        return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+      };
+
+
+      const sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt:
+      string | Date }) => {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      };
+
+
+      export const hasBeenProcessed = async (cwd: string, uuid: string):
+      Promise<boolean> => {
+        const db = getDb(cwd);
+        const record = await db.query().from('transactions').where({ uuid }).first();
+        // A transaction has been processed if it exists and is either committed or undone.
+        // A pending transaction has not been fully processed.
+        return !!record && (record.status === 'committed' || record.status === 'undone');
+      };
+
+
+      export const writePendingState = async (cwd: string, state: StateFile):
+      Promise<void> => {
+        const db = getDb(cwd);
+        const data = {
+          ...fromStateFile(state),
+          status: 'pending',
+        };
+        await db.insert('transactions', data as any);
+      };
+
+
+      export const commitState = async (cwd: string, uuid: string):
+      Promise<void> => {
+        const db = getDb(cwd);
+        // Also update status from 'pending' to 'committed'
+        const updated = await db.update('transactions').set({ status: 'committed' }).where({ uuid, status: 'pending' });
+        if (updated.length === 0) {
+            logger.warn(`Could not find pending transaction with uuid ${uuid} to commit.`);
+        }
+      };
+
+
+      export const deletePendingState = async (cwd: string, uuid: string):
+      Promise<void> => {
+        const db = getDb(cwd);
+        // In case of rollback, we mark it as 'undone' instead of deleting.
+        const updated = await db.update('transactions').set({ status: 'undone' }).where({ uuid, status: 'pending' });
+        if (updated.length === 0) {
+          logger.debug(`Could not find pending transaction with uuid ${uuid} to mark as undone. It might have been committed or already undone.`);
+        }
+      };
+
+
+      export const readStateFile = async (cwd: string, uuid: string):
+      Promise<StateFile | null> => {
+        const db = getDb(cwd);
+        const record = await db.query().from('transactions').where({ uuid, status: 'committed' }).first();
+        return record ? toStateFile(record) : null;
+      };
+
+
+      interface ReadStateFilesOptions {
+          skipReverts?: boolean;
+      }
+
+
+      export const readAllStateFiles = async (cwd: string = process.cwd(),
+      options: ReadStateFilesOptions = {}): Promise<StateFile[] | null> => {
+          const db = getDb(cwd);
+          let records = await db.query().from('transactions').where({ status: 'committed' }).all();
+          
+          if (!records) return []; // konro might return null
+          
+          let validResults = records.map(toStateFile);
+
+          if (options.skipReverts) {
+              const revertedUuids = new Set<string>();
+              validResults.forEach(sf => {
+                  if (isRevertTransaction(sf)) {
+                      const revertedUuid = getRevertedTransactionUuid(sf);
+                      if (revertedUuid) {
+                          revertedUuids.add(revertedUuid);
+                      }
+                  }
+              });
+
+              validResults = validResults.filter(sf => 
+                  !isRevertTransaction(sf) && !revertedUuids.has(sf.uuid)
+              );
+          }
+
+          // Sort transactions by date, most recent first
+          validResults.sort(sortByDateDesc);
+
+          return validResults;
+      }
+
+
+      export const findLatestStateFile = async (cwd: string = process.cwd(),
+      options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {
+          const allFiles = await readAllStateFiles(cwd, options);
+          return allFiles?.[0] ?? null;
+      };
+
+
+      export const findStateFileByIdentifier = async (cwd: string, identifier:
+      string, options: ReadStateFilesOptions = {}): Promise<StateFile | null> =>
+      {
+          if (isUUID(identifier)) {
+              // When fetching by UUID, we always return it if committed, regardless of whether it's a revert or not.
+              const db = getDb(cwd);
+              const record = await db.query().from('transactions').where({ uuid: identifier, status: 'committed' }).first();
+              return record ? toStateFile(record) : null;
+          }
+          
+          if (/^-?\d+$/.test(identifier)) {
+              const index = Math.abs(parseInt(identifier, 10));
+              if (isNaN(index) || index <= 0) {
+                  return null;
+              }
+
+              const transactions = await readAllStateFiles(cwd, options);
+              if (transactions && transactions.length >= index) {
+                  return transactions[index - 1] ?? null;
+              }
+              return null;
+          }
+
+          return null;
+      };
+    patchStrategy: replace
+  - type: write
+    path: src/core/config.ts
+    content: >-
+      --- src/core/config.ts
+
+      +++ src/core/config.ts
+
+      @@ -1,7 +1,7 @@
+       import { z } from 'zod';
+       import path from 'path';
+       import { promises as fs } from 'fs';
+       import { Config, ConfigSchema } from '../types';
+      -import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME,
+      TRANSACTIONS_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON,
+      PENDING_STATE_FILE_SUFFIX, COMMITTED_STATE_FILE_SUFFIX } from
+      '../utils/constants';
+
+      +import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON }
+      from '../utils/constants';
+       import { logger, isEnoentError } from '../utils/logger';
+       import chalk from 'chalk';
+       
+      @@ -39,25 +39,12 @@
+       
+       const stateDirectoryCache = new Map<string, boolean>();
+       
+       export const getStateDirectory = (cwd: string) => path.resolve(cwd, STATE_DIRECTORY_NAME);
+      -export const getTransactionsDirectory = (cwd: string) =>
+      path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME);
+
+      -export const getUndoneDirectory = (cwd: string) =>
+      path.join(getTransactionsDirectory(cwd), UNDONE_DIRECTORY_NAME);
+
+      -
+
+      -export const getStateFilePath = (cwd: string, uuid: string, isPending:
+      boolean): string => {
+
+      -  const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` :
+      `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+
+      -  return path.join(getTransactionsDirectory(cwd), fileName);
+
+      -};
+
+      -
+
+      -export const getUndoneStateFilePath = (cwd: string, uuid: string): string
+      => {
+
+      -  const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+
+      -  return path.join(getUndoneDirectory(cwd), fileName);
+
+      -};
+       
+       export const ensureStateDirExists = async (cwd: string = process.cwd()): Promise<void> => {
+      -  const undoneDirPath = getUndoneDirectory(cwd);
+
+      -  if (!stateDirectoryCache.has(undoneDirPath)) {
+
+      -    await fs.mkdir(undoneDirPath, { recursive: true });
+
+      -    stateDirectoryCache.set(undoneDirPath, true);
+
+      +  const stateDirPath = getStateDirectory(cwd);
+
+      +  if (!stateDirectoryCache.has(stateDirPath)) {
+
+      +    await fs.mkdir(stateDirPath, { recursive: true });
+
+      +    stateDirectoryCache.set(stateDirPath, true);
+         }
+       };
+    patchStrategy: new-unified
+  - type: write
+    path: src/index.ts
+    content: >-
+      --- src/index.ts
+
+      +++ src/index.ts
+
+      @@ -1,6 +1,6 @@
+       // Core logic
+       export { createClipboardWatcher } from './core/clipboard';
+      -export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+      loadConfigOrExit, findConfigPath, getStateFilePath, getUndoneStateFilePath
+      } from './core/config';
+
+      +export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+      loadConfigOrExit, findConfigPath } from './core/config';
+       export { parseLLMResponse } from './core/parser';
+       export {
+           commitState,
+    patchStrategy: new-unified
+snapshot:
+  src/core/db.ts: null
+  package.json: |
+    {
+      "name": "relaycode",
+      "version": "1.0.38",
+      "description": "A developer assistant that automates applying code changes from LLMs.",
+      "type": "module",
+      "main": "./dist/index.js",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "bin": {
+        "relay": "./dist/cli.js"
+      },
+      "files": [
+        "dist",
+        "fallbacks"
+      ],
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+      },
+      "scripts": {
+        "clean": "rm -rf dist",
+        "build": "bun run clean && bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target node",
+        "test": "bun test",
+        "dev": "bun run src/cli.ts",
+        "prepublishOnly": "bun run build",
+        "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+        "commit": "bun run src/cli.ts git commit -y && git push"
+      },
+      "dependencies": {
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "diff-apply": "^1.0.6",
+        "esbuild": "0.25.6",
+        "js-yaml": "^4.1.0",
+        "toasted-notifier": "^10.1.0",
+        "typescript": "^5.8.3",
+        "uuid": "^11.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/uuid": "^10.0.0"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "automation",
+        "codegen",
+        "developer-tool",
+        "cli"
+      ],
+      "author": "Relay Code",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/relaycoder/relaycode.git"
+      },
+      "homepage": "https://relay.code"
+    }
+  src/utils/constants.ts: |-
+    export const APP_NAME = 'Relaycode';
+    export const COMMAND_NAME = 'relay';
+
+    export const CONFIG_FILE_NAME_JSON = 'relay.config.json';
+    export const CONFIG_FILE_NAMES = [CONFIG_FILE_NAME_JSON];
+    export const STATE_DIRECTORY_NAME = '.relay';
+    export const GITIGNORE_FILE_NAME = '.gitignore';
+    export const TRANSACTIONS_DIRECTORY_NAME = 'transactions';
+    export const UNDONE_DIRECTORY_NAME = 'undone';
+    export const FALLBACKS_DIR = 'fallbacks';
+    export const WINDOWS_DIR = 'windows';
+
+    export const WINDOWS_CLIPBOARD_EXE_NAME = 'clipboard_x86_64.exe';
+    export const PENDING_STATE_FILE_SUFFIX = '.pending.yml';
+    export const COMMITTED_STATE_FILE_SUFFIX = '.yml';
+
+    export const GITIGNORE_COMMENT = '# relay state';
+
+    export const CODE_BLOCK_START_MARKER = '// START';
+    export const CODE_BLOCK_END_MARKER = '// END';
+    export const DELETE_FILE_MARKER = '//TODO: delete this file';
+    export const RENAME_FILE_OPERATION = 'rename-file';
+  src/core/state.ts: "import { promises as fs } from 'fs';\r\nimport yaml from 'js-yaml';\r\nimport { StateFile, StateFileSchema } from '../types';\r\nimport { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX } from '../utils/constants';\r\nimport { logger, isEnoentError } from '../utils/logger';\r\nimport { fileExists, safeRename } from '../utils/fs';\r\n\rimport { ensureStateDirExists, getStateFilePath, getTransactionsDirectory, getUndoneStateFilePath } from './config';\r\n\r\nexport const isRevertTransaction = (state: StateFile): boolean => {\r\n    return state.reasoning.some(r => r.startsWith('Reverting transaction'));\r\n}\r\n\r\nexport const getRevertedTransactionUuid = (state: StateFile): string | null => {\r\n    for (const r of state.reasoning) {\r\n        const match = r.match(/^Reverting transaction ([\\w-]+)\\./);\r\n        if (match && match[1]) {\r\n            return match[1];\r\n        }\r\n    }\r\n    return null;\r\n}\r\n\r\nconst getUuidFromFileName = (fileName: string): string => {\r\n  return fileName.replace(COMMITTED_STATE_FILE_SUFFIX, '');\r\n};\r\n\r\nconst isUUID = (str: string): boolean => {\r\n  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);\r\n};\r\n\r\n// Helper to get all committed transaction file names.\r\nconst getCommittedTransactionFiles = async (cwd: string): Promise<{ stateDir: string; files: string[] } | null> => {\r\n    const transactionsDir = getTransactionsDirectory(cwd);\r\n    try {\r\n        await fs.access(transactionsDir);\r\n    } catch (e) {\r\n        return null;\r\n    }\r\n    const files = await fs.readdir(transactionsDir);\r\n    const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));\r\n    return { stateDir: transactionsDir, files: transactionFiles };\r\n};\r\n\r\nconst sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt: string | Date }) => {\r\n    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();\r\n};\r\n\r\nexport const hasBeenProcessed = async (cwd: string, uuid: string): Promise<boolean> => {\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  const undonePath = getUndoneStateFilePath(cwd, uuid);\r\n  // Check if a transaction has been committed or undone.\r\n  // This allows re-processing a transaction that failed and left an orphaned .pending.yml\r\n  // because we don't check for `.pending.yml` files.\r\n  return (await fileExists(committedPath)) || (await fileExists(undonePath));\r\n};\r\n\r\nexport const writePendingState = async (cwd: string, state: StateFile): Promise<void> => {\r\n  const validatedState = StateFileSchema.parse(state);\r\n  const yamlString = yaml.dump(validatedState);\r\n  const filePath = getStateFilePath(cwd, state.uuid, true);\r\n  \rawait ensureStateDirExists(cwd);\n  await fs.writeFile(filePath, yamlString, 'utf-8');\r\n};\r\n\r\nexport const commitState = async (cwd: string, uuid: string): Promise<void> => {\r\n  const pendingPath = getStateFilePath(cwd, uuid, true);\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  await safeRename(pendingPath, committedPath);\r\n};\r\n\r\nexport const deletePendingState = async (cwd: string, uuid: string): Promise<void> => {\r\n  const pendingPath = getStateFilePath(cwd, uuid, true);\r\n  try {\r\n    await fs.unlink(pendingPath);\r\n  } catch (error) {\r\n    if (isEnoentError(error)) {\r\n      // Already gone, that's fine.\r\n      return;\r\n    }\r\n    throw error;\r\n  }\r\n};\r\n\r\nexport const readStateFile = async (cwd: string, uuid: string): Promise<StateFile | null> => {\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  try {\r\n    const fileContent = await fs.readFile(committedPath, 'utf-8');\r\n    const yamlContent = yaml.load(fileContent);\r\n    const parsed = StateFileSchema.safeParse(yamlContent);\r\n    if (parsed.success) {\r\n      return parsed.data;\r\n    }\r\n    logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);\r\n    return null;\r\n  } catch (error) {\r\n    // Can be file not found or YAML parsing error.\r\n    // In any case, we can't get the state file.\r\n    return null;\r\n  }\r\n};\r\n\r\ninterface ReadStateFilesOptions {\r\n    skipReverts?: boolean;\r\n}\r\n\r\nexport const readAllStateFiles = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile[] | null> => {\r\n    const transactionFileInfo = await getCommittedTransactionFiles(cwd);\r\n    if (!transactionFileInfo) {\r\n        return null;\r\n    }\r\n    const { files: transactionFiles } = transactionFileInfo;\r\n    \r\n    const promises = transactionFiles.map(async (file) => {\r\n        const stateFile = await readStateFile(cwd, getUuidFromFileName(file));\r\n        if (!stateFile) {\r\n            logger.warn(`Could not read or parse state file ${file}. Skipping.`);\r\n        }\r\n        return stateFile;\r\n    });\r\n\r\n    const results = await Promise.all(promises);\r\n    let validResults = results.filter((sf): sf is StateFile => !!sf);\r\n\r\n    if (options.skipReverts) {\r\n        const revertedUuids = new Set<string>();\r\n        validResults.forEach(sf => {\r\n            const revertedUuid = getRevertedTransactionUuid(sf);\r\n            if (revertedUuid) {\r\n                revertedUuids.add(revertedUuid);\r\n            }\r\n        });\r\n\r\n        validResults = validResults.filter(sf => \r\n            !isRevertTransaction(sf) && !revertedUuids.has(sf.uuid)\r\n        );\r\n    }\r\n\r\n    // Sort transactions by date, most recent first\r\n    validResults.sort(sortByDateDesc);\r\n\r\n    return validResults;\r\n}\r\n\r\nexport const findLatestStateFile = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {\r\n    // This is a case where using readAllStateFiles is simpler and the performance\r\n    // difference is negligible for finding just the latest.\r\n    // The optimization in the original `findLatestStateFile` is complex and this simplifies logic.\r\n    const allFiles = await readAllStateFiles(cwd, options);\r\n    return allFiles?.[0] ?? null;\r\n};\r\n\r\nexport const findStateFileByIdentifier = async (cwd: string, identifier: string, options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {\r\n    if (isUUID(identifier)) {\r\n        // When fetching by UUID, we always return it, regardless of whether it's a revert or not.\r\n        // The user is being explicit.\r\n        return readStateFile(cwd, identifier);\r\n    }\r\n    \r\n    if (/^-?\\d+$/.test(identifier)) {\r\n        const index = Math.abs(parseInt(identifier, 10));\r\n        if (isNaN(index) || index <= 0) {\r\n            return null;\r\n        }\r\n\r\n        const transactions = await readAllStateFiles(cwd, options);\r\n        if (transactions && transactions.length >= index) {\r\n            return transactions[index - 1] ?? null;\r\n        }\r\n        return null;\r\n    }\r\n\r\n    return null;\r\n};"
+  src/core/config.ts: "import { z } from 'zod';\r\nimport path from 'path';\r\nimport { promises as fs } from 'fs';\r\nimport { Config, ConfigSchema } from '../types';\r\nimport { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, TRANSACTIONS_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON, PENDING_STATE_FILE_SUFFIX, COMMITTED_STATE_FILE_SUFFIX } from '../utils/constants';\r\nimport { logger, isEnoentError } from '../utils/logger';\r\nimport chalk from 'chalk';\r\n\r\nexport const findConfigPath = async (cwd: string = process.cwd()): Promise<string | null> => {\r\n  for (const fileName of CONFIG_FILE_NAMES) {\r\n    const configPath = path.join(cwd, fileName);\r\n    try {\r\n      await fs.access(configPath);\r\n      return configPath;\r\n    } catch (error) {\r\n      if (!isEnoentError(error)) {\r\n        // ignore other errors for now to keep searching\r\n      }\r\n    }\r\n  }\r\n  return null;\r\n};\r\n\r\nexport const findConfig = async (cwd: string = process.cwd()): Promise<Config | null> => {\r\n  const configPath = await findConfigPath(cwd);\r\n  if (!configPath) {\r\n    return null;\r\n  }\r\n  try {\r\n    const fileContent = await fs.readFile(configPath, 'utf-8');\r\n    const configJson = JSON.parse(fileContent);\r\n    return ConfigSchema.parse(configJson);\r\n  } catch (error) {\r\n    if (isEnoentError(error)) {\r\n      return null;\r\n    }\r\n    if (error instanceof z.ZodError) {\r\n      throw new Error(`Invalid configuration in ${path.basename(configPath)}: ${error.message}`);\r\n    }\r\n    throw error;\r\n  }\r\n};\r\n\r\nexport const loadConfigOrExit = async (cwd: string = process.cwd()): Promise<Config> => {\r\n  const config = await findConfig(cwd);\r\n  if (!config) {\r\n    logger.error(`Configuration file ('${chalk.cyan(CONFIG_FILE_NAME_JSON)}') not found.`);\r\n    logger.info(`Please run ${chalk.magenta(\"'relay init'\")} to create one.`);\r\n    process.exit(1);\r\n  }\r\n  return config;\r\n};\r\n\r\nconst stateDirectoryCache = new Map<string, boolean>();\n\nexport const getStateDirectory = (cwd: string) => path.resolve(cwd, STATE_DIRECTORY_NAME);\nexport const getTransactionsDirectory = (cwd: string) => path.join(getStateDirectory(cwd), TRANSACTIONS_DIRECTORY_NAME);\nexport const getUndoneDirectory = (cwd: string) => path.join(getTransactionsDirectory(cwd), UNDONE_DIRECTORY_NAME);\n\nexport const getStateFilePath = (cwd: string, uuid: string, isPending: boolean): string => {\n  const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` : `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;\n  return path.join(getTransactionsDirectory(cwd), fileName);\n};\n\nexport const getUndoneStateFilePath = (cwd: string, uuid: string): string => {\n  const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;\n  return path.join(getUndoneDirectory(cwd), fileName);\n};\n\nexport const ensureStateDirExists = async (cwd: string = process.cwd()): Promise<void> => {\n  const undoneDirPath = getUndoneDirectory(cwd);\n  if (!stateDirectoryCache.has(undoneDirPath)) {\n    await fs.mkdir(undoneDirPath, { recursive: true });\n    stateDirectoryCache.set(undoneDirPath, true);\n  }\n};\n\nexport const createConfig = async (projectId: string, cwd: string = process.cwd()): Promise<Config> => {\r  \r\n  const defaultConfig = ConfigSchema.parse({ projectId });\r\n\r  const configContent = {\r\n    $schema: \"https://relay-code.dev/schema.json\",\r\n    ...defaultConfig\r\n  };\r\n\r  const configPath = path.join(cwd, CONFIG_FILE_NAME_JSON);\r\n  await fs.writeFile(configPath, JSON.stringify(configContent, null, 2));\r\n\r\n  return configContent;\r\n};\r\n\r\nexport const getProjectId = async (cwd: string = process.cwd()): Promise<string> => {\r\n  try {\r\n    const pkgJsonPath = path.join(cwd, 'package.json');\r\n    const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');\r\n    const pkgJson = JSON.parse(fileContent);\r\n    if (pkgJson.name && typeof pkgJson.name === 'string') {\r\n      return pkgJson.name;\r\n    }\r\n  } catch (e) {\r\n    // Ignore if package.json doesn't exist or is invalid\r\n  }\r\n  return path.basename(cwd);\r\n};\r\n"
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath, getStateFilePath, getUndoneStateFilePath }
+    from './core/config';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        findStateFileByIdentifier,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState
+    } from './core/state';
+
+    export { processPatch, applyOperations, createSnapshot, restoreSnapshot }
+    from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { getTypeScriptErrorCount } from './utils/typescript';
+
+    export {
+        deleteFile,
+        readFileContent,
+        writeFileContent,
+        fileExists,
+        renameFile,
+        safeRename,
+    } from './utils/fs';
+
+    export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+
+    export { formatTransactionDetails } from './utils/formatters';
+
+    export {
+        createNotifier,
+        notifyPatchDetected,
+        notifyApprovalRequired,
+        requestApprovalWithNotification,
+        notifySuccess,
+        notifyFailure,
+        notifyRollbackFailure,
+    } from './utils/notifier';
+
+    export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+approved: true

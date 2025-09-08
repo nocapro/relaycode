@@ -1,0 +1,2661 @@
+uuid: a80efd1f-8255-4424-aa61-e73715c0a370
+projectId: relaycode
+createdAt: '2025-06-23T17:03:48.546Z'
+reasoning:
+  - >-
+    I've updated the CLI to provide a more cohesive and visually appealing user
+    experience by integrating `chalk` for colored output across various
+    commands. This will make command outputs, logs, and prompts more readable
+    and user-friendly.
+  - 'Here are the changes I''ve made:'
+  - '### `src/commands/apply.ts`'
+  - >-
+    I've added `chalk` to colorize file paths in the output, making it easier to
+    see which file is being processed.
+  - '### `src/commands/git-commit.ts`'
+  - >-
+    The git command outputs are now colorized. Commands, exit codes, and
+    confirmations are highlighted for better readability.
+  - '### `src/commands/init.ts`'
+  - >-
+    The initialization message is now more vibrant, guiding the user with
+    colored text for key elements like file names, project IDs, and example
+    commands.
+  - '### `src/commands/log.ts`'
+  - >-
+    The transaction log has been visually enhanced. UUIDs, dates, and change
+    types (`write`, `delete`, `rename`) are now colored, making the log much
+    easier to scan.
+  - '### `src/commands/revert.ts`'
+  - >-
+    The `revert` command now provides clearer, color-coded feedback, making it
+    easier to identify transaction UUIDs, indices, and file paths in log
+    messages.
+  - '### `src/commands/watch.ts`'
+  - >-
+    The system prompt displayed by `watch` is now colorized, making it much
+    easier for users to read and copy. Important sections and keywords are
+    highlighted.
+  - '### `src/core/config.ts`'
+  - >-
+    Error and informational messages in the configuration loader are now styled
+    for better visibility, such as when the config file is not found.
+  - '### `src/core/transaction.ts`'
+  - >-
+    The transaction processing logic now features a much-improved logging
+    summary. Line changes (additions/deletions), file operations, and
+    performance metrics are all color-coded for at-a-glance understanding.
+  - >-
+    These changes work together to create a more professional and user-friendly
+    command-line interface.
+operations:
+  - type: write
+    path: src/commands/apply.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import { loadConfigOrExit } from '../core/config';
+
+      import { parseLLMResponse } from '../core/parser';
+
+      import { processPatch } from '../core/transaction';
+
+      import { logger } from '../utils/logger';
+
+
+      export const applyCommand = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+
+      =======
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import { loadConfigOrExit } from '../core/config';
+
+      import { parseLLMResponse } from '../core/parser';
+
+      import { processPatch } from '../core/transaction';
+
+      import { logger } from '../utils/logger';
+
+      import chalk from 'chalk';
+
+
+      export const applyCommand = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          let content: string;
+          const absoluteFilePath = path.resolve(cwd, filePath);
+          try {
+              content = await fs.readFile(absoluteFilePath, 'utf-8');
+              logger.info(`Reading patch from file: ${absoluteFilePath}`);
+          } catch (error) {
+              logger.error(`Failed to read patch file at '${absoluteFilePath}'. Aborting.`);
+              return;
+          }
+      =======
+          let content: string;
+          const absoluteFilePath = path.resolve(cwd, filePath);
+          try {
+              content = await fs.readFile(absoluteFilePath, 'utf-8');
+              logger.info(`Reading patch from file: ${chalk.cyan(absoluteFilePath)}`);
+          } catch (error) {
+              logger.error(`Failed to read patch file at '${chalk.cyan(absoluteFilePath)}'. Aborting.`);
+              return;
+          }
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          logger.success('Valid patch format detected. Processing...');
+          await processPatch(config, parsedResponse, { cwd });
+          logger.info('--------------------------------------------------');
+      };
+
+      =======
+          logger.success('Valid patch format detected. Processing...');
+          await processPatch(config, parsedResponse, { cwd });
+          logger.info(chalk.gray('--------------------------------------------------'));
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/git-commit.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { findLatestStateFile } from '../core/state';
+
+      import { logger } from '../utils/logger';
+
+      import { executeShellCommand } from '../utils/shell';
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from './log';
+
+      =======
+
+      import { findLatestStateFile } from '../core/state';
+
+      import { logger } from '../utils/logger';
+
+      import { executeShellCommand } from '../utils/shell';
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from './log';
+
+      import chalk from 'chalk';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          formatTransactionDetails(latestTransaction).forEach(line => logger.log(line));
+
+          const confirmed = await getConfirmation(`\nDo you want to run 'git add .' and 'git commit -m "${latestTransaction.gitCommitMsg}"'? (y/N)`);
+          if (!confirmed) {
+              logger.info('Commit operation cancelled.');
+              return;
+          }
+
+          logger.info("Running 'git add .'...");
+          const addResult = await executeShellCommand('git add .', cwd);
+          if (addResult.exitCode !== 0) {
+              logger.error(`'git add .' failed with exit code ${addResult.exitCode}.`);
+              logger.error(addResult.stderr);
+              return;
+          }
+          logger.success("'git add .' completed successfully.");
+
+          const commitCmd = `git commit -m "${latestTransaction.gitCommitMsg}"`;
+          logger.info(`Running '${commitCmd}'...`);
+          const commitResult = await executeShellCommand(commitCmd, cwd);
+
+          if (commitResult.exitCode !== 0) {
+              logger.error(`'git commit' failed with exit code ${commitResult.exitCode}.`);
+              logger.error(commitResult.stderr);
+              if (commitResult.stdout) logger.log(commitResult.stdout);
+              logger.warn('You may need to resolve commit issues manually.');
+              return;
+          }
+      =======
+          formatTransactionDetails(latestTransaction).forEach(line => logger.log(line));
+
+          const confirmed = await getConfirmation(`\nDo you want to run ${chalk.magenta("'git add .'")} and ${chalk.magenta(`'git commit -m "${latestTransaction.gitCommitMsg}"'`)}? (y/N)`);
+          if (!confirmed) {
+              logger.info('Commit operation cancelled.');
+              return;
+          }
+
+          logger.info(`Running ${chalk.magenta("'git add .'")}...`);
+          const addResult = await executeShellCommand('git add .', cwd);
+          if (addResult.exitCode !== 0) {
+              logger.error(`${chalk.magenta("'git add .'")} failed with exit code ${chalk.red(addResult.exitCode)}.`);
+              logger.error(addResult.stderr);
+              return;
+          }
+          logger.success(`${chalk.magenta("'git add .'")} completed successfully.`);
+
+          const commitCmd = `git commit -m "${latestTransaction.gitCommitMsg}"`;
+          logger.info(`Running ${chalk.magenta(`'${commitCmd}'`)}...`);
+          const commitResult = await executeShellCommand(commitCmd, cwd);
+
+          if (commitResult.exitCode !== 0) {
+              logger.error(`${chalk.magenta("'git commit'")} failed with exit code ${chalk.red(commitResult.exitCode)}.`);
+              logger.error(commitResult.stderr);
+              if (commitResult.stdout) logger.log(commitResult.stdout);
+              logger.warn('You may need to resolve commit issues manually.');
+              return;
+          }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/init.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import { findConfig, createConfig, ensureStateDirExists, getProjectId }
+      from '../core/config';
+
+      import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+
+      import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME,
+      GITIGNORE_COMMENT } from '../utils/constants';
+
+
+      const getInitMessage = (projectId: string): string => `
+
+      ✅ relaycode has been initialized for this project.
+
+
+      Configuration file created: ${CONFIG_FILE_NAME}
+
+      =======
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import { findConfig, createConfig, ensureStateDirExists, getProjectId }
+      from '../core/config';
+
+      import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+
+      import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME,
+      GITIGNORE_COMMENT } from '../utils/constants';
+
+      import chalk from 'chalk';
+
+
+      const getInitMessage = (projectId: string): string => `
+
+      ${chalk.green('✅ relaycode has been initialized for this project.')}
+
+
+      Configuration file created: ${chalk.cyan(CONFIG_FILE_NAME)}
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      Project ID: ${projectId}
+
+
+      Next steps:
+
+      1. (Optional) Open ${CONFIG_FILE_NAME} to customize settings like
+      'preferredStrategy' to control how the AI generates code patches.
+         - 'auto' (default): The AI can choose the best patch strategy.
+         - 'new-unified': Forces the AI to use diffs, great for most changes.
+         - 'replace': Forces the AI to replace entire files, good for new files or small changes.
+         - 'multi-search-replace': Forces the AI to perform precise search and replace operations.
+
+      2. Run 'relay watch' in your terminal. This will start the service and
+      display the system prompt tailored to your configuration.
+
+
+      3. Copy the system prompt provided by 'relay watch' and paste it into your
+      AI assistant's "System Prompt" or "Custom Instructions".
+
+      `;
+
+
+
+      const updateGitignore = async (cwd: string): Promise<void> => {
+          const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+          const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
+
+          try {
+              let content = await fs.readFile(gitignorePath, 'utf-8');
+              if (!content.includes(STATE_DIRECTORY_NAME)) {
+                  content += entry;
+                  await fs.writeFile(gitignorePath, content);
+                  logger.info(`Updated ${GITIGNORE_FILE_NAME} to ignore ${STATE_DIRECTORY_NAME}/`);
+              }
+          } catch (error) {
+              if (isEnoentError(error)) {
+                  await fs.writeFile(gitignorePath, entry.trim());
+                  logger.info(`Created ${GITIGNORE_FILE_NAME} and added ${STATE_DIRECTORY_NAME}/`);
+              } else {
+                  logger.error(`Failed to update ${GITIGNORE_FILE_NAME}: ${getErrorMessage(error)}`);
+              }
+          }
+      };
+
+
+      export const initCommand = async (cwd: string = process.cwd()):
+      Promise<void> => {
+          logger.info('Initializing relaycode in this project...');
+
+          const config = await findConfig(cwd);
+          if (config) {
+              logger.warn(`${CONFIG_FILE_NAME} already exists. Initialization skipped.`);
+              logger.log(`
+      To use relaycode, please run 'relay watch'.
+
+      It will display a system prompt to copy into your LLM assistant.
+
+      You can review your configuration in ${CONFIG_FILE_NAME}.
+
+      `);
+              return;
+          }
+      =======
+
+      Project ID: ${chalk.cyan(projectId)}
+
+
+      ${chalk.bold('Next steps:')}
+
+      ${chalk.gray('1.')} (Optional) Open ${chalk.cyan(CONFIG_FILE_NAME)} to
+      customize settings like ${chalk.yellow("'preferredStrategy'")} to control
+      how the AI generates code patches.
+         - ${chalk.yellow("'auto'")} (default): The AI can choose the best patch strategy.
+         - ${chalk.yellow("'new-unified'")}: Forces the AI to use diffs, great for most changes.
+         - ${chalk.yellow("'replace'")}: Forces the AI to replace entire files, good for new files or small changes.
+         - ${chalk.yellow("'multi-search-replace'")}: Forces the AI to perform precise search and replace operations.
+
+      ${chalk.gray('2.')} Run ${chalk.magenta("'relay watch'")} in your
+      terminal. This will start the service and display the system prompt
+      tailored to your configuration.
+
+
+      ${chalk.gray('3.')} Copy the system prompt provided by
+      ${chalk.magenta("'relay watch'")} and paste it into your AI assistant's
+      "System Prompt" or "Custom Instructions".
+
+      `;
+
+
+
+      const updateGitignore = async (cwd: string): Promise<void> => {
+          const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+          const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
+
+          try {
+              let content = await fs.readFile(gitignorePath, 'utf-8');
+              if (!content.includes(STATE_DIRECTORY_NAME)) {
+                  content += entry;
+                  await fs.writeFile(gitignorePath, content);
+                  logger.info(`Updated ${chalk.cyan(GITIGNORE_FILE_NAME)} to ignore ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
+              }
+          } catch (error) {
+              if (isEnoentError(error)) {
+                  await fs.writeFile(gitignorePath, entry.trim());
+                  logger.info(`Created ${chalk.cyan(GITIGNORE_FILE_NAME)} and added ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
+              } else {
+                  logger.error(`Failed to update ${chalk.cyan(GITIGNORE_FILE_NAME)}: ${getErrorMessage(error)}`);
+              }
+          }
+      };
+
+
+      export const initCommand = async (cwd: string = process.cwd()):
+      Promise<void> => {
+          logger.info('Initializing relaycode in this project...');
+
+          const config = await findConfig(cwd);
+          if (config) {
+              logger.warn(`${chalk.cyan(CONFIG_FILE_NAME)} already exists. Initialization skipped.`);
+              logger.log(`
+      To use relaycode, please run ${chalk.magenta("'relay watch'")}.
+
+      It will display a system prompt to copy into your LLM assistant.
+
+      You can review your configuration in ${chalk.cyan(CONFIG_FILE_NAME)}.
+
+      `);
+              return;
+          }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/log.ts
+    content: |-
+      <<<<<<< SEARCH
+      import { logger } from '../utils/logger';
+      import { FileOperation, StateFile } from '../types';
+      import { readAllStateFiles } from '../core/state';
+      import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+      const opToString = (op: FileOperation): string => {
+          switch (op.type) {
+              case 'write': return `write: ${op.path}`;
+              case 'delete': return `delete: ${op.path}`;
+              case 'rename': return `rename: ${op.from} -> ${op.to}`;
+          }
+      };
+
+      export const formatTransactionDetails = (
+          tx: StateFile,
+          options: { showOperations?: boolean, showSpacing?: boolean } = {}
+      ): string[] => {
+          const lines: string[] = [];
+          lines.push(`- UUID: ${tx.uuid}`);
+          lines.push(`  Date: ${new Date(tx.createdAt).toLocaleString()}`);
+          if (tx.promptSummary) {
+              lines.push(`  Prompt Summary: ${tx.promptSummary}`);
+          }
+          if (tx.gitCommitMsg) {
+              lines.push(`  Git Commit: ${tx.gitCommitMsg}`);
+          }
+          if (tx.reasoning && tx.reasoning.length > 0) {
+              lines.push('  Reasoning:');
+              tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+          }
+          if (options.showOperations && tx.operations && tx.operations.length > 0) {
+              lines.push('  Changes:');
+              tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+          }
+      =======
+      import { logger } from '../utils/logger';
+      import { FileOperation, StateFile } from '../types';
+      import { readAllStateFiles } from '../core/state';
+      import { STATE_DIRECTORY_NAME } from '../utils/constants';
+      import chalk from 'chalk';
+
+      const opToString = (op: FileOperation): string => {
+          switch (op.type) {
+              case 'write': return `${chalk.green('write')}:  ${chalk.cyan(op.path)}`;
+              case 'delete': return `${chalk.red('delete')}: ${chalk.cyan(op.path)}`;
+              case 'rename': return `${chalk.yellow('rename')}: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`;
+          }
+      };
+
+      export const formatTransactionDetails = (
+          tx: StateFile,
+          options: { showOperations?: boolean, showSpacing?: boolean } = {}
+      ): string[] => {
+          const lines: string[] = [];
+          lines.push(`- ${chalk.bold('UUID')}: ${chalk.gray(tx.uuid)}`);
+          lines.push(`  ${chalk.bold('Date')}: ${new Date(tx.createdAt).toLocaleString()}`);
+          if (tx.promptSummary) {
+              lines.push(`  ${chalk.bold('Prompt Summary')}: ${tx.promptSummary}`);
+          }
+          if (tx.gitCommitMsg) {
+              lines.push(`  ${chalk.bold('Git Commit')}: "${tx.gitCommitMsg}"`);
+          }
+          if (tx.reasoning && tx.reasoning.length > 0) {
+              lines.push(`  ${chalk.bold('Reasoning')}:`);
+              tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+          }
+          if (options.showOperations && tx.operations && tx.operations.length > 0) {
+              lines.push(`  ${chalk.bold('Changes')}:`);
+              tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+          }
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+          const transactions = await readAllStateFiles(cwd);
+
+          if (transactions === null) {
+              log(`warn: State directory '${STATE_DIRECTORY_NAME}' not found. No logs to display.`);
+              log("info: Run 'relay init' to initialize the project.");
+              return;
+          }
+
+          if (transactions.length === 0) {
+              log('info: No committed transactions found.');
+              return;
+          }
+
+          log('Committed Transactions (most recent first):');
+          log('-------------------------------------------');
+
+          if (transactions.length === 0) {
+              log('info: No valid transactions found.');
+              return;
+          }
+      =======
+          const transactions = await readAllStateFiles(cwd);
+
+          if (transactions === null) {
+              log(`${chalk.yellow('warn')}: State directory '${chalk.cyan(STATE_DIRECTORY_NAME)}' not found. No logs to display.`);
+              log(`${chalk.blue('info')}: Run ${chalk.magenta("'relay init'")} to initialize the project.`);
+              return;
+          }
+
+          if (transactions.length === 0) {
+              log(`${chalk.blue('info')}: No committed transactions found.`);
+              return;
+          }
+
+          log(chalk.bold('Committed Transactions (most recent first):'));
+          log(chalk.gray('-------------------------------------------'));
+
+          if (transactions.length === 0) {
+              log(`${chalk.blue('info')}: No valid transactions found.`);
+              return;
+          }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/revert.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { loadConfigOrExit } from '../core/config';
+
+      import { readStateFile, readAllStateFiles } from '../core/state';
+
+      import { processPatch } from '../core/transaction';
+
+      import { logger } from '../utils/logger';
+
+      import { FileOperation, ParsedLLMResponse, StateFile } from '../types';
+
+      import { v4 as uuidv4 } from 'uuid';
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from './log';
+
+      =======
+
+      import { loadConfigOrExit } from '../core/config';
+
+      import { readStateFile, readAllStateFiles } from '../core/state';
+
+      import { processPatch } from '../core/transaction';
+
+      import { logger } from '../utils/logger';
+
+      import { FileOperation, ParsedLLMResponse, StateFile } from '../types';
+
+      import { v4 as uuidv4 } from 'uuid';
+
+      import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      import { formatTransactionDetails } from './log';
+
+      import chalk from 'chalk';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          if (isUUID(effectiveIdentifier)) {
+              targetDescription = `transaction with UUID '${effectiveIdentifier}'`;
+              logger.info(`Attempting to revert ${targetDescription}`);
+              stateToRevert = await readStateFile(cwd, effectiveIdentifier);
+          } else if (/^-?\d+$/.test(effectiveIdentifier)) {
+              const index = Math.abs(parseInt(effectiveIdentifier, 10));
+              if (isNaN(index) || index <= 0) {
+                  logger.error('Invalid index. Please provide a positive number (e.g., "1" for the latest).');
+                  return;
+              }
+              targetDescription = index === 1 ? 'the latest transaction' : `the ${index}-th latest transaction`;
+              logger.info(`Looking for ${targetDescription}...`);
+              const allTransactions = await readAllStateFiles(cwd);
+              if (!allTransactions || allTransactions.length < index) {
+                  logger.error(`Transaction not found. Only ${allTransactions?.length ?? 0} transactions exist.`);
+                  return;
+              }
+              stateToRevert = allTransactions[index - 1] ?? null;
+          } else {
+              logger.error(`Invalid identifier: '${identifier}'. Please provide a UUID or an index (e.g., '1' for the latest).`);
+              return;
+          }
+      =======
+          if (isUUID(effectiveIdentifier)) {
+              targetDescription = `transaction with UUID '${chalk.cyan(effectiveIdentifier)}'`;
+              logger.info(`Attempting to revert ${targetDescription}`);
+              stateToRevert = await readStateFile(cwd, effectiveIdentifier);
+          } else if (/^-?\d+$/.test(effectiveIdentifier)) {
+              const index = Math.abs(parseInt(effectiveIdentifier, 10));
+              if (isNaN(index) || index <= 0) {
+                  logger.error(`Invalid index. Please provide a positive number (e.g., ${chalk.cyan('"1"')} for the latest).`);
+                  return;
+              }
+              targetDescription = index === 1 ? 'the latest transaction' : `the ${chalk.cyan(index)}-th latest transaction`;
+              logger.info(`Looking for ${targetDescription}...`);
+              const allTransactions = await readAllStateFiles(cwd);
+              if (!allTransactions || allTransactions.length < index) {
+                  logger.error(`Transaction not found. Only ${chalk.cyan(allTransactions?.length ?? 0)} transactions exist.`);
+                  return;
+              }
+              stateToRevert = allTransactions[index - 1] ?? null;
+          } else {
+              logger.error(`Invalid identifier: '${chalk.yellow(identifier)}'. Please provide a UUID or an index (e.g., ${chalk.cyan("'1'")} for the latest).`);
+              return;
+          }
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          if (!stateToRevert) {
+              logger.error(`Could not find ${targetDescription}.`);
+              return;
+          }
+
+          logger.log(`Transaction to be reverted:`);
+          formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+      =======
+          if (!stateToRevert) {
+              logger.error(`Could not find ${targetDescription}.`);
+              return;
+          }
+
+          logger.log(chalk.bold(`Transaction to be reverted:`));
+          formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const inverse_operations = [...stateToRevert.operations]
+              .reverse()
+              .map((op): FileOperation | null => {
+                  switch (op.type) {
+                      case 'rename':
+                          return { type: 'rename', from: op.to, to: op.from };
+                      case 'delete': {
+                          const deletedContent = stateToRevert.snapshot[op.path];
+                          if (deletedContent === null || typeof deletedContent === 'undefined') {
+                              logger.warn(`Cannot revert deletion of ${op.path}, original content not found in snapshot. Skipping.`);
+                              return null;
+                          }
+                          return { type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' };
+                      }
+                      case 'write': {
+                          const originalContent = stateToRevert.snapshot[op.path];
+                          if (typeof originalContent === 'undefined') {
+                              logger.warn(`Cannot find original state for ${op.path} in snapshot. Skipping revert for this operation.`);
+                              return null;
+                          }
+      =======
+          const inverse_operations = [...stateToRevert.operations]
+              .reverse()
+              .map((op): FileOperation | null => {
+                  switch (op.type) {
+                      case 'rename':
+                          return { type: 'rename', from: op.to, to: op.from };
+                      case 'delete': {
+                          const deletedContent = stateToRevert.snapshot[op.path];
+                          if (deletedContent === null || typeof deletedContent === 'undefined') {
+                              logger.warn(`Cannot revert deletion of ${chalk.cyan(op.path)}, original content not found in snapshot. Skipping.`);
+                              return null;
+                          }
+                          return { type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' };
+                      }
+                      case 'write': {
+                          const originalContent = stateToRevert.snapshot[op.path];
+                          if (typeof originalContent === 'undefined') {
+                              logger.warn(`Cannot find original state for ${chalk.cyan(op.path)} in snapshot. Skipping revert for this operation.`);
+                              return null;
+                          }
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const parsedResponse: ParsedLLMResponse = {
+              control: {
+                  projectId: config.projectId,
+                  uuid: newUuid,
+              },
+              operations: inverse_operations,
+              reasoning,
+          };
+
+          logger.info(`Creating new transaction ${newUuid} to perform the revert.`);
+          await processPatch(config, parsedResponse, { cwd, prompter });
+      };
+
+      =======
+          const parsedResponse: ParsedLLMResponse = {
+              control: {
+                  projectId: config.projectId,
+                  uuid: newUuid,
+              },
+              operations: inverse_operations,
+              reasoning,
+          };
+
+          logger.info(`Creating new transaction ${chalk.gray(newUuid)} to perform the revert.`);
+          await processPatch(config, parsedResponse, { cwd, prompter });
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/watch.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { findConfig, loadConfigOrExit } from '../core/config';
+
+      import { createClipboardWatcher } from '../core/clipboard';
+
+      import { parseLLMResponse } from '../core/parser';
+
+      import { processPatch } from '../core/transaction';
+
+      import { logger } from '../utils/logger';
+
+      import { CONFIG_FILE_NAME } from '../utils/constants'
+
+      import { Config } from '../types';
+
+      import fs from 'fs';
+
+      import path from 'path';
+
+
+      const getSystemPrompt = (projectId: string, preferredStrategy:
+      Config['preferredStrategy']): string => {
+          const header = `
+      ✅ relaycode is watching for changes.
+
+
+      IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+      Copy the entire text below and paste it into your LLM's "System Prompt"
+
+      or "Custom Instructions" section.
+
+      ---------------------------------------------------------------------------`;
+
+          const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+      =======
+
+      import { findConfig, loadConfigOrExit } from '../core/config';
+
+      import { createClipboardWatcher } from '../core/clipboard';
+
+      import { parseLLMResponse } from '../core/parser';
+
+      import { processPatch } from '../core/transaction';
+
+      import { logger } from '../utils/logger';
+
+      import { CONFIG_FILE_NAME } from '../utils/constants'
+
+      import { Config } from '../types';
+
+      import chalk from 'chalk';
+
+      import fs from 'fs';
+
+      import path from 'path';
+
+
+      const getSystemPrompt = (projectId: string, preferredStrategy:
+      Config['preferredStrategy']): string => {
+          const header = `
+      ${chalk.green('✅ relaycode is watching for changes.')}
+
+
+      ${chalk.yellow.bold('IMPORTANT:')} For relaycode to work, you must
+      configure your AI assistant.
+
+      Copy the entire text below and paste it into your LLM's "System Prompt"
+
+      or "Custom Instructions" section.
+
+      ${chalk.gray('---------------------------------------------------------------------------')}`;
+
+          const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const syntaxAuto = `
+      **Syntax:**
+
+      \`\`\`typescript // filePath {patchStrategy}
+
+      ... content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+      \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+      the \`replace\` strategy).
+
+
+      **Examples:**
+
+      \`\`\`typescript // src/components/Button.tsx
+
+      ...
+
+      \`\`\`
+
+      \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+      ...
+
+      \`\`\``;
+
+      =======
+          const syntaxAuto = `
+      ${chalk.bold('Syntax:')}
+
+      \`\`\`typescript // filePath {patchStrategy}
+
+      ... content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+      \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+      the \`replace\` strategy).
+
+
+      ${chalk.bold('Examples:')}
+
+      \`\`\`typescript // src/components/Button.tsx
+
+      ...
+
+      \`\`\`
+
+      \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+      ...
+
+      \`\`\``;
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const syntaxReplace = `
+      **Syntax:**
+
+      \`\`\`typescript // filePath
+
+      ... content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - Only the \`replace\` strategy is enabled. This means you must provide
+      the ENTIRE file content for any change. This is suitable for creating new
+      files or making changes to small files.`;
+
+      =======
+          const syntaxReplace = `
+      ${chalk.bold('Syntax:')}
+
+      \`\`\`typescript // filePath
+
+      ... content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - Only the \`replace\` strategy is enabled. This means you must provide
+      the ENTIRE file content for any change. This is suitable for creating new
+      files or making changes to small files.`;
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const syntaxNewUnified = `
+      **Syntax:**
+
+      \`\`\`typescript // filePath new-unified
+
+      ... diff content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+      =======
+          const syntaxNewUnified = `
+      ${chalk.bold('Syntax:')}
+
+      \`\`\`typescript // filePath new-unified
+
+      ... diff content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const syntaxMultiSearchReplace = `
+      **Syntax:**
+
+      \`\`\`typescript // filePath multi-search-replace
+
+      ... diff content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - You must use the \`multi-search-replace\` patch strategy for all
+      modifications.`;
+
+      =======
+          const syntaxMultiSearchReplace = `
+      ${chalk.bold('Syntax:')}
+
+      \`\`\`typescript // filePath multi-search-replace
+
+      ... diff content ...
+
+      \`\`\`
+
+      - \`filePath\`: The path to the file. **If the path contains spaces, it
+      MUST be enclosed in double quotes.**
+
+      - You must use the \`multi-search-replace\` patch strategy for all
+      modifications.`;
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const sectionNewUnified = `---
+
+      ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+      Use for most changes, like refactoring, adding features, and fixing bugs.
+      It's resilient to minor changes in the source file.
+
+
+      **Diff Format:**
+
+      1.  **File Headers**: Start with \`--- {filePath}\` and \`+++
+      {filePath}\`.
+
+      2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+      3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+      change for context.
+
+      4.  **Changes**: Mark additions with \`+\` and removals with \`-\`.
+      Maintain indentation.
+
+
+      **Example:**
+
+      =======
+          const sectionNewUnified = `${chalk.gray('---')}
+
+      ${chalk.bold('### Strategy 1: Advanced Unified Diff (`new-unified`) -
+      RECOMMENDED')}
+
+
+      Use for most changes, like refactoring, adding features, and fixing bugs.
+      It's resilient to minor changes in the source file.
+
+
+      ${chalk.bold('Diff Format:')}
+
+      1.  **File Headers**: Start with \`--- {filePath}\` and \`+++
+      {filePath}\`.
+
+      2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+      3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+      change for context.
+
+      4.  **Changes**: Mark additions with \`+\` and removals with \`-\`.
+      Maintain indentation.
+
+
+      ${chalk.bold('Example:')}
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const sectionMultiSearchReplace = `---
+
+      ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+      Use for precise, surgical replacements. The \`SEARCH\` block must be an
+      exact match of the content in the file.
+
+
+      **Diff Format:**
+
+      Repeat this block for each replacement.
+
+      \`\`\`diff
+
+      <<<<<<< SEARCH
+
+      :start_line: (optional)
+
+      :end_line: (optional)
+
+      -------
+
+      [exact content to find including whitespace]
+
+      =======
+
+      [new content to replace with]
+
+      >>>>>>> REPLACE
+
+      \`\`\`
+
+      `;
+
+      =======
+          const sectionMultiSearchReplace = `${chalk.gray('---')}
+
+      ${chalk.bold('### Strategy 2: Multi-Search-Replace
+      (`multi-search-replace`)')}
+
+
+      Use for precise, surgical replacements. The \`SEARCH\` block must be an
+      exact match of the content in the file.
+
+
+      ${chalk.bold('Diff Format:')}
+
+      Repeat this block for each replacement.
+
+      \`\`\`diff
+
+      <<<<<<< SEARCH
+
+      :start_line: (optional)
+
+      :end_line: (optional)
+
+      -------
+
+      [exact content to find including whitespace]
+
+      =======
+
+      [new content to replace with]
+
+      >>>>>>> REPLACE
+
+      \`\`\`
+
+      `;
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const otherOps = `---
+
+      ### Other Operations
+
+
+      -   **Creating a file**: Use the default \`replace\` strategy (omit the
+      strategy name) and provide the full file content.
+
+      -   **Deleting a file**:
+
+      =======
+          const otherOps = `${chalk.gray('---')}
+
+      ${chalk.bold('### Other Operations')}
+
+
+      -   **Creating a file**: Use the default \`replace\` strategy (omit the
+      strategy name) and provide the full file content.
+
+      -   **Deleting a file**:
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          const finalSteps = `---
+
+      ### Final Steps
+
+
+      1.  Add your step-by-step reasoning in plain text before each code block.
+
+      2.  ALWAYS add the following YAML block at the very end of your response.
+      Use the exact projectId shown here. Generate a new random uuid for each
+      response.
+
+          \`\`\`yaml
+          projectId: ${projectId}
+          uuid: (generate a random uuid)
+          changeSummary:
+      =======
+          const finalSteps = `${chalk.gray('---')}
+
+      ${chalk.bold('### Final Steps')}
+
+
+      1.  Add your step-by-step reasoning in plain text before each code block.
+
+      2.  ALWAYS add the following YAML block at the very end of your response.
+      Use the exact projectId shown here. Generate a new random uuid for each
+      response.
+
+          \`\`\`yaml
+          projectId: ${chalk.cyan(projectId)}
+          uuid: (generate a random uuid)
+          changeSummary:
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          promptSummary: "A brief summary of my request."
+          gitCommitMsg: "feat: A concise, imperative git commit message."
+          \`\`\`
+      `;
+          
+          const footer = `---------------------------------------------------------------------------`;
+      =======
+          promptSummary: "A brief summary of my request."
+          gitCommitMsg: "feat: A concise, imperative git commit message."
+          \`\`\`
+      `;
+          
+          const footer = `${chalk.gray('---------------------------------------------------------------------------')}`;
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+            logger.info('New clipboard content detected. Attempting to parse...');
+            const parsedResponse = parseLLMResponse(content);
+
+            if (!parsedResponse) {
+              logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+              return;
+            }
+
+            // Check project ID before notifying and processing.
+            if (parsedResponse.control.projectId !== config.projectId) {
+              logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+              return;
+            }
+
+            await processPatch(config, parsedResponse, { cwd, notifyOnStart: true });
+            logger.info('--------------------------------------------------');
+            logger.info('Watching for next patch...');
+      =======
+            logger.info('New clipboard content detected. Attempting to parse...');
+            const parsedResponse = parseLLMResponse(content);
+
+            if (!parsedResponse) {
+              logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+              return;
+            }
+
+            // Check project ID before notifying and processing.
+            if (parsedResponse.control.projectId !== config.projectId) {
+              logger.debug(`Ignoring patch for different project (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(parsedResponse.control.projectId)}').`);
+              return;
+            }
+
+            await processPatch(config, parsedResponse, { cwd, notifyOnStart: true });
+            logger.info(chalk.gray('--------------------------------------------------'));
+            logger.info('Watching for next patch...');
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          debounceTimer = setTimeout(async () => {
+            logger.info(`Configuration file change detected. Reloading...`);
+            try {
+              const newConfig = await findConfig(cwd);
+              if (newConfig) {
+                logger.success('Configuration reloaded. Restarting services...');
+                startServices(newConfig);
+              } else {
+                logger.error(`${CONFIG_FILE_NAME} is invalid or has been deleted. Services paused.`);
+                if (clipboardWatcher) {
+                  clipboardWatcher.stop();
+                  clipboardWatcher = null;
+                }
+              }
+      =======
+          debounceTimer = setTimeout(async () => {
+            logger.info(`Configuration file change detected. Reloading...`);
+            try {
+              const newConfig = await findConfig(cwd);
+              if (newConfig) {
+                logger.success('Configuration reloaded. Restarting services...');
+                startServices(newConfig);
+              } else {
+                logger.error(`${chalk.cyan(CONFIG_FILE_NAME)} is invalid or has been deleted. Services paused.`);
+                if (clipboardWatcher) {
+                  clipboardWatcher.stop();
+                  clipboardWatcher = null;
+                }
+              }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/config.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { z } from 'zod';
+
+      import path from 'path';
+
+      import { promises as fs } from 'fs';
+
+      import { Config, ConfigSchema } from '../types';
+
+      import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME } from
+      '../utils/constants';
+
+      import { logger, isEnoentError } from '../utils/logger';
+
+      =======
+
+      import { z } from 'zod';
+
+      import path from 'path';
+
+      import { promises as fs } from 'fs';
+
+      import { Config, ConfigSchema } from '../types';
+
+      import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME } from
+      '../utils/constants';
+
+      import { logger, isEnoentError } from '../utils/logger';
+
+      import chalk from 'chalk';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const loadConfigOrExit = async (cwd: string = process.cwd()):
+      Promise<Config> => {
+          const config = await findConfig(cwd);
+          if (!config) {
+              logger.error(`Configuration file '${CONFIG_FILE_NAME}' not found.`);
+              logger.info("Please run 'relay init' to create one.");
+              process.exit(1);
+          }
+          return config;
+      };
+
+      =======
+
+      export const loadConfigOrExit = async (cwd: string = process.cwd()):
+      Promise<Config> => {
+          const config = await findConfig(cwd);
+          if (!config) {
+              logger.error(`Configuration file '${chalk.cyan(CONFIG_FILE_NAME)}' not found.`);
+              logger.info(`Please run ${chalk.magenta("'relay init'")} to create one.`);
+              process.exit(1);
+          }
+          return config;
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation
+      } from '../types';
+
+      import { logger, getErrorMessage } from '../utils/logger';
+
+      import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+      import { createSnapshot, restoreSnapshot, applyOperations } from
+      './executor';
+
+      =======
+
+      import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation
+      } from '../types';
+
+      import { logger, getErrorMessage } from '../utils/logger';
+
+      import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+      import { createSnapshot, restoreSnapshot, applyOperations } from
+      './executor';
+
+      import chalk from 'chalk';
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const logCompletionSummary = (
+          uuid: string,
+          startTime: number,
+          operations: FileOperation[]
+      ) => {
+          const duration = performance.now() - startTime;
+
+          logger.log('\nSummary:');
+          logger.log(`Applied ${operations.length} file operation(s) successfully.`);
+          logger.log(`Total time from start to commit: ${duration.toFixed(2)}ms`);
+          logger.success(`✅ Transaction ${uuid} committed successfully!`);
+      };
+
+      =======
+
+      const logCompletionSummary = (
+          uuid: string,
+          startTime: number,
+          operations: FileOperation[]
+      ) => {
+          const duration = performance.now() - startTime;
+
+          logger.log(chalk.bold('\nSummary:'));
+          logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+          logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+          logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+      FileSnapshot, reason: string, enableNotifications: boolean = true):
+      Promise<void> => {
+          logger.warn(`Rolling back changes: ${reason}`);
+          try {
+              await restoreSnapshot(snapshot, cwd);
+              logger.success('  - Files restored to original state.');
+          } catch (error) {
+              logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+              // Do not rethrow; we're already in a final error handling state.
+          } finally {
+              try {
+                  await deletePendingState(cwd, uuid);
+                  logger.success(`↩️ Transaction ${uuid} rolled back.`);
+                  notifyFailure(uuid, enableNotifications);
+              } catch (cleanupError) {
+                  logger.error(`Fatal: Could not clean up pending state for ${uuid}: ${getErrorMessage(cleanupError)}`);
+              }
+          }
+      };
+
+      =======
+
+      const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+      FileSnapshot, reason: string, enableNotifications: boolean = true):
+      Promise<void> => {
+          logger.warn(`Rolling back changes: ${reason}`);
+          try {
+              await restoreSnapshot(snapshot, cwd);
+              logger.success('  - Files restored to original state.');
+          } catch (error) {
+              logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+              // Do not rethrow; we're already in a final error handling state.
+          } finally {
+              try {
+                  await deletePendingState(cwd, uuid);
+                  logger.success(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                  notifyFailure(uuid, enableNotifications);
+              } catch (cleanupError) {
+                  logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+              }
+          }
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          // 1. Validation
+          if (projectId !== config.projectId) {
+              logger.warn(`Skipping patch: projectId mismatch (expected '${config.projectId}', got '${projectId}').`);
+              return;
+          }
+          if (await hasBeenProcessed(cwd, uuid)) {
+              logger.info(`Skipping patch: uuid '${uuid}' has already been processed.`);
+              return;
+          }
+      =======
+          // 1. Validation
+          if (projectId !== config.projectId) {
+              logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+              return;
+          }
+          if (await hasBeenProcessed(cwd, uuid)) {
+              logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+              return;
+          }
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          // Notify if coming from watch mode, now that we know it's a new patch.
+          if (notifyOnStart) {
+              notifyPatchDetected(config.projectId, config.enableNotifications);
+              logger.success(`Valid patch detected for project '${config.projectId}'. Processing...`);
+          }
+
+          // 2. Pre-flight checks
+          if (config.preCommand) {
+              logger.log(`  - Running pre-command: ${config.preCommand}`);
+              const { exitCode, stderr } = await executeShellCommand(config.preCommand, cwd);
+              if (exitCode !== 0) {
+                  logger.error(`Pre-command failed with exit code ${exitCode}, aborting transaction.`);
+                  if (stderr) logger.error(`Stderr: ${stderr}`);
+                  return;
+              }
+          }
+
+          logger.info(`🚀 Starting transaction for patch ${uuid}...`);
+          logger.log(`Reasoning:\n  ${reasoning.join('\n  ')}`);
+      =======
+          // Notify if coming from watch mode, now that we know it's a new patch.
+          if (notifyOnStart) {
+              notifyPatchDetected(config.projectId, config.enableNotifications);
+              logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+          }
+
+          // 2. Pre-flight checks
+          if (config.preCommand) {
+              logger.log(`  - Running pre-command: ${chalk.magenta(config.preCommand)}`);
+              const { exitCode, stderr } = await executeShellCommand(config.preCommand, cwd);
+              if (exitCode !== 0) {
+                  logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                  if (stderr) logger.error(`Stderr: ${stderr}`);
+                  return;
+              }
+          }
+
+          logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+          logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+              const newContents = await applyOperations(operations, cwd);
+              logger.success('  - File operations complete.');
+
+              const opStats = operations.map(op => {
+                  const stats = calculateLineChanges(op, snapshot, newContents);
+                  if (op.type === 'write') {
+                      logger.success(`✔ Written: ${op.path} (+${stats.added}, -${stats.removed})`);
+                  } else if (op.type === 'delete') {
+                      logger.success(`✔ Deleted: ${op.path}`);
+                  } else if (op.type === 'rename') {
+                      logger.success(`✔ Renamed: ${op.from} -> ${op.to}`);
+                  }
+                  return stats;
+              });
+
+              // Run post-command
+              if (config.postCommand) {
+                  logger.log(`  - Running post-command: ${config.postCommand}`);
+                  const postResult = await executeShellCommand(config.postCommand, cwd);
+                  if (postResult.exitCode !== 0) {
+                      logger.error(`Post-command failed with exit code ${postResult.exitCode}.`);
+                      if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                      throw new Error('Post-command failed, forcing rollback.');
+                  }
+              }
+
+              // Log summary before asking for approval
+              const checksDuration = performance.now() - startTime;
+              const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+              const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+              logger.log('\nPre-flight summary:');
+              logger.success(`Lines changed: +${totalAdded}, -${totalRemoved}`);
+              logger.log(`Checks completed in ${checksDuration.toFixed(2)}ms`);
+
+              // Check for approval
+              const finalErrorCount = await getErrorCount(config.linter, cwd);
+              logger.log(`  - Final linter error count: ${finalErrorCount}`);
+      =======
+              const newContents = await applyOperations(operations, cwd);
+              logger.success('  - File operations complete.');
+
+              const opStats = operations.map(op => {
+                  const stats = calculateLineChanges(op, snapshot, newContents);
+                  if (op.type === 'write') {
+                      logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                  } else if (op.type === 'delete') {
+                      logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                  } else if (op.type === 'rename') {
+                      logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                  }
+                  return stats;
+              });
+
+              // Run post-command
+              if (config.postCommand) {
+                  logger.log(`  - Running post-command: ${chalk.magenta(config.postCommand)}`);
+                  const postResult = await executeShellCommand(config.postCommand, cwd);
+                  if (postResult.exitCode !== 0) {
+                      logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                      if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                      throw new Error('Post-command failed, forcing rollback.');
+                  }
+              }
+
+              // Log summary before asking for approval
+              const checksDuration = performance.now() - startTime;
+              const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+              const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+              logger.log(chalk.bold('\nPre-flight summary:'));
+              logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+              logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+              // Check for approval
+              const finalErrorCount = await getErrorCount(config.linter, cwd);
+              logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/commands/apply.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { loadConfigOrExit } from '../core/config';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+
+    export const applyCommand = async (filePath: string, cwd: string =
+    process.cwd()): Promise<void> => {
+        const config = await loadConfigOrExit(cwd);
+        logger.setLevel(config.logLevel);
+
+        let content: string;
+        const absoluteFilePath = path.resolve(cwd, filePath);
+        try {
+            content = await fs.readFile(absoluteFilePath, 'utf-8');
+            logger.info(`Reading patch from file: ${absoluteFilePath}`);
+        } catch (error) {
+            logger.error(`Failed to read patch file at '${absoluteFilePath}'. Aborting.`);
+            return;
+        }
+
+        logger.info('Attempting to parse patch file...');
+        const parsedResponse = parseLLMResponse(content);
+
+        if (!parsedResponse) {
+            logger.error('The content of the file is not a valid relaycode patch. Aborting.');
+            return;
+        }
+
+        logger.success('Valid patch format detected. Processing...');
+        await processPatch(config, parsedResponse, { cwd });
+        logger.info('--------------------------------------------------');
+    };
+  src/commands/git-commit.ts: >-
+    import { findLatestStateFile } from '../core/state';
+
+    import { logger } from '../utils/logger';
+
+    import { executeShellCommand } from '../utils/shell';
+
+    import { getConfirmation as defaultGetConfirmation } from '../utils/prompt';
+
+    import { formatTransactionDetails } from './log';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    export const gitCommitCommand = async (cwd: string = process.cwd(),
+    prompter?: Prompter): Promise<void> => {
+        const getConfirmation = prompter || defaultGetConfirmation;
+
+        logger.info('Looking for the last transaction to commit...');
+        const latestTransaction = await findLatestStateFile(cwd);
+
+        if (!latestTransaction) {
+            logger.warn('No committed transactions found.');
+            return;
+        }
+
+        if (!latestTransaction.gitCommitMsg) {
+            logger.warn('The latest transaction does not have a git commit message.');
+            logger.log('Transaction details:');
+            formatTransactionDetails(latestTransaction, { showSpacing: true }).forEach(line => logger.log(line));
+            return;
+        }
+
+        logger.log('Found latest transaction with commit message:');
+        formatTransactionDetails(latestTransaction).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation(`\nDo you want to run 'git add .' and 'git commit -m "${latestTransaction.gitCommitMsg}"'? (y/N)`);
+        if (!confirmed) {
+            logger.info('Commit operation cancelled.');
+            return;
+        }
+
+        logger.info("Running 'git add .'...");
+        const addResult = await executeShellCommand('git add .', cwd);
+        if (addResult.exitCode !== 0) {
+            logger.error(`'git add .' failed with exit code ${addResult.exitCode}.`);
+            logger.error(addResult.stderr);
+            return;
+        }
+        logger.success("'git add .' completed successfully.");
+
+        const commitCmd = `git commit -m "${latestTransaction.gitCommitMsg}"`;
+        logger.info(`Running '${commitCmd}'...`);
+        const commitResult = await executeShellCommand(commitCmd, cwd);
+
+        if (commitResult.exitCode !== 0) {
+            logger.error(`'git commit' failed with exit code ${commitResult.exitCode}.`);
+            logger.error(commitResult.stderr);
+            if (commitResult.stdout) logger.log(commitResult.stdout);
+            logger.warn('You may need to resolve commit issues manually.');
+            return;
+        }
+        
+        logger.success('✅ Git commit successful!');
+        logger.log(commitResult.stdout);
+    };
+  src/commands/init.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { findConfig, createConfig, ensureStateDirExists, getProjectId } from
+    '../core/config';
+
+    import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+
+    import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME,
+    GITIGNORE_COMMENT } from '../utils/constants';
+
+
+    const getInitMessage = (projectId: string): string => `
+
+    ✅ relaycode has been initialized for this project.
+
+
+    Configuration file created: ${CONFIG_FILE_NAME}
+
+
+    Project ID: ${projectId}
+
+
+    Next steps:
+
+    1. (Optional) Open ${CONFIG_FILE_NAME} to customize settings like
+    'preferredStrategy' to control how the AI generates code patches.
+       - 'auto' (default): The AI can choose the best patch strategy.
+       - 'new-unified': Forces the AI to use diffs, great for most changes.
+       - 'replace': Forces the AI to replace entire files, good for new files or small changes.
+       - 'multi-search-replace': Forces the AI to perform precise search and replace operations.
+
+    2. Run 'relay watch' in your terminal. This will start the service and
+    display the system prompt tailored to your configuration.
+
+
+    3. Copy the system prompt provided by 'relay watch' and paste it into your
+    AI assistant's "System Prompt" or "Custom Instructions".
+
+    `;
+
+
+
+    const updateGitignore = async (cwd: string): Promise<void> => {
+        const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+        const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
+
+        try {
+            let content = await fs.readFile(gitignorePath, 'utf-8');
+            if (!content.includes(STATE_DIRECTORY_NAME)) {
+                content += entry;
+                await fs.writeFile(gitignorePath, content);
+                logger.info(`Updated ${GITIGNORE_FILE_NAME} to ignore ${STATE_DIRECTORY_NAME}/`);
+            }
+        } catch (error) {
+            if (isEnoentError(error)) {
+                await fs.writeFile(gitignorePath, entry.trim());
+                logger.info(`Created ${GITIGNORE_FILE_NAME} and added ${STATE_DIRECTORY_NAME}/`);
+            } else {
+                logger.error(`Failed to update ${GITIGNORE_FILE_NAME}: ${getErrorMessage(error)}`);
+            }
+        }
+    };
+
+
+    export const initCommand = async (cwd: string = process.cwd()):
+    Promise<void> => {
+        logger.info('Initializing relaycode in this project...');
+
+        const config = await findConfig(cwd);
+        if (config) {
+            logger.warn(`${CONFIG_FILE_NAME} already exists. Initialization skipped.`);
+            logger.log(`
+    To use relaycode, please run 'relay watch'.
+
+    It will display a system prompt to copy into your LLM assistant.
+
+    You can review your configuration in ${CONFIG_FILE_NAME}.
+
+    `);
+            return;
+        }
+        
+        const projectId = await getProjectId(cwd);
+        await createConfig(projectId, cwd);
+        logger.success(`Created configuration file: ${CONFIG_FILE_NAME}`);
+        
+        await ensureStateDirExists(cwd);
+        logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+
+        await updateGitignore(cwd);
+
+        logger.log(getInitMessage(projectId));
+    };
+  src/commands/log.ts: >-
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, StateFile } from '../types';
+
+    import { readAllStateFiles } from '../core/state';
+
+    import { STATE_DIRECTORY_NAME } from '../utils/constants';
+
+
+    const opToString = (op: FileOperation): string => {
+        switch (op.type) {
+            case 'write': return `write: ${op.path}`;
+            case 'delete': return `delete: ${op.path}`;
+            case 'rename': return `rename: ${op.from} -> ${op.to}`;
+        }
+    };
+
+
+    export const formatTransactionDetails = (
+        tx: StateFile,
+        options: { showOperations?: boolean, showSpacing?: boolean } = {}
+    ): string[] => {
+        const lines: string[] = [];
+        lines.push(`- UUID: ${tx.uuid}`);
+        lines.push(`  Date: ${new Date(tx.createdAt).toLocaleString()}`);
+        if (tx.promptSummary) {
+            lines.push(`  Prompt Summary: ${tx.promptSummary}`);
+        }
+        if (tx.gitCommitMsg) {
+            lines.push(`  Git Commit: ${tx.gitCommitMsg}`);
+        }
+        if (tx.reasoning && tx.reasoning.length > 0) {
+            lines.push('  Reasoning:');
+            tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+        }
+        if (options.showOperations && tx.operations && tx.operations.length > 0) {
+            lines.push('  Changes:');
+            tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+        }
+        if (options.showSpacing) {
+            lines.push(''); // Newline for spacing
+        }
+        return lines;
+    };
+
+
+    export const logCommand = async (cwd: string = process.cwd(),
+    outputCapture?: string[]): Promise<void> => {
+        const log = (message: string) => {
+            if (outputCapture) {
+                outputCapture.push(message);
+            } else {
+                logger.log(message);
+            }
+        };
+
+        const transactions = await readAllStateFiles(cwd);
+
+        if (transactions === null) {
+            log(`warn: State directory '${STATE_DIRECTORY_NAME}' not found. No logs to display.`);
+            log("info: Run 'relay init' to initialize the project.");
+            return;
+        }
+
+        if (transactions.length === 0) {
+            log('info: No committed transactions found.');
+            return;
+        }
+
+        log('Committed Transactions (most recent first):');
+        log('-------------------------------------------');
+
+        if (transactions.length === 0) {
+            log('info: No valid transactions found.');
+            return;
+        }
+
+        transactions.forEach(tx => {
+            formatTransactionDetails(tx, { showOperations: true, showSpacing: true }).forEach(line => log(line));
+        });
+    };
+  src/commands/revert.ts: >-
+    import { loadConfigOrExit } from '../core/config';
+
+    import { readStateFile, readAllStateFiles } from '../core/state';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, ParsedLLMResponse, StateFile } from '../types';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { getConfirmation as defaultGetConfirmation } from '../utils/prompt';
+
+    import { formatTransactionDetails } from './log';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    const isUUID = (str: string): boolean => {
+        return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+    };
+
+
+    export const revertCommand = async (identifier?: string, cwd: string =
+    process.cwd(), prompter?: Prompter): Promise<void> => {
+        const getConfirmation = prompter || defaultGetConfirmation;
+        const config = await loadConfigOrExit(cwd);
+
+        let stateToRevert: StateFile | null = null;
+        let targetDescription: string;
+
+        // Default to '1' to revert the latest transaction if no identifier is provided.
+        const effectiveIdentifier = identifier ?? '1';
+
+        if (isUUID(effectiveIdentifier)) {
+            targetDescription = `transaction with UUID '${effectiveIdentifier}'`;
+            logger.info(`Attempting to revert ${targetDescription}`);
+            stateToRevert = await readStateFile(cwd, effectiveIdentifier);
+        } else if (/^-?\d+$/.test(effectiveIdentifier)) {
+            const index = Math.abs(parseInt(effectiveIdentifier, 10));
+            if (isNaN(index) || index <= 0) {
+                logger.error('Invalid index. Please provide a positive number (e.g., "1" for the latest).');
+                return;
+            }
+            targetDescription = index === 1 ? 'the latest transaction' : `the ${index}-th latest transaction`;
+            logger.info(`Looking for ${targetDescription}...`);
+            const allTransactions = await readAllStateFiles(cwd);
+            if (!allTransactions || allTransactions.length < index) {
+                logger.error(`Transaction not found. Only ${allTransactions?.length ?? 0} transactions exist.`);
+                return;
+            }
+            stateToRevert = allTransactions[index - 1] ?? null;
+        } else {
+            logger.error(`Invalid identifier: '${identifier}'. Please provide a UUID or an index (e.g., '1' for the latest).`);
+            return;
+        }
+
+        if (!stateToRevert) {
+            logger.error(`Could not find ${targetDescription}.`);
+            return;
+        }
+
+        logger.log(`Transaction to be reverted:`);
+        formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation('\nAre you sure you want to revert this transaction? (y/N)');
+        if (!confirmed) {
+            logger.info('Revert operation cancelled.');
+            return;
+        }
+
+        // 3. Generate inverse operations
+        const inverse_operations = [...stateToRevert.operations]
+            .reverse()
+            .map((op): FileOperation | null => {
+                switch (op.type) {
+                    case 'rename':
+                        return { type: 'rename', from: op.to, to: op.from };
+                    case 'delete': {
+                        const deletedContent = stateToRevert.snapshot[op.path];
+                        if (deletedContent === null || typeof deletedContent === 'undefined') {
+                            logger.warn(`Cannot revert deletion of ${op.path}, original content not found in snapshot. Skipping.`);
+                            return null;
+                        }
+                        return { type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' };
+                    }
+                    case 'write': {
+                        const originalContent = stateToRevert.snapshot[op.path];
+                        if (typeof originalContent === 'undefined') {
+                            logger.warn(`Cannot find original state for ${op.path} in snapshot. Skipping revert for this operation.`);
+                            return null;
+                        }
+                        if (originalContent === null) {
+                            return { type: 'delete', path: op.path };
+                        } else {
+                            return { type: 'write', path: op.path, content: originalContent, patchStrategy: 'replace' };
+                        }
+                    }
+                }
+            })
+            .filter((op): op is FileOperation => op !== null);
+
+        if (inverse_operations.length === 0) {
+            logger.warn('No operations to revert for this transaction.');
+            return;
+        }
+
+        // 4. Create and process a new "revert" transaction
+        const newUuid = uuidv4();
+        const reasoning = [
+            `Reverting transaction ${stateToRevert.uuid}.`,
+            `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+        ];
+
+        const parsedResponse: ParsedLLMResponse = {
+            control: {
+                projectId: config.projectId,
+                uuid: newUuid,
+            },
+            operations: inverse_operations,
+            reasoning,
+        };
+
+        logger.info(`Creating new transaction ${newUuid} to perform the revert.`);
+        await processPatch(config, parsedResponse, { cwd, prompter });
+    };
+  src/commands/watch.ts: >-
+    import { findConfig, loadConfigOrExit } from '../core/config';
+
+    import { createClipboardWatcher } from '../core/clipboard';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { CONFIG_FILE_NAME } from '../utils/constants'
+
+    import { Config } from '../types';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+
+    const getSystemPrompt = (projectId: string, preferredStrategy:
+    Config['preferredStrategy']): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+        const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+        const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+    \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+    the \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+    ...
+
+    \`\`\``;
+
+        const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+        const syntaxNewUnified = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath new-unified
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+        const syntaxMultiSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath multi-search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`multi-search-replace\` patch strategy for all
+    modifications.`;
+
+        const sectionNewUnified = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+        const sectionMultiSearchReplace = `---
+
+    ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    :start_line: (optional)
+
+    :end_line: (optional)
+
+    -------
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+        const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+        const finalSteps = `---
+
+    ### Final Steps
+
+
+    1.  Add your step-by-step reasoning in plain text before each code block.
+
+    2.  ALWAYS add the following YAML block at the very end of your response.
+    Use the exact projectId shown here. Generate a new random uuid for each
+    response.
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary:
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: "A brief summary of my request."
+        gitCommitMsg: "feat: A concise, imperative git commit message."
+        \`\`\`
+    `;
+        
+        const footer = `---------------------------------------------------------------------------`;
+
+        const syntaxMap = {
+            auto: syntaxAuto,
+            replace: syntaxReplace,
+            'new-unified': syntaxNewUnified,
+            'multi-search-replace': syntaxMultiSearchReplace,
+        };
+
+        const strategyDetailsMap = {
+            auto: `${sectionNewUnified}\n${sectionMultiSearchReplace}`,
+            replace: '', // Covered in 'otherOps'
+            'new-unified': sectionNewUnified,
+            'multi-search-replace': sectionMultiSearchReplace,
+        };
+
+        const syntax = syntaxMap[preferredStrategy] ?? syntaxMap.auto;
+        const strategyDetails = strategyDetailsMap[preferredStrategy] ?? strategyDetailsMap.auto;
+
+        return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    }
+
+
+    export const watchCommand = async (cwd: string = process.cwd()): Promise<{
+    stop: () => void }> => {
+      let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+      const configPath = path.resolve(cwd, CONFIG_FILE_NAME);
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.logLevel);
+        logger.debug(`Log level set to: ${config.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.preferredStrategy));
+
+        clipboardWatcher = createClipboardWatcher(config.clipboardPollInterval, async (content) => {
+          logger.info('New clipboard content detected. Attempting to parse...');
+          const parsedResponse = parseLLMResponse(content);
+
+          if (!parsedResponse) {
+            logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+            return;
+          }
+
+          // Check project ID before notifying and processing.
+          if (parsedResponse.control.projectId !== config.projectId) {
+            logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+            return;
+          }
+
+          await processPatch(config, parsedResponse, { cwd, notifyOnStart: true });
+          logger.info('--------------------------------------------------');
+          logger.info('Watching for next patch...');
+        });
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`${CONFIG_FILE_NAME} is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      const configWatcher = fs.watch(configPath, handleConfigChange);
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+  src/core/config.ts: >-
+    import { z } from 'zod';
+
+    import path from 'path';
+
+    import { promises as fs } from 'fs';
+
+    import { Config, ConfigSchema } from '../types';
+
+    import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError } from '../utils/logger';
+
+
+    export const findConfig = async (cwd: string = process.cwd()):
+    Promise<Config | null> => {
+      const configPath = path.join(cwd, CONFIG_FILE_NAME);
+      try {
+        const fileContent = await fs.readFile(configPath, 'utf-8');
+        const configJson = JSON.parse(fileContent);
+        return ConfigSchema.parse(configJson);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null;
+        }
+        if (error instanceof z.ZodError) {
+          throw new Error(`Invalid configuration in ${CONFIG_FILE_NAME}: ${error.message}`);
+        }
+        throw error;
+      }
+    };
+
+
+    export const loadConfigOrExit = async (cwd: string = process.cwd()):
+    Promise<Config> => {
+        const config = await findConfig(cwd);
+        if (!config) {
+            logger.error(`Configuration file '${CONFIG_FILE_NAME}' not found.`);
+            logger.info("Please run 'relay init' to create one.");
+            process.exit(1);
+        }
+        return config;
+    };
+
+
+    export const createConfig = async (projectId: string, cwd: string =
+    process.cwd()): Promise<Config> => {
+        const config = {
+            projectId,
+            clipboardPollInterval: 2000,
+            approvalMode: 'auto' as const,
+            approvalOnErrorCount: 0,
+            linter: 'bun tsc --noEmit',
+            preCommand: '',
+            postCommand: '',
+            preferredStrategy: 'auto' as const,
+            enableNotifications: true,
+        };
+        
+        // Ensure the schema defaults are applied, including for logLevel
+        const validatedConfig = ConfigSchema.parse(config);
+
+        const configPath = path.join(cwd, CONFIG_FILE_NAME);
+        await fs.writeFile(configPath, JSON.stringify(validatedConfig, null, 2));
+
+        return validatedConfig;
+    };
+
+
+    export const ensureStateDirExists = async (cwd: string = process.cwd()):
+    Promise<void> => {
+        const stateDirPath = path.join(cwd, STATE_DIRECTORY_NAME);
+        await fs.mkdir(stateDirPath, { recursive: true });
+    };
+
+
+    export const getProjectId = async (cwd: string = process.cwd()):
+    Promise<string> => {
+        try {
+            const pkgJsonPath = path.join(cwd, 'package.json');
+            const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');
+            const pkgJson = JSON.parse(fileContent);
+            if (pkgJson.name && typeof pkgJson.name === 'string') {
+                return pkgJson.name;
+            }
+        } catch (e) {
+            // Ignore if package.json doesn't exist or is invalid
+        }
+        return path.basename(cwd);
+    };
+  src/core/transaction.ts: >-
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { createSnapshot, restoreSnapshot, applyOperations } from
+    './executor';
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt'
+
+    import { notifyApprovalRequired, notifyFailure, notifySuccess,
+    notifyPatchDetected } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+    };
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        snapshot: FileSnapshot,
+        newContents: Map<string, string>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newContents.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        // This is a simplified diff, for a more accurate count a real diff algorithm is needed,
+        // but this is fast and good enough for a summary.
+        const oldSet = new Set(oldLines);
+        const newSet = new Set(newLines);
+        
+        let added = 0;
+        for (const line of newLines) {
+            if (!oldSet.has(line)) added++;
+        }
+
+        let removed = 0;
+        for (const line of oldLines) {
+            if (!newSet.has(line)) removed++;
+        }
+        
+        return { added, removed };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log('\nSummary:');
+        logger.log(`Applied ${operations.length} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${duration.toFixed(2)}ms`);
+        logger.success(`✅ Transaction ${uuid} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true):
+    Promise<void> => {
+        logger.warn(`Rolling back changes: ${reason}`);
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.success(`↩️ Transaction ${uuid} rolled back.`);
+                notifyFailure(uuid, enableNotifications);
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${uuid}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${config.projectId}', got '${projectId}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${uuid}' has already been processed.`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.enableNotifications);
+            logger.success(`Valid patch detected for project '${config.projectId}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.preCommand) {
+            logger.log(`  - Running pre-command: ${config.preCommand}`);
+            const { exitCode, stderr } = await executeShellCommand(config.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${exitCode}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${uuid}...`);
+        logger.log(`Reasoning:\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newContents = await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, snapshot, newContents);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${op.path} (+${stats.added}, -${stats.removed})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${op.path}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${op.from} -> ${op.to}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.postCommand) {
+                logger.log(`  - Running post-command: ${config.postCommand}`);
+                const postResult = await executeShellCommand(config.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${postResult.exitCode}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log('\nPre-flight summary:');
+            logger.success(`Lines changed: +${totalAdded}, -${totalRemoved}`);
+            logger.log(`Checks completed in ${checksDuration.toFixed(2)}ms`);
+
+            // Check for approval
+            const finalErrorCount = await getErrorCount(config.linter, cwd);
+            logger.log(`  - Final linter error count: ${finalErrorCount}`);
+            
+            let isApproved: boolean;
+            if (config.approvalMode === 'auto') { // Auto mode allows conditional auto-approval
+                const canAutoApprove = finalErrorCount <= config.approvalOnErrorCount;
+
+                if (canAutoApprove) {
+                    logger.success('  - Changes automatically approved based on your configuration.');
+                    isApproved = true;
+                } else {
+                    notifyApprovalRequired(config.projectId, config.enableNotifications);
+                    isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+                }
+            } else { // Manual mode always requires user approval
+                logger.warn('Manual approval required because "approvalMode" is set to "manual".');
+                notifyApprovalRequired(config.projectId, config.enableNotifications);
+                isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+            }
+
+            if (isApproved) {
+                stateFile.approved = true;
+                await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.enableNotifications);
+            } else {
+                throw new Error('Changes were not approved.');
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.enableNotifications);
+        }
+    };
+approved: true
+gitCommitMsg: 'refactor(cli): enhance UI with consistent chalk styling'
+promptSummary: I want the CLI UI to be cohesive also, full of chalk implementation

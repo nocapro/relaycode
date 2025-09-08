@@ -1,0 +1,691 @@
+uuid: a1f1266d-5553-41bb-ad68-07b587d165ac
+projectId: relaycode
+createdAt: '2025-06-27T02:54:15.357Z'
+gitCommitMsg: 'feat: notify on failed patch rollback'
+promptSummary: >-
+  The user requested to add a system notification for when a patch rollback
+  fails. This involved creating a new notifier, exporting it, and updating the
+  transaction rollback logic to use it and prevent conflicting notifications.
+reasoning:
+  - >-
+    Okay, I can help with that. Triggering a system notification on a failed
+    patch rollback is a great idea to ensure you're immediately aware of
+    critical issues. Here are the changes to implement this functionality.
+  - >-
+    I'll start by creating a new notification type for rollback failures in
+    `src/utils/notifier.ts`. This ensures a clear and specific message is sent
+    for this critical event.
+  - >-
+    Next, I'll export this new notifier function from the main `index.ts` file
+    to make it accessible to other modules.
+  - >-
+    Now, I'll update the core transaction logic. First, I'll import the new
+    `notifyRollbackFailure` function into `src/core/transaction.ts`.
+  - >-
+    Finally, I'll modify the `rollbackTransaction` function in
+    `src/core/transaction.ts`. This change introduces logic to track if the
+    rollback was successful. If restoring files fails, it will now trigger the
+    new `notifyRollbackFailure` notification. This also prevents sending the
+    generic "patch failed" notification if the rollback itself was the point of
+    failure, avoiding confusing or contradictory alerts.
+  - >-
+    These changes will ensure you receive a clear system notification if a
+    rollback ever fails, allowing for quick manual intervention.
+operations:
+  - type: write
+    path: src/utils/notifier.ts
+    content: |-
+      <<<<<<< SEARCH
+      export const notifyFailure = createNotifier(
+          (uuid: string) => `Patch \`${uuid}\` failed and was rolled back.`
+      );
+      =======
+      export const notifyFailure = createNotifier(
+          (uuid: string) => `Patch \`${uuid}\` failed and was rolled back.`
+      );
+
+      export const notifyRollbackFailure = createNotifier(
+          (uuid: string) => `CRITICAL: Rollback for patch \`${uuid}\` FAILED. Manual intervention required.`
+      );
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/index.ts
+    content: |-
+      <<<<<<< SEARCH
+          requestApprovalWithNotification,
+          notifySuccess,
+          notifyFailure,
+      } from './utils/notifier';
+      =======
+          requestApprovalWithNotification,
+          notifySuccess,
+          notifyFailure,
+          notifyRollbackFailure,
+      } from './utils/notifier';
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+      notifyPatchDetected } from '../utils/notifier';
+
+      =======
+
+      import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+      notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+      FileSnapshot, reason: string, enableNotifications: boolean = true,
+      isError: boolean = true): Promise<void> => {
+          if (isError) {
+              logger.warn(`Rolling back changes: ${reason}`);
+          }
+          try {
+              await restoreSnapshot(snapshot, cwd);
+              logger.success('  - Files restored to original state.');
+          } catch (error) {
+              logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+              // Do not rethrow; we're already in a final error handling state.
+          } finally {
+              try {
+                  await deletePendingState(cwd, uuid);
+                  logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                  if (isError) {
+                      notifyFailure(uuid, enableNotifications);
+                  }
+              } catch (cleanupError) {
+                  logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+              }
+          }
+      };
+
+      =======
+
+      const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+      FileSnapshot, reason: string, enableNotifications: boolean = true,
+      isError: boolean = true): Promise<void> => {
+          if (isError) {
+              logger.warn(`Rolling back changes: ${reason}`);
+          }
+
+          let rollbackSuccessful = false;
+          try {
+              await restoreSnapshot(snapshot, cwd);
+              logger.success('  - Files restored to original state.');
+              rollbackSuccessful = true;
+          } catch (error) {
+              logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+              notifyRollbackFailure(uuid, enableNotifications);
+              // Do not rethrow; we're already in a final error handling state.
+          } finally {
+              try {
+                  await deletePendingState(cwd, uuid);
+                  logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                  if (isError && rollbackSuccessful) {
+                      notifyFailure(uuid, enableNotifications);
+                  }
+              } catch (cleanupError) {
+                  logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+              }
+          }
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/utils/notifier.ts: >-
+    const toastedNotifier = require('toasted-notifier');
+
+
+    // Manually define the interface for the parts of toasted-notifier we use,
+
+    // as it doesn't have official TypeScript definitions.
+
+    interface NotifyOptions {
+      title: string;
+      message: string;
+      sound: boolean;
+      wait: boolean;
+      actions?: string[];
+      timeout?: number;
+    }
+
+
+    interface ToastedNotifier {
+      notify(
+        options: NotifyOptions,
+        callback?: (err: Error | null, response: string) => void,
+      ): void;
+    }
+
+
+    const notifier: ToastedNotifier = toastedNotifier;
+
+    import { APP_NAME } from './constants';
+
+    import { getErrorMessage, logger } from './logger';
+
+
+    // This is a "fire-and-forget" utility. If notifications fail for any reason
+
+    // (e.g., unsupported OS, DND mode, permissions), it should not crash the
+    app.
+
+    const sendNotification = (options: { title: string; message: string;
+    enableNotifications?: boolean }) => {
+        // Skip notification if explicitly disabled
+        if (options.enableNotifications === false) {
+            return;
+        }
+        
+        try {
+            notifier.notify({
+                title: options.title,
+                message: options.message,
+                sound: false, // Keep it quiet by default
+                wait: false,
+            }, (err: Error | null) => {
+                if (err) {
+                    // Silently ignore errors. This is a non-critical feature.
+                }
+            });
+        } catch (err) {
+            // Silently ignore errors.
+        }
+    };
+
+
+    export const createNotifier = (messageTemplate: (param: string) => string)
+    => {
+        return (param: string, enableNotifications: boolean = true) => {
+            sendNotification({
+                title: APP_NAME,
+                message: messageTemplate(param),
+                enableNotifications,
+            });
+        };
+    };
+
+
+    export const notifyPatchDetected = createNotifier(
+        (projectId: string) => `New patch detected for project \`${projectId}\`.`
+    );
+
+
+    export const notifyApprovalRequired = createNotifier(
+        (projectId: string) => `Action required to approve changes for \`${projectId}\`.`
+    );
+
+
+    export const notifySuccess = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` applied successfully.`
+    );
+
+
+    export const notifyFailure = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` failed and was rolled back.`
+    );
+
+
+    export const requestApprovalWithNotification = (
+        projectId: string,
+        enableNotifications: boolean = true
+    ): Promise<'approved' | 'rejected' | 'timeout' | 'unsupported'> => {
+        if (enableNotifications === false) {
+            return Promise.resolve('unsupported');
+        }
+
+        return new Promise((resolve) => {
+            try {
+                notifier.notify(
+                    {
+                        title: `Approval Required for ${projectId}`,
+                        message: 'A patch requires your approval. You can also approve/reject in the terminal.',
+                        sound: true,
+                        wait: true, // This is key. It makes the notifier wait for user action.
+                        actions: ['Approve', 'Reject'],
+                        timeout: 30, // seconds
+                    },
+                    (err: Error | null, response: string) => {
+                        if (err) {
+                            logger.debug(`Notification approval error: ${getErrorMessage(err)}`);
+                            return resolve('unsupported');
+                        }
+                        const cleanResponse = (response || '').toLowerCase().trim();
+                        if (cleanResponse.startsWith('approve')) {
+                            resolve('approved');
+                        } else if (cleanResponse.startsWith('reject')) {
+                            resolve('rejected');
+                        } else {
+                            logger.debug(`Notification approval received non-action response: "${cleanResponse}"`);
+                            resolve('timeout');
+                        }
+                    }
+                );
+            } catch (err) {
+                logger.debug(`Notification dispatch threw synchronous error: ${getErrorMessage(err)}`);
+                resolve('unsupported');
+            }
+        });
+    };
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath } from './core/config';
+
+    export { applyOperations, createSnapshot, restoreSnapshot } from
+    './core/executor';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        findStateFileByIdentifier,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState,
+        getStateFilePath,
+        getUndoneStateFilePath
+    } from './core/state';
+
+    export { processPatch } from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export {
+        deleteFile,
+        readFileContent,
+        writeFileContent,
+        fileExists,
+        renameFile,
+        safeRename,
+    } from './utils/fs';
+
+    export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+
+    export { formatTransactionDetails } from './utils/formatters';
+
+    export {
+        createNotifier,
+        notifyPatchDetected,
+        notifyApprovalRequired,
+        requestApprovalWithNotification,
+        notifySuccess,
+        notifyFailure,
+    } from './utils/notifier';
+
+    export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+  src/core/transaction.ts: >
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { createSnapshot, restoreSnapshot, applyOperations } from
+    './executor';
+
+    import chalk from 'chalk';
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt'
+
+    import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+    notifyPatchDetected } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+        yes?: boolean;
+    };
+
+
+    const countLineDiff = (baseLines: string[], newLines: string[]): number => {
+        const baseSet = new Set(baseLines);
+        let diff = 0;
+        for (const line of newLines) {
+            if (!baseSet.has(line)) diff++;
+        }
+        return diff;
+    }
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        snapshot: FileSnapshot,
+        newContents: Map<string, string>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newContents.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        // This is a simplified diff, for a more accurate count a real diff algorithm is needed,
+        // but this is fast and good enough for a summary.
+        return {
+            added: countLineDiff(oldLines, newLines),
+            removed: countLineDiff(newLines, oldLines),
+        };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true, isError:
+    boolean = true): Promise<void> => {
+        if (isError) {
+            logger.warn(`Rolling back changes: ${reason}`);
+        }
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                if (isError) {
+                    notifyFailure(uuid, enableNotifications);
+                }
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    type ApprovalOptions = {
+        config: Config;
+        cwd: string;
+        prompter: Prompter;
+        skipConfirmation: boolean;
+    }
+
+
+    const handleApproval = async ({ config, cwd, prompter, skipConfirmation }:
+    ApprovalOptions): Promise<boolean> => {
+        const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+        logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+        
+        const getManualApproval = async (reason: string): Promise<boolean> => {
+            logger.warn(reason);
+            
+            const notificationResult = await requestApprovalWithNotification(config.projectId, config.core.enableNotifications);
+
+            if (notificationResult === 'approved') {
+                logger.info('Approved via notification.');
+                return true;
+            }
+            if (notificationResult === 'rejected') {
+                logger.info('Rejected via notification.');
+                return false;
+            }
+
+            if (notificationResult === 'timeout') {
+                logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');
+            }
+
+            return await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+        };
+
+        if (skipConfirmation) {
+            logger.success('  - Changes approved via -y/--yes flag.');
+            return true;
+        }
+        if (config.patch.approvalMode === 'manual') {
+            return await getManualApproval('Manual approval required because "approvalMode" is set to "manual".');
+        }
+        // auto mode
+        const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+        if (canAutoApprove) {
+            logger.success('  - Changes automatically approved based on your configuration.');
+            return true;
+        }
+        return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const skipConfirmation = options?.yes === true;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newContents = await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, snapshot, newContents);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log(chalk.bold('\nPre-flight summary:'));
+            logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+            logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+            const isApproved = await handleApproval({ config, cwd, prompter, skipConfirmation });
+
+            if (isApproved) {
+                stateFile.approved = true;
+                await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.core.enableNotifications);
+                await handleAutoGitBranch(config, stateFile, cwd);
+            } else {
+                logger.warn('Operation cancelled by user. Rolling back changes...');
+                await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        }
+    };
+
+
+    const handleAutoGitBranch = async (config: Config, stateFile: StateFile,
+    cwd: string): Promise<void> => {
+        if (!config.git.autoGitBranch) return;
+
+        let branchNameSegment = '';
+        if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+            branchNameSegment = stateFile.gitCommitMsg;
+        } else {
+            branchNameSegment = stateFile.uuid;
+        }
+
+        const sanitizedSegment = branchNameSegment
+            .trim()
+            .toLowerCase()
+            .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+            .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+            .replace(/-+/g, '-') // Collapse consecutive hyphens
+            .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+            .slice(0, 70); // Truncate
+
+        if (sanitizedSegment) {
+            const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+            logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+            const command = `git checkout -b "${branchName}"`;
+            const result = await executeShellCommand(command, cwd);
+            if (result.exitCode === 0) {
+                logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+            } else {
+                // Exit code 128 from `git checkout -b` often means the branch already exists.
+                if (result.exitCode === 128 && result.stderr.includes('already exists')) {
+                    logger.warn(`Could not create branch '${chalk.magenta(branchName)}' because it already exists.`);
+                } else {
+                    logger.warn(`Could not create git branch '${chalk.magenta(branchName)}'.`);
+                }
+                logger.debug(`'${command}' failed with: ${result.stderr}`);
+            }
+        } else {
+            logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+        }
+    };
+approved: true

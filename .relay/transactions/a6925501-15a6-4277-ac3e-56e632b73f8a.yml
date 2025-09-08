@@ -1,0 +1,1737 @@
+uuid: a6925501-15a6-4277-ac3e-56e632b73f8a
+projectId: relaycode
+createdAt: '2025-09-04T02:27:56.431Z'
+linesAdded: 198
+linesRemoved: 33
+gitCommitMsg: 'fix(revert): improve revert logic for complex transactions and add tests'
+promptSummary: >-
+  The user is reporting issues with file rollbacks in complex transactions. I
+  will add comprehensive test cases for both transaction rollbacks and the
+  revert command, then fix the revert command's logic to be more robust and
+  handle edge cases like file renames correctly.
+reasoning:
+  - >-
+    ok, i see you're having some trouble with rollbacks, especially in complex
+    situations. that's a classic programmer headache. stuff gets hairy when
+    you're juggling file renames, edits, and deletes all at once. a single weak
+    link in the logic and the whole state gets borked.
+  - >-
+    let's get this sorted. i'll first add some seriously gnarly test cases to
+    make sure we can reliably reproduce the problem. then i'll refactor the
+    `revert` logic to be more robust. instead of trying to be clever and
+    reversing operations one-by-one, we'll make it data-driven based on the
+    snapshot. it's simpler and way less likely to miss edge cases.
+  - let's cook.
+  - '### Step 1: Add stronger tests for transaction rollbacks'
+  - >-
+    First, I'll beef up `test/e2e/transaction.test.ts` with two more hardcore
+    scenarios.
+  - >-
+    1.  A "mega-complex" transaction involving edits, deletes, creates, and
+    renames, which is then rolled back by the user. This will stress-test the
+    `restoreSnapshot` logic with a ton of interleaved operations.
+  - >-
+    2.  A transaction that fails mid-way because of an invalid patch hunk. This
+    ensures that even if `applyOperations` blows up, the rollback still cleans
+    up everything perfectly.
+  - >-
+    This will give us confidence that the basic rollback mechanism within a
+    single transaction is solid.
+  - '### Step 2: Add a guard test for the `revert` command'
+  - >-
+    Now for the main event. The `revert` command's logic for generating inverse
+    operations is tricky, especially with renames. I'll add a "mega-complex"
+    revert test to `test/e2e/revert.test.ts`. This test will apply a series of
+    complex changes and then revert them, asserting that the file system returns
+    to its original state. This is where I expect a failure.
+  - '### Step 3: Fix the `revert` implementation'
+  - >-
+    Alright, with the tests in place, it's time to fix the `revert` command. The
+    old logic tried to reverse each operation, which is fragile. The new logic
+    is much more robust:
+  - >-
+    1.  Figure out what files existed *after* the original transaction
+    (`finalPaths`).
+  - >-
+    2.  Any file that exists in `finalPaths` but not in the original snapshot
+    must have been created, so the inverse operation is to `delete` it.
+  - >-
+    3.  Any file that existed in the original snapshot must be restored to its
+    original content. The inverse operation is to `write` its original content.
+    This correctly handles modifications, deletions (by re-writing the original
+    file), and the content of renamed files (by restoring the original file at
+    its original path).
+  - >-
+    This approach directly computes the operations needed to transform the
+    post-transaction state back to the pre-transaction (snapshot) state, which
+    is exactly what a revert should do.
+  - >-
+    phew. that should do it. this new `revert` logic is much more solid and
+    should handle all the gnarly edge cases you've been seeing. the new tests
+    will keep it that way.
+  - now, let's ship it.
+operations:
+  - type: write
+    path: test/e2e/transaction.test.ts
+    content: >-
+      --- test/e2e/transaction.test.ts
+
+      +++ test/e2e/transaction.test.ts
+
+      @@ -211,6 +211,39 @@
+           expect(stateData).toBeNull();
+         });
+       
+      +  it('should fail transaction gracefully and rollback if a patch hunk is
+      invalid', async () => {
+
+      +    const fileA = 'src/a.ts';
+
+      +    const originalA = 'console.log("a original");';
+
+      +    await createTestFile(context.testDir.path, fileA, originalA);
+
+      +
+
+      +    const fileB = 'src/b.ts';
+
+      +    const originalB = 'console.log("b original");';
+
+      +    await createTestFile(context.testDir.path, fileB, originalB);
+
+      +
+
+      +    // This diff is invalid because "b original" does not contain
+      "non-existent content"
+
+      +    const invalidDiff = `--- a/src/b.ts
+
+      ++++ b/src/b.ts
+
+      +@@ -1,1 +1,1 @@
+
+      +-console.log("non-existent content");
+
+      ++console.log("b modified");
+
+      + `;
+
+      +
+
+      +    const { uuid } = await runProcessPatch(
+
+      +      context, {},
+
+      +      [
+
+      +        { type: 'edit', path: fileA, content: 'console.log("a
+      modified");' },
+
+      +        { type: 'edit', path: fileB, content: invalidDiff, strategy:
+      'standard-diff' },
+
+      +      ]
+
+      +    );
+
+      +
+
+      +    // Check that both files are rolled back
+
+      +    const finalA = await fs.readFile(path.join(context.testDir.path,
+      fileA), 'utf-8');
+
+      +    expect(finalA).toBe(originalA);
+
+      +
+
+      +    const finalB = await fs.readFile(path.join(context.testDir.path,
+      fileB), 'utf-8');
+
+      +    expect(finalB).toBe(originalB);
+
+      +
+
+      +    // No state file should have been committed
+
+      +    const stateData = await readStateFile(context.testDir.path, uuid);
+
+      +    expect(stateData).toBeNull();
+
+      +  });
+
+      +
+         it('should correctly apply a file deletion operation', async () => {
+           const fileToDelete = 'src/delete-me.ts';
+           const originalDeleteContent = 'delete this content';
+      @@ -345,6 +378,79 @@
+           expect(newFileExists).toBe(false);
+         });
+       
+      +  it('should correctly rollback a mega-complex transaction and restore
+      filesystem state', async () => {
+
+      +    // 1. SETUP
+
+      +    const fileToModify = 'src/modify.ts';
+
+      +    const originalModifyContent = 'export const a = 1;';
+
+      +    await createTestFile(context.testDir.path, fileToModify,
+      originalModifyContent);
+
+      +
+
+      +    const fileToDelete = 'src/delete.ts';
+
+      +    const originalDeleteContent = 'export const b = 2;';
+
+      +    await createTestFile(context.testDir.path, fileToDelete,
+      originalDeleteContent);
+
+      +
+
+      +    const fileToRename = 'src/rename-me.ts';
+
+      +    const originalRenameContent = 'export const c = 3;';
+
+      +    await createTestFile(context.testDir.path, fileToRename,
+      originalRenameContent);
+
+      +    
+
+      +    const renamedPath = 'src/renamed.ts';
+
+      +
+
+      +    const existingSharedFile = 'src/shared/existing.ts';
+
+      +    const originalSharedContent = 'export const d = 4;';
+
+      +    await createTestFile(context.testDir.path, existingSharedFile,
+      originalSharedContent);
+
+      +
+
+      +    const newSharedFile = 'src/shared/new.ts';
+
+      +
+
+      +    // 2. OPERATIONS
+
+      +    await runProcessPatch(
+
+      +        context,
+
+      +        { approvalMode: 'manual' },
+
+      +        [
+
+      +            // Standard modify
+
+      +            { type: 'edit', path: fileToModify, content: 'export const a
+      = 100;' },
+
+      +            // Standard delete
+
+      +            { type: 'delete', path: fileToDelete },
+
+      +            // Standard create
+
+      +            { type: 'new', path: 'src/new-file.ts', content: 'export
+      const e = 5;' },
+
+      +            // Rename a file
+
+      +            { type: 'rename', from: fileToRename, to: renamedPath },
+
+      +            // Modify the *renamed* file
+
+      +            { type: 'edit', path: renamedPath, content: 'export const c =
+      300;' },
+
+      +            // Re-create a file with the *original* name of the renamed
+      file
+
+      +            { type: 'new', path: fileToRename, content: 'export const f =
+      6;' },
+
+      +            // Create a file in an existing directory
+
+      +            { type: 'new', path: newSharedFile, content: 'export const g
+      = 7;' },
+
+      +        ],
+
+      +        { prompter: async () => false } // 3. TRIGGER ROLLBACK
+
+      +    );
+
+      +
+
+      +    // 4. ASSERTIONS
+
+      +    // Check modified file
+
+      +    const modifiedContent = await
+      fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+
+      +    expect(modifiedContent).toBe(originalModifyContent);
+
+      +
+
+      +    // Check deleted file (should be restored)
+
+      +    const deletedFileExists = await
+      fs.access(path.join(context.testDir.path, fileToDelete)).then(() =>
+      true).catch(() => false);
+
+      +    expect(deletedFileExists).toBe(true);
+
+      +    const deletedContent = await
+      fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+
+      +    expect(deletedContent).toBe(originalDeleteContent);
+
+      +
+
+      +    // Check created file (should be gone)
+
+      +    const newFileExists = await fs.access(path.join(context.testDir.path,
+      'src/new-file.ts')).then(() => true).catch(() => false);
+
+      +    expect(newFileExists).toBe(false);
+
+      +
+
+      +    // Check renamed file (original should be restored, renamed path
+      should be gone)
+
+      +    const originalRenamedFileExists = await
+      fs.access(path.join(context.testDir.path, fileToRename)).then(() =>
+      true).catch(() => false);
+
+      +    expect(originalRenamedFileExists).toBe(true);
+
+      +    const originalRenamedContent = await
+      fs.readFile(path.join(context.testDir.path, fileToRename), 'utf-8');
+
+      +    expect(originalRenamedContent).toBe(originalRenameContent);
+
+      +    
+
+      +    const renamedFileExists = await
+      fs.access(path.join(context.testDir.path, renamedPath)).then(() =>
+      true).catch(() => false);
+
+      +    expect(renamedFileExists).toBe(false);
+
+      +
+
+      +    // Check shared directory state
+
+      +    const existingSharedFileExists = await
+      fs.access(path.join(context.testDir.path, existingSharedFile)).then(() =>
+      true).catch(() => false);
+
+      +    expect(existingSharedFileExists).toBe(true);
+
+      +    const sharedContent = await
+      fs.readFile(path.join(context.testDir.path, existingSharedFile), 'utf-8');
+
+      +    expect(sharedContent).toBe(originalSharedContent);
+
+      +    
+
+      +    const newSharedFileExists = await
+      fs.access(path.join(context.testDir.path, newSharedFile)).then(() =>
+      true).catch(() => false);
+
+      +    expect(newSharedFileExists).toBe(false);
+
+      +
+
+      +    const sharedDirExists = await
+      fs.access(path.join(context.testDir.path, 'src/shared')).then(() =>
+      true).catch(() => false);
+
+      +    expect(sharedDirExists).toBe(true); // Directory should not be
+      deleted as it wasn't empty
+
+      +  });
+
+      +
+         it('should correctly apply multiple sequential operations on the same file, including a rename', async () => {
+           const originalFilePath = 'src/service.ts';
+           const renamedFilePath = 'src/services/main-service.ts';
+    patchStrategy: new-unified
+  - type: write
+    path: test/e2e/revert.test.ts
+    content: >-
+      --- test/e2e/revert.test.ts
+
+      +++ test/e2e/revert.test.ts
+
+      @@ -87,6 +87,55 @@
+               expect(newFileExistsAfterRevert).toBe(false);
+           });
+       
+      +    it('should correctly revert a mega-complex transaction', async () =>
+      {
+
+      +        // 1. SETUP
+
+      +        const fileToModify = 'src/modify.ts';
+
+      +        const originalModifyContent = 'export const a = 1;';
+
+      +        await createTestFile(context.testDir.path, fileToModify,
+      originalModifyContent);
+
+      +
+
+      +        const fileToDelete = 'src/delete.ts';
+
+      +        const originalDeleteContent = 'export const b = 2;';
+
+      +        await createTestFile(context.testDir.path, fileToDelete,
+      originalDeleteContent);
+
+      +
+
+      +        const fileToRename = 'src/rename-me.ts';
+
+      +        const originalRenameContent = 'export const c = 3;';
+
+      +        await createTestFile(context.testDir.path, fileToRename,
+      originalRenameContent);
+
+      +        
+
+      +        const renamedPath = 'src/renamed.ts';
+
+      +
+
+      +        // 2. APPLY a complex patch (T1)
+
+      +        const { uuid: t1_uuid } = await runProcessPatch(
+
+      +            context, {},
+
+      +            [
+
+      +                { type: 'edit', path: fileToModify, content: 'export
+      const a = 100;' },
+
+      +                { type: 'delete', path: fileToDelete },
+
+      +                { type: 'new', path: 'src/new-file.ts', content: 'export
+      const d = 4;' },
+
+      +                { type: 'rename', from: fileToRename, to: renamedPath },
+
+      +                { type: 'edit', path: renamedPath, content: 'export const
+      c = 300;' },
+
+      +            ]
+
+      +        );
+
+      +
+
+      +        // 3. REVERT T1
+
+      +        await revertCommand(t1_uuid, {}, context.testDir.path, async ()
+      => true);
+
+      +
+
+      +        // 4. ASSERTIONS
+
+      +        const modifiedContent = await
+      fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+
+      +        expect(modifiedContent).toBe(originalModifyContent);
+
+      +
+
+      +        const deletedFileExists = await
+      fs.access(path.join(context.testDir.path, fileToDelete)).then(() =>
+      true).catch(() => false);
+
+      +        expect(deletedFileExists).toBe(true);
+
+      +        const deletedContent = await
+      fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+
+      +        expect(deletedContent).toBe(originalDeleteContent);
+
+      +
+
+      +        const newFileExists = await
+      fs.access(path.join(context.testDir.path, 'src/new-file.ts')).then(() =>
+      true).catch(() => false);
+
+      +        expect(newFileExists).toBe(false);
+
+      +
+
+      +        const originalRenamedFileExists = await
+      fs.access(path.join(context.testDir.path, fileToRename)).then(() =>
+      true).catch(() => false);
+
+      +        expect(originalRenamedFileExists).toBe(true);
+
+      +        const originalRenamedContent = await
+      fs.readFile(path.join(context.testDir.path, fileToRename), 'utf-8');
+
+      +        expect(originalRenamedContent).toBe(originalRenameContent);
+
+      +        
+
+      +        const renamedFileExists = await
+      fs.access(path.join(context.testDir.path, renamedPath)).then(() =>
+      true).catch(() => false);
+
+      +        expect(renamedFileExists).toBe(false);
+
+      +    });
+
+      +
+           it('should correctly revert a transaction with file modification and rename', async () => {
+               const originalFilePath = 'src/original.ts';
+               const renamedFilePath = 'src/renamed.ts';
+    patchStrategy: new-unified
+  - type: write
+    path: src/commands/revert.ts
+    content: >-
+      --- src/commands/revert.ts
+
+      +++ src/commands/revert.ts
+
+      @@ -83,49 +83,32 @@
+               return;
+           }
+       
+      -    // 3. Generate inverse operations
+
+      +    // 3. Generate inverse operations.
+
+      +    // This logic is simpler and more robust than trying to reverse each
+      operation individually.
+
+      +    // It determines the final state of files after the transaction and
+      generates operations
+
+      +    // to transform that final state back to the initial snapshot state.
+           const inverse_operations: FileOperation[] = [];
+      -    const revertedPaths = new Set<string>();
+       
+      -    // To correctly revert a transaction with multiple operations on the
+      same file,
+
+      -    // we iterate through operations in reverse and only generate one
+      inverse operation
+
+      -    // per file path. This ensures we revert to the pre-transaction
+      snapshot state.
+
+      -    for (const op of [...stateToRevert.operations].reverse()) {
+
+      -        if (op.type === 'rename') {
+
+      -            inverse_operations.push({ type: 'rename', from: op.to, to:
+      op.from });
+
+      -        } else {
+
+      -            if (revertedPaths.has(op.path)) {
+
+      -                continue;
+
+      -            }
+
+      -
+
+      -            if (op.type === 'delete') {
+
+      -                const deletedContent = stateToRevert.snapshot[op.path];
+
+      -                if (deletedContent === null || typeof deletedContent ===
+      'undefined') {
+
+      -                    logger.warn(`Cannot revert deletion of
+      ${chalk.cyan(op.path)}, original content not found in snapshot.
+      Skipping.`);
+
+      -                    continue;
+
+      -                }
+
+      -                inverse_operations.push({ type: 'write', path: op.path,
+      content: deletedContent, patchStrategy: 'replace' });
+
+      -            } else if (op.type === 'write') {
+
+      -                const originalContent = stateToRevert.snapshot[op.path];
+
+      -                if (typeof originalContent === 'undefined') {
+
+      -                    logger.warn(`Cannot find original state for
+      ${chalk.cyan(op.path)} in snapshot. Skipping revert for this operation.`);
+
+      -                    continue;
+
+      -                }
+
+      -                if (originalContent === null) {
+
+      -                    // File was created in this transaction. The inverse
+      is to delete it.
+
+      -                    inverse_operations.push({ type: 'delete', path:
+      op.path });
+
+      -                } else {
+
+      -                    // File existed. The inverse is to restore its
+      original content.
+
+      -                    inverse_operations.push({ type: 'write', path:
+      op.path, content: originalContent, patchStrategy: 'replace' });
+
+      -                }
+
+      -            }
+
+      -            revertedPaths.add(op.path);
+
+      +    // Get a set of all file paths that existed *after* the transaction.
+
+      +    const finalPaths = new
+      Set<string>(Object.keys(stateToRevert.snapshot));
+
+      +    for (const op of stateToRevert.operations) {
+
+      +        if (op.type === 'rename') {
+
+      +            finalPaths.delete(op.from);
+
+      +            finalPaths.add(op.to);
+
+      +        } else if (op.type === 'write' && !finalPaths.has(op.path)) {
+
+      +            finalPaths.add(op.path); // A new file was created
+
+      +        } else if (op.type === 'delete') {
+
+      +            finalPaths.delete(op.path);
+               }
+           }
+       
+      +    // Any path that exists now but didn't in the snapshot (or was null)
+      must be deleted.
+
+      +    for (const finalPath of finalPaths) {
+
+      +        if (!stateToRevert.snapshot.hasOwnProperty(finalPath) ||
+      stateToRevert.snapshot[finalPath] === null) {
+
+      +            inverse_operations.push({ type: 'delete', path: finalPath });
+
+      +        }
+
+      +    }
+
+      +
+
+      +    // Any path that was in the snapshot must be restored to its original
+      content.
+
+      +    for (const snapshotPath in stateToRevert.snapshot) {
+
+      +        const content = stateToRevert.snapshot[snapshotPath];
+
+      +        if (content !== null) {
+
+      +            inverse_operations.push({ type: 'write', path: snapshotPath,
+      content, patchStrategy: 'replace' });
+
+      +        }
+
+      +    }
+
+      +
+           if (inverse_operations.length === 0) {
+               logger.warn('No operations to revert for this transaction.');
+               return;
+    patchStrategy: new-unified
+snapshot:
+  test/e2e/revert.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import {
+        setupE2ETest,
+        E2ETestContext,
+        createTestFile,
+        runProcessPatch,
+        createTestConfig,
+    } from '../test.util';
+
+    import { revertCommand } from '../../src/commands/revert';
+
+    import { logger } from '../../src/utils/logger'; // Mocks can't be ESM
+    imports
+
+    import { findLatestStateFile, readAllStateFiles, readStateFile } from
+    '../../src/core/state';
+
+
+    describe('e2e/revert', () => {
+        let context: E2ETestContext;
+
+        beforeEach(async () => {
+            context = await setupE2ETest();
+            // We need an initialized project for revert to work
+            await createTestConfig(context.testDir.path);
+        });
+
+        afterEach(async () => {
+            if (context) await context.cleanup();
+        });
+
+        it('should successfully revert a simple file modification', async () => {
+            const testFile = 'src/index.ts';
+            const originalContent = 'console.log("v1");';
+            const modifiedContent = 'console.log("v2");';
+            await createTestFile(context.testDir.path, testFile, originalContent);
+
+            // 1. Apply a patch to create a transaction (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context,
+                {},
+                [{ type: 'edit', path: testFile, content: modifiedContent }]
+            );
+
+            // Verify file was modified
+            const contentAfterPatch = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(contentAfterPatch).toBe(modifiedContent);
+
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify changes
+            const contentAfterRevert = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(contentAfterRevert).toBe(originalContent);
+
+            // 4. Verify that a new transaction (T2) was created for the revert
+            const t2 = await findLatestStateFile(context.testDir.path);
+            expect(t2).not.toBeNull();
+            expect(t2!.uuid).not.toBe(t1_uuid);
+            expect(t2!.reasoning.join(' ')).toContain(`Reverting transaction ${t1_uuid}`);
+
+            // 5. Verify T1 and T2 transactions exist in DB
+            const t1_state = await readStateFile(context.testDir.path, t1_uuid);
+            const t2_state = await readStateFile(context.testDir.path, t2!.uuid);
+            expect(t1_state).not.toBeNull();
+            expect(t2_state).not.toBeNull();
+        });
+
+        it('should correctly revert a complex transaction (edit, delete, create)', async () => {
+            const fileToModify = 'src/modify.ts';
+            const originalModifyContent = 'export const a = 1;';
+            await createTestFile(context.testDir.path, fileToModify, originalModifyContent);
+            
+            const fileToDelete = 'src/delete.ts';
+            const originalDeleteContent = 'export const b = 2;';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+            
+            const newFilePath = 'src/components/new.ts';
+            const newFileContent = 'export const c = 3;';
+        
+            // 1. Apply a complex patch (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [
+                    { type: 'edit', path: fileToModify, content: 'export const a = 100;' },
+                    { type: 'delete', path: fileToDelete },
+                    { type: 'new', path: newFilePath, content: newFileContent }
+                ]
+            );
+            
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify rollback
+            const restoredModifyContent = await fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+            expect(restoredModifyContent).toBe(originalModifyContent);
+            
+            const restoredDeleteFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(restoredDeleteFileExists).toBe(true);
+            const restoredDeleteContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+            expect(restoredDeleteContent).toBe(originalDeleteContent);
+            
+            const newFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExistsAfterRevert).toBe(false);
+
+            // 4. Verify a new transaction (T2) was created
+            const t2 = await findLatestStateFile(context.testDir.path);
+            expect(t2).not.toBeNull();
+            expect(t2!.uuid).not.toBe(t1_uuid);
+        });
+
+        it('should correctly revert a transaction with file creation and modification', async () => {
+            const newFilePath = 'src/components/new-file.ts';
+            const initialContent = 'export const a = 1;';
+            const modifiedContent = 'export const a = 2;';
+
+            // 1. Apply a patch with new file and modification (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [
+                    { type: 'new', path: newFilePath, content: initialContent },
+                    { type: 'edit', path: newFilePath, content: modifiedContent }
+                ]
+            );
+
+            // Verify file was created with modified content
+            const contentAfterPatch = await fs.readFile(path.join(context.testDir.path, newFilePath), 'utf-8');
+            expect(contentAfterPatch).toBe(modifiedContent);
+            
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify rollback (file should be deleted)
+            const newFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExistsAfterRevert).toBe(false);
+        });
+
+        it('should correctly revert a transaction with file modification and rename', async () => {
+            const originalFilePath = 'src/original.ts';
+            const renamedFilePath = 'src/renamed.ts';
+            const originalContent = 'export const a = "v1";';
+            const modifiedContent = 'export const a = "v2";';
+
+            // Setup: create the original file
+            await createTestFile(context.testDir.path, originalFilePath, originalContent);
+
+            // 1. Apply a patch with modification and rename (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [
+                    { type: 'edit', path: originalFilePath, content: modifiedContent },
+                    { type: 'rename', from: originalFilePath, to: renamedFilePath }
+                ]
+            );
+
+            // Verify file was renamed and content is modified
+            const renamedFileExists = await fs.access(path.join(context.testDir.path, renamedFilePath)).then(() => true).catch(() => false);
+            expect(renamedFileExists).toBe(true);
+            const renamedContent = await fs.readFile(path.join(context.testDir.path, renamedFilePath), 'utf-8');
+            expect(renamedContent).toBe(modifiedContent);
+            const originalFileExists = await fs.access(path.join(context.testDir.path, originalFilePath)).then(() => true).catch(() => false);
+            expect(originalFileExists).toBe(false);
+            
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify rollback
+            const originalFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, originalFilePath)).then(() => true).catch(() => false);
+            expect(originalFileExistsAfterRevert).toBe(true);
+            const originalContentAfterRevert = await fs.readFile(path.join(context.testDir.path, originalFilePath), 'utf-8');
+            expect(originalContentAfterRevert).toBe(originalContent);
+
+            const renamedFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, renamedFilePath)).then(() => true).catch(() => false);
+            expect(renamedFileExistsAfterRevert).toBe(false);
+        });
+
+        it('should log an error and do nothing if UUID does not exist', async () => {
+            let errorLog = '';
+            (logger as any).error = (msg: string) => { errorLog = msg; };
+
+            const fakeUuid = '00000000-0000-0000-0000-000000000000';
+            await revertCommand(fakeUuid, {}, context.testDir.path);
+            
+            expect(errorLog).toContain(`Could not find transaction with UUID '${fakeUuid}'`);
+        });
+
+        it('should be possible to revert a revert', async () => {
+            const testFile = 'src/index.ts';
+            const v1 = 'v1';
+            const v2 = 'v2';
+            await createTestFile(context.testDir.path, testFile, v1);
+
+            // 1. Apply patch to go from v1 -> v2 (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [{ type: 'edit', path: testFile, content: v2 }]
+            );
+            let content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(content).toBe(v2);
+
+            // 2. Revert T1 to go from v2 -> v1 (T2)
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+            content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(content).toBe(v1);
+
+            // 3. Get T2's UUID and revert it to go from v1 -> v2 (T3)
+            const t2 = await findLatestStateFile(context.testDir.path);
+            expect(t2).not.toBeNull();
+            await revertCommand(t2!.uuid, {}, context.testDir.path, async () => true);
+            content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(content).toBe(v2);
+
+            // 4. Check that we have 3 state files
+            const allStates = await readAllStateFiles(context.testDir.path);
+            expect(allStates).not.toBeNull();
+            expect(allStates!.length).toBe(3);
+        });
+
+        describe('revert by index/default', () => {
+            const testFile = 'src/index.ts';
+            const v1 = 'v1';
+            const v2 = 'v2';
+            const v3 = 'v3';
+
+            beforeEach(async () => {
+                // Create a history of transactions
+                await createTestFile(context.testDir.path, testFile, v1);
+                // T1: v1 -> v2
+                await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v2 }]);
+                // T2: v2 -> v3
+                await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v3 }]);
+            });
+
+            it('should revert the latest transaction when no identifier is provided', async () => {
+                // Revert T2 (latest)
+                await revertCommand(undefined, {}, context.testDir.path, async () => true);
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v2);
+            });
+
+            it('should revert the latest transaction when identifier is "1"', async () => {
+                // Revert T2 (latest)
+                await revertCommand('1', {}, context.testDir.path, async () => true);
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v2);
+            });
+
+            it('should revert the 2nd latest transaction when identifier is "2"', async () => {
+                // Revert T1 (2nd latest)
+                await revertCommand('2', {}, context.testDir.path, async () => true);
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v1);
+            });
+
+            it('should log an error for an invalid index', async () => {
+                let errorLog = '';
+                (logger as any).error = (msg: string) => { errorLog = msg; };
+                await revertCommand('99', {}, context.testDir.path, async () => true);
+                expect(errorLog).toContain('Could not find the 99-th latest transaction.');
+            });
+        });
+
+        describe('revert with filtering', () => {
+            const testFile = 'src/index.ts';
+            const v1 = 'v1-original';
+            const v2 = 'v2-first-change';
+            const v3 = 'v3-second-change';
+            let t1_uuid: string, t2_uuid: string, t3_uuid_revert_t2: string;
+
+            beforeEach(async () => {
+                // Setup a history: T1 (v1->v2), T2 (v2->v3), T3 (revert T2, v3->v2)
+                await createTestFile(context.testDir.path, testFile, v1);
+
+                // T1: v1 -> v2
+                const { uuid: t1 } = await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v2 }]);
+                t1_uuid = t1;
+
+                // T2: v2 -> v3
+                const { uuid: t2 } = await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v3 }]);
+                t2_uuid = t2;
+
+                // T3: Revert T2, bringing content from v3 -> v2
+                await revertCommand(t2_uuid, {}, context.testDir.path, async () => true);
+                const t3_state = await findLatestStateFile(context.testDir.path);
+                t3_uuid_revert_t2 = t3_state!.uuid;
+            });
+
+            it('should skip reverting a "revert" transaction and a reverted transaction by default', async () => {
+                // Attempt to revert the latest transaction. 
+                // The chronological order is T3 (revert), T2 (reverted), T1.
+                // T3 and T2 should be skipped, so T1 should be reverted.
+                await revertCommand(undefined, {}, context.testDir.path, async () => true);
+                
+                // State after revert should be v1 (reverted T1)
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v1);
+
+                const latest = await findLatestStateFile(context.testDir.path);
+                expect(latest?.reasoning.join(' ')).toContain(`Reverting transaction ${t1_uuid}`);
+            });
+
+            it('should revert the latest "revert" transaction when --include-reverts is used', async () => {
+                // Revert latest, including reverts. T3 should be reverted.
+                await revertCommand('1', { includeReverts: true }, context.testDir.path, async () => true);
+
+                // State after should be v3 (reverted the revert of T2)
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v3);
+
+                const latest = await findLatestStateFile(context.testDir.path);
+                expect(latest?.reasoning.join(' ')).toContain(`Reverting transaction ${t3_uuid_revert_t2}`);
+            });
+
+            it('should fail to find the 2nd transaction when filtering is on', async () => {
+                // With default filtering, the only revertable transaction is T1.
+                // So asking for the 2nd should fail.
+                let errorLog = '';
+                (logger as any).error = (msg: string) => { errorLog += msg; };
+                (logger as any).info = (msg: string) => { errorLog += msg; }; // Also capture info for the message
+                await revertCommand('2', {}, context.testDir.path, async () => true);
+                
+                expect(errorLog).toContain('Could not find the 2-th latest transaction.');
+                expect(errorLog).toContain('revert transaction');
+            });
+
+            it('should correctly identify the 2nd transaction when including reverts', async () => {
+                // When including reverts, the order is T3, T2, T1. The 2nd is T2.
+                // Reverting T2 will apply its snapshot, which contains v2. The file is already v2.
+                await revertCommand('2', { includeReverts: true }, context.testDir.path, async () => true);
+                const contentAfterRevert = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(contentAfterRevert).toBe(v2);
+
+                const allStates = await readAllStateFiles(context.testDir.path);
+                expect(allStates?.length).toBe(4); // T1, T2, T3, and the new revert of T2
+                const latest = await findLatestStateFile(context.testDir.path);
+                expect(latest?.reasoning.join(' ')).toContain(`Reverting transaction ${t2_uuid}`);
+            });
+        });
+    });
+  src/commands/revert.ts: >-
+    import { loadConfigOrExit } from '../core/config';
+
+    import { findStateFileByIdentifier, readAllStateFiles } from
+    '../core/state';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, ParsedLLMResponse } from 'relaycode-core';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { createConfirmationHandler, Prompter } from '../utils/prompt';
+
+    import { formatTransactionDetails } from '../utils/formatters';
+
+    import chalk from 'chalk';
+
+
+    interface RevertOptions {
+        yes?: boolean;
+        includeReverts?: boolean;
+    }
+
+
+    export const revertCommand = async (identifier?: string, options:
+    RevertOptions = {}, cwd: string = process.cwd(), prompter?: Prompter):
+    Promise<void> => {
+        const getConfirmation = createConfirmationHandler(options, prompter);
+        const config = await loadConfigOrExit(cwd);
+
+        let targetDescription: string;
+
+        // Default to '1' to revert the latest transaction if no identifier is provided.
+        const effectiveIdentifier = identifier ?? '1';
+
+        const isIndexSearch = /^-?\d+$/.test(effectiveIdentifier);
+
+        if (isIndexSearch) {
+            const index = Math.abs(parseInt(effectiveIdentifier, 10));
+            if (isNaN(index) || index <= 0) {
+                logger.error(`Invalid index. Please provide a positive number (e.g., ${chalk.cyan('"1"')} for the latest).`);
+                return;
+            }
+            targetDescription = index === 1 ? 'the latest transaction' : `the ${chalk.cyan(index)}-th latest transaction`;
+        } else {
+            // We assume it's a UUID, findStateFileByIdentifier will validate
+            targetDescription = `transaction with UUID '${chalk.cyan(effectiveIdentifier)}'`;
+        }
+
+        logger.info(`Looking for ${targetDescription}...`);
+        const stateToRevert = await findStateFileByIdentifier(cwd, effectiveIdentifier, {
+            skipReverts: !options.includeReverts,
+        });
+
+        if (!stateToRevert) {
+            logger.error(`Could not find ${targetDescription}.`);
+            if (isIndexSearch) {
+                const allTransactions = await readAllStateFiles(cwd, { skipReverts: false }); // Show total count including reverts
+                const nonRevertTransactions = await readAllStateFiles(cwd, { skipReverts: true });
+                const revertCount = (allTransactions?.length ?? 0) - (nonRevertTransactions?.length ?? 0);
+                
+                logger.info(`Found ${chalk.cyan(allTransactions?.length ?? 0)} total transactions.`);
+                if (revertCount > 0) {
+                    logger.info(`${chalk.cyan(revertCount)} of them are revert transactions, which are skipped by default.`);
+                    logger.info(`Use the ${chalk.cyan('--include-reverts')} flag to include them in the search.`);
+                }
+            }
+            return;
+        }
+        logger.log(chalk.bold(`Transaction to be reverted:`));
+        formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation('\nAre you sure you want to revert this transaction? (y/N)');
+        if (!confirmed) {
+            logger.info('Revert operation cancelled.');
+            return;
+        }
+
+        // 3. Generate inverse operations
+        const inverse_operations: FileOperation[] = [];
+        const revertedPaths = new Set<string>();
+
+        // To correctly revert a transaction with multiple operations on the same file,
+        // we iterate through operations in reverse and only generate one inverse operation
+        // per file path. This ensures we revert to the pre-transaction snapshot state.
+        for (const op of [...stateToRevert.operations].reverse()) {
+            if (op.type === 'rename') {
+                inverse_operations.push({ type: 'rename', from: op.to, to: op.from });
+            } else {
+                if (revertedPaths.has(op.path)) {
+                    continue;
+                }
+
+                if (op.type === 'delete') {
+                    const deletedContent = stateToRevert.snapshot[op.path];
+                    if (deletedContent === null || typeof deletedContent === 'undefined') {
+                        logger.warn(`Cannot revert deletion of ${chalk.cyan(op.path)}, original content not found in snapshot. Skipping.`);
+                        continue;
+                    }
+                    inverse_operations.push({ type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' });
+                } else if (op.type === 'write') {
+                    const originalContent = stateToRevert.snapshot[op.path];
+                    if (typeof originalContent === 'undefined') {
+                        logger.warn(`Cannot find original state for ${chalk.cyan(op.path)} in snapshot. Skipping revert for this operation.`);
+                        continue;
+                    }
+                    if (originalContent === null) {
+                        // File was created in this transaction. The inverse is to delete it.
+                        inverse_operations.push({ type: 'delete', path: op.path });
+                    } else {
+                        // File existed. The inverse is to restore its original content.
+                        inverse_operations.push({ type: 'write', path: op.path, content: originalContent, patchStrategy: 'replace' });
+                    }
+                }
+                revertedPaths.add(op.path);
+            }
+        }
+
+        if (inverse_operations.length === 0) {
+            logger.warn('No operations to revert for this transaction.');
+            return;
+        }
+
+        // 4. Create and process a new "revert" transaction
+        const newUuid = uuidv4();
+        const reasoning = [
+            `Reverting transaction ${stateToRevert.uuid}.`,
+            `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+        ];
+
+        const parsedResponse: ParsedLLMResponse = {
+            control: {
+                projectId: config.projectId,
+                uuid: newUuid,
+            },
+            operations: inverse_operations,
+            reasoning,
+        };
+
+        logger.info(`Creating new transaction ${chalk.gray(newUuid)} to perform the revert.`);
+        await processPatch(config, parsedResponse, { cwd, prompter, yes: options.yes });
+    };
+  test/e2e/transaction.test.ts: >
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+    from '../test.util';
+
+    import { readStateFile } from '../../src/core/state';
+
+
+    describe('e2e/transaction', () => {
+      let context: E2ETestContext;
+      const testFile = 'src/index.ts';
+      const originalContent = 'console.log("original");';
+
+      beforeEach(async () => {
+        context = await setupE2ETest({ withTsconfig: true });
+        await createTestFile(context.testDir.path, testFile, originalContent);
+      });
+
+      afterEach(async () => {
+        if (context) await context.cleanup();
+      });
+
+      it('should apply changes, commit, and store correct state in the database', async () => {
+        const newContent = 'console.log("new content");';
+        const { uuid } = await runProcessPatch(
+          context,
+          { linter: '', approvalMode: 'auto' },
+          [{ type: 'edit', path: testFile, content: newContent }]
+        );
+        // Add a small delay to ensure file operations have completed
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Check file content
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(newContent);
+
+        const stateData = await readStateFile(context.testDir.path, uuid);
+
+        expect(stateData).not.toBeNull();
+        if (!stateData) return; // type guard
+
+        expect(stateData.uuid).toBe(uuid);
+        expect(stateData.approved).toBe(true);
+        expect(stateData.operations).toHaveLength(1);
+        const op = stateData.operations[0]!;
+        expect(op.type).toBe('write');
+        if (op.type === 'write') {
+          expect(op.path).toBe(testFile);
+        }
+        expect(stateData.snapshot[testFile]).toBe(originalContent);
+        expect(stateData.reasoning).toBeDefined();
+      });
+
+      it('should rollback changes when manually disapproved', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { approvalMode: 'manual' },
+          [{ type: 'edit', path: testFile, content: 'console.log("I will be rolled back");' }],
+          { prompter: async () => false }
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should fallback to shell execution for non-tsc linters and require approval on failure', async () => {
+        await runProcessPatch(
+          context,
+          // 'false' is a command that always exits with 1. This tests the shell fallback.
+          { approvalMode: 'auto', approvalOnErrorCount: 0, linter: 'false' },
+          [{ type: 'edit', path: testFile, content: 'any content' }],
+          { prompter: async () => false } // Disapprove manually
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent); // Should be rolled back
+      });
+
+      it('should require manual approval if linter errors exceed approvalOnErrorCount', async () => {
+        await runProcessPatch(
+          context,
+          { approvalMode: 'auto', approvalOnErrorCount: 0, linter: 'bun tsc -b --noEmit' },
+          [{ type: 'edit', path: testFile, content: 'const x: string = 123;' }],
+          { prompter: async () => false }
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+      });
+
+      it('should skip linter if command is empty and auto-approve', async () => {
+        const badContent = 'const x: string = 123;'; // Would fail linter, but it's skipped
+
+        await runProcessPatch(
+          context,
+          { linter: '' },
+          [{ type: 'edit', path: testFile, content: badContent }]
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(badContent);
+      });
+
+      it('should ignore patch with already processed UUID', async () => {
+        const uuid = uuidv4();
+
+        // 1. Process and commit a patch
+        await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: "first change" }], { responseOverrides: { uuid } });
+
+        // 2. Try to process another patch with the same UUID - this will create a new response with the same UUID.
+        // The `processPatch` logic should see the existing state file and ignore it.
+        await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: "second change" }], { responseOverrides: { uuid } });
+
+        // Content should be from the first change, not the second
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe("first change");
+      });
+
+      it('should create nested directories for new files', async () => {
+        const newFilePath = 'src/a/b/c/new-file.ts';
+        const newFileContent = 'hello world';
+
+        await runProcessPatch(
+          context,
+          {},
+          [{ type: 'new', path: newFilePath, content: newFileContent }]
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, newFilePath), 'utf-8');
+        expect(finalContent).toBe(newFileContent);
+      });
+
+      it('should rollback new file and its new empty parent directory on rejection', async () => {
+        const newFilePath = 'src/new/dir/file.ts';
+
+        await runProcessPatch(context, { approvalMode: 'manual' },
+          [{ type: 'new', path: newFilePath, content: 'content' }], { prompter: async () => false });
+
+        const fileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+        expect(fileExists).toBe(false);
+
+        const dirExists = await fs.access(path.join(context.testDir.path, 'src/new/dir')).then(() => true).catch(() => false);
+        expect(dirExists).toBe(false);
+
+        const midDirExists = await fs.access(path.join(context.testDir.path, 'src/new')).then(() => true).catch(() => false);
+        expect(midDirExists).toBe(false);
+
+        // src directory should still exist as it contained a file before
+        const srcDirExists = await fs.access(path.join(context.testDir.path, 'src')).then(() => true).catch(() => false);
+        expect(srcDirExists).toBe(true);
+      });
+
+      it('should not delete parent directory on rollback if it was not empty beforehand', async () => {
+        const existingFilePath = 'src/shared/existing.ts';
+        const newFilePath = 'src/shared/new.ts';
+
+        await createTestFile(context.testDir.path, existingFilePath, 'const existing = true;');
+
+        await runProcessPatch(context, { approvalMode: 'manual' },
+          [{ type: 'new', path: newFilePath, content: 'const brandNew = true;' }],
+          { prompter: async () => false });
+
+        // New file should be gone
+        const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+        expect(newFileExists).toBe(false);
+
+        // Existing file and its directory should remain
+        const existingFileExists = await fs.access(path.join(context.testDir.path, existingFilePath)).then(() => true).catch(() => false);
+        expect(existingFileExists).toBe(true);
+
+        const sharedDirExists = await fs.access(path.join(context.testDir.path, 'src/shared')).then(() => true).catch(() => false);
+        expect(sharedDirExists).toBe(true);
+      });
+
+      it('should abort transaction if preCommand fails', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { preCommand: 'false' },
+          [{ type: 'edit', path: testFile, content: 'new content' }]
+        );
+
+        // File should not have been changed
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        // No state file should have been created
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should automatically roll back if postCommand fails', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { postCommand: 'false' },
+          [{ type: 'edit', path: testFile, content: 'new content' }]
+        );
+
+        // File should have been rolled back
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        // No state file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should ignore patch with non-matching projectId', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { projectId: 'correct-project' },
+          [{ type: 'edit', path: testFile, content: 'should not be applied' }],
+          { responseOverrides: { projectId: 'wrong-project' } }
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        // No state file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should correctly apply a file deletion operation', async () => {
+        const fileToDelete = 'src/delete-me.ts';
+        const originalDeleteContent = 'delete this content';
+        await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+
+        const { uuid } = await runProcessPatch(
+          context,
+          {},
+          [{ type: 'delete', path: fileToDelete }]
+        );
+
+        const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+        expect(deletedFileExists).toBe(false);
+
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+      });
+
+      it('should correctly roll back a file deletion operation', async () => {
+        const fileToDelete = 'src/delete-me.ts';
+        const originalDeleteContent = 'delete this content';
+        await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+
+        const { uuid } = await runProcessPatch(
+          context, { approvalMode: 'manual' },
+          [{ type: 'delete', path: fileToDelete }], { prompter: async () => false }
+        );
+
+        const restoredFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+        expect(restoredFileExists).toBe(true);
+
+        // Content should be the same as the original
+        const restoredContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+        expect(restoredContent).toBe(originalDeleteContent);
+
+        // No state file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should auto-approve if linter errors are within approvalOnErrorCount', async () => {
+        const badContent = 'const x: string = 123;'; // 1 TS error
+
+        const { uuid } = await runProcessPatch(
+          context,
+          { approvalMode: 'auto', approvalOnErrorCount: 1, linter: 'bun tsc -b --noEmit' },
+          [{ type: 'edit', path: testFile, content: badContent }]
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(badContent);
+
+        // State file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+      });
+
+      it('should overwrite an orphaned pending transaction and allow reprocessing', async () => {
+        const uuid = uuidv4();
+        const newContent = 'console.log("final content");';
+
+        // Create an orphaned pending transaction by running a patch and not approving it.
+        // We'll use a trick: have the prompter throw an error to simulate a crash after the pending state is written.
+        try {
+          await runProcessPatch(
+            context,
+            { approvalMode: 'manual' },
+            [{ type: 'edit', path: testFile, content: "this won't be applied" }],
+            { responseOverrides: { uuid }, prompter: async () => { throw new Error('Simulated crash'); } }
+          );
+        } catch (e: any) {
+          expect(e.message).toBe('Simulated crash');
+        }
+
+        await runProcessPatch(
+          context,
+          {},
+          [{ type: 'edit', path: testFile, content: newContent }],
+          { responseOverrides: { uuid } }
+        );
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(newContent);
+
+        // A committed state file should exist
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+        if (!stateData) return;
+        // The final committed reasoning should be from the second run.
+        expect(stateData.operations.length).toBeGreaterThan(0);
+        const op = stateData.operations[0]!;
+        expect(op.type).toBe('write');
+        if (op.type === 'write') {
+          expect(op.content).toContain('final content');
+        }
+      });
+
+      it('should run pre and post commands in the correct order', async () => {
+        const preCommandFile = path.join(context.testDir.path, 'pre.txt');
+        const postCommandFile = path.join(context.testDir.path, 'post.txt');
+
+        // Use a synchronous file write to avoid potential race conditions or async flushing issues
+        // with `node -e` in a shelled-out process.
+        const preCommand = `node -e "require('fs').writeFileSync('${preCommandFile.replace(/\\/g, '/')}', '')"`;
+        const postCommand = `node -e "require('fs').writeFileSync('${postCommandFile.replace(/\\/g, '/')}', '')"`;
+
+        await runProcessPatch(
+          context,
+          {
+            preCommand,
+            postCommand,
+          },
+          [{ type: 'edit', path: testFile, content: 'new content' }]
+        );
+
+        const preExists = await fs.access(preCommandFile).then(() => true).catch(() => false);
+        expect(preExists).toBe(true);
+
+        const postExists = await fs.access(postCommandFile).then(() => true).catch(() => false);
+        expect(postExists).toBe(true);
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe('new content');
+      });
+
+      it('should create a pending record during transaction and mark as undone on rollback', async () => {
+        const uuid = uuidv4();
+
+        // We can't easily check the DB *during* the transaction.
+        // Instead, we will check that no committed record exists after rollback.
+        // The state transition is pending -> undone.
+        // We don't have a way to check for 'undone' records with the current state API,
+        // but we can check that it's not 'committed'.
+
+        // Check if the pending file exists during the transaction
+        // This part is no longer testable in the same way with an in-process DB.
+        // let pendingFileExistedDuringRun = false;
+
+        const prompter = async (): Promise<boolean> => {
+          // pendingFileExistedDuringRun = (await getDb(context.testDir.path).query().from('transactions').where({ uuid, status: 'pending' }).first()) != null;
+          return false; // Disapprove to trigger rollback
+        };
+
+        await runProcessPatch(
+          context,
+          { approvalMode: 'manual' },
+          [{ type: 'edit', path: testFile, content: 'I will be rolled back' }],
+          { prompter, responseOverrides: { uuid } }
+        );
+
+        // No committed file should exist
+        const committedState = await readStateFile(context.testDir.path, uuid);
+        expect(committedState).toBeNull();
+      });
+
+      it('should fail transaction gracefully if a file is not writable and rollback all changes', async () => {
+        const unwritableFile = 'src/unwritable.ts';
+        const writableFile = 'src/writable.ts';
+        const originalUnwritableContent = 'original unwritable';
+        const originalWritableContent = 'original writable';
+
+        await createTestFile(context.testDir.path, unwritableFile, originalUnwritableContent);
+        await createTestFile(context.testDir.path, writableFile, originalWritableContent);
+
+        const unwritableFilePath = path.join(context.testDir.path, unwritableFile);
+
+        try {
+          await fs.chmod(unwritableFilePath, 0o444); // Make read-only
+
+          const { uuid } = await runProcessPatch(
+            context, {},
+            [
+              { type: 'edit', path: writableFile, content: 'new writable content' },
+              { type: 'edit', path: unwritableFile, content: 'new unwritable content' }
+            ]
+          );
+
+          // Check file states: both should be rolled back to original content.
+          const finalWritable = await fs.readFile(path.join(context.testDir.path, writableFile), 'utf-8');
+          expect(finalWritable).toBe(originalWritableContent);
+
+          const finalUnwritable = await fs.readFile(path.join(context.testDir.path, unwritableFile), 'utf-8');
+          expect(finalUnwritable).toBe(originalUnwritableContent);
+
+          // No state file should have been committed
+          const stateData = await readStateFile(context.testDir.path, uuid);
+          expect(stateData).toBeNull();
+        } finally {
+          // Make the file writable again to allow cleanup
+          try {
+            await fs.chmod(unwritableFilePath, 0o644);
+          } catch (err) {
+            console.error('Failed to restore file permissions:', err);
+          }
+        }
+      });
+
+      it('should rollback gracefully if creating a file in a non-writable directory fails', async () => {
+        const readonlyDir = 'src/readonly-dir';
+        const newFilePath = path.join(readonlyDir, 'new-file.ts');
+        const readonlyDirPath = path.join(context.testDir.path, readonlyDir);
+
+        await fs.mkdir(readonlyDirPath, { recursive: true });
+        await fs.chmod(readonlyDirPath, 0o555); // Read and execute only
+
+        try {
+          const { uuid } = await runProcessPatch(
+            context,
+            {},
+            [{ type: 'new', path: newFilePath, content: 'this should not be written' }]
+          );
+
+          // Check that the new file was not created
+          const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+          expect(newFileExists).toBe(false);
+
+          // No state file should have been committed
+          const stateData = await readStateFile(context.testDir.path, uuid);
+          expect(stateData).toBeNull();
+        } finally {
+          // Restore permissions for cleanup
+          try {
+            // The directory might have been removed on rollback, so check if it exists first.
+            if (await fs.access(readonlyDirPath).then(() => true).catch(() => false)) {
+              await fs.chmod(readonlyDirPath, 0o755);
+            }
+          } catch (err) {
+            console.error('Failed to restore directory permissions:', err);
+          }
+        }
+      });
+
+      it('should correctly rollback a complex transaction (modify, delete, create)', async () => {
+        // Setup initial files
+        const fileToModify = 'src/modify.ts';
+        const originalModifyContent = 'export const a = 1;';
+        await createTestFile(context.testDir.path, fileToModify, originalModifyContent);
+
+        const fileToDelete = 'src/delete.ts';
+        const originalDeleteContent = 'export const b = 2;';
+        await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+
+        const newFilePath = 'src/new/component.ts';
+        const newFileContent = 'export const c = 3;';
+
+        // Disapprove the transaction
+        await runProcessPatch(
+          context,
+          { approvalMode: 'manual' },
+          [
+            { type: 'edit', path: fileToModify, content: 'export const a = 100;' },
+            { type: 'delete', path: fileToDelete },
+            { type: 'new', path: newFilePath, content: newFileContent }
+          ], { prompter: async () => false }
+        );
+
+        // Verify rollback
+        const modifiedFileContent = await fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+        expect(modifiedFileContent).toBe(originalModifyContent);
+
+        const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+        expect(deletedFileExists).toBe(true);
+
+        const deletedFileContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+        expect(deletedFileContent).toBe(originalDeleteContent);
+
+        const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+        expect(newFileExists).toBe(false);
+      });
+
+      it('should correctly apply multiple sequential operations on the same file, including a rename', async () => {
+        const originalFilePath = 'src/service.ts';
+        const renamedFilePath = 'src/services/main-service.ts';
+        const originalServiceContent = `class Service {
+        name = "MyService";
+
+        execute() {
+            console.log("Executing service");
+        }
+    }`;
+        await createTestFile(context.testDir.path, originalFilePath, originalServiceContent);
+
+        // First, a standard diff to rename a property and add a new one.
+        const unifiedDiff = `--- a/${originalFilePath}
+    +++ b/${originalFilePath}
+
+    @@ -1,5 +1,6 @@
+     class Service {
+    -     name = "MyService";
+
+    +    name = "MyAwesomeService";
+
+    +    version = "1.0";
+
+         execute() {
+             console.log("Executing service");
+        }
+    }`;
+
+        // Then, a search-replace to update a method on the *result* of the first patch.
+        const searchReplaceDiff = `
+    <<<<<<< SEARCH
+            console.log("Executing service");
+    =======
+            console.log(\`Executing service \${this.name} v\${this.version}\`);
+    >>>>>>> REPLACE
+
+    `;
+
+        // And finally, rename the file.
+        const { uuid } = await runProcessPatch(
+          context,
+          {},
+          [
+            { type: 'edit', path: originalFilePath, content: unifiedDiff, strategy: 'standard-diff' },
+            { type: 'edit', path: originalFilePath, content: searchReplaceDiff, strategy: 'search-replace' },
+            { type: 'rename', from: originalFilePath, to: renamedFilePath },
+          ]
+        );
+
+        // 1. Verify file system state
+        const originalFileExists = await fs.access(path.join(context.testDir.path, originalFilePath)).then(() => true).catch(() => false);
+        expect(originalFileExists).toBe(false);
+
+        const renamedFileExists = await fs.access(path.join(context.testDir.path, renamedFilePath)).then(() => true).catch(() => false);
+        expect(renamedFileExists).toBe(true);
+
+        // 2. Verify final content
+        const finalContent = await fs.readFile(path.join(context.testDir.path, renamedFilePath), 'utf-8');
+        const expectedContent = `class Service {
+        name = "MyAwesomeService";
+        version = "1.0";
+
+        execute() {
+            console.log(\`Executing service \${this.name} v\${this.version}\`);
+        }
+    }`;
+        expect(finalContent.replace(/\s/g, '')).toBe(expectedContent.replace(/\s/g, ''));
+
+        // 3. Verify snapshot in state file for rollback purposes
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+        expect(stateData?.snapshot[originalFilePath]).toBe(originalServiceContent);
+        expect(stateData?.snapshot[renamedFilePath]).toBe(null); // It didn't exist at snapshot time
+      });
+    });
+approved: true

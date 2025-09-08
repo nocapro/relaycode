@@ -1,0 +1,77 @@
+e2e_patch_tests:
+  - name: create-file-with-replace
+    description: Should create a new file using the replace strategy (default)
+    markdown_content: |
+      ```typescript // src/new.ts
+      export const newFunction = () => {
+          console.log("new file");
+      };
+      ```
+    initial_state: []
+    expected_state:
+      - path: "src/new.ts"
+        content: |
+          export const newFunction = () => {
+              console.log("new file");
+          };
+
+  - name: delete-file
+    description: Should delete an existing file
+    markdown_content: |
+      ```typescript // src/old-helper.ts
+      //TODO: delete this file
+      ```
+    initial_state:
+      - path: "src/old-helper.ts"
+        content: "export const oldHelper = () => {};"
+    expected_state:
+      - path: "src/old-helper.ts"
+        exists: false
+
+  - name: rename-file
+    description: Should rename an existing file
+    markdown_content: |
+      ```json // rename-file
+      {
+        "from": "src/old-name.ts",
+        "to": "src/new-name.ts"
+      }
+      ```
+    initial_state:
+      - path: "src/old-name.ts"
+        content: "export const oldName = {};"
+    expected_state:
+      - path: "src/old-name.ts"
+        exists: false
+      - path: "src/new-name.ts"
+        content: "export const oldName = {};"
+
+  - name: create-file-with-spaces-in-path
+    description: Should create a file with spaces in its path
+    markdown_content: |
+      ```typescript // "src/components/My Component.tsx"
+      export const MyComponent = () => <div>Hello</div>;
+      ```
+    initial_state: []
+    expected_state:
+      - path: "src/components/My Component.tsx"
+        content: |
+          export const MyComponent = () => <div>Hello</div>;
+
+  - name: rename-file-with-spaces-in-path
+    description: Should correctly rename a file to a path with spaces
+    markdown_content: |
+      ```json // rename-file
+      {
+        "from": "src/components/MyComponent.tsx",
+        "to": "src/components/My New Component.tsx"
+      }
+      ```
+    initial_state:
+      - path: "src/components/MyComponent.tsx"
+        content: "export const MyComponent = () => {};"
+    expected_state:
+      - path: "src/components/MyComponent.tsx"
+        exists: false
+      - path: "src/components/My New Component.tsx"
+        content: "export const MyComponent = () => {};"

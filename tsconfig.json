@@ -1,0 +1,41 @@
+{
+  "include": ["src/**/*.ts",  "test/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ],
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "module": "esnext",
+    "target": "esnext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    // "paths": {
+    //   "@/*": ["./src/*"],
+    //   "relaycode-core": ["./packages/relaycode-core/dist/"],
+    //   "konro": ["./packages/konro/src/index.ts"],
+    //   "apply-multi-diff": ["./packages/apply-multi-diff/src/index.ts"]
+    // }
+    "strict": true,
+    "downlevelIteration": true,
+    "skipLibCheck": true,
+    "jsx": "preserve",
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitAny": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "types": [
+      "bun-types"
+    ]
+  }
+}

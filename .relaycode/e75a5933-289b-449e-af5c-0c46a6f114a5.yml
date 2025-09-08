@@ -1,0 +1,436 @@
+uuid: e75a5933-289b-449e-af5c-0c46a6f114a5
+projectId: relaycode
+createdAt: '2025-06-24T06:05:47.124Z'
+gitCommitMsg: 'fix(core): Make restoreSnapshot robust to partial failures'
+promptSummary: >-
+  Fixing a bug in the transaction rollback logic that was exposed by a test
+  failure. The `restoreSnapshot` function was not robust enough and would halt
+  on the first error, leaving files in a partially modified state. I've updated
+  it to attempt restoring all files and collect errors, ensuring a more complete
+  rollback.
+reasoning:
+  - >-
+    I see you've encountered a test failure. It seems my previous refactoring
+    exposed a latent bug in the transaction rollback logic. I apologize for
+    that.
+  - >-
+    The error message `Expected: "original writable", Received: "new writable
+    content"` indicates that when a transaction fails, the rollback process
+    isn't correctly restoring all files to their original state. My
+    investigation reveals that the `restoreSnapshot` function in
+    `src/core/executor.ts` would halt if it encountered an error (like trying to
+    write to a read-only file), leaving other files in a modified state.
+  - >-
+    I will now fix this by making the `restoreSnapshot` function more robust.
+    Instead of stopping on the first error, it will now attempt to restore *all*
+    files from the snapshot and then report any failures at the end. This
+    ensures that a failure to restore one file doesn't prevent others from being
+    correctly rolled back.
+  - 'Here is the fix for `src/core/executor.ts`:'
+  - >-
+    This change should resolve the test failure and make the rollback process
+    significantly more reliable.
+operations:
+  - type: write
+    path: src/core/executor.ts
+    content: >-
+      --- src/core/executor.ts
+
+      +++ src/core/executor.ts
+
+      @@ -259,48 +259,45 @@
+         }
+       };
+       
+       export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string = process.cwd()): Promise<void> => {
+         const projectRoot = path.resolve(cwd);
+         const entries = Object.entries(snapshot);
+      -  const directoriesDeleted = new Set<string>();
+
+      +  const directoriesToClean = new Set<string>();
+
+      +  const restoreErrors: { path: string, error: unknown }[] = [];
+       
+      -  // Handle all file operations sequentially to ensure atomicity during
+      rollback
+
+      -  for (const [filePath, content] of entries) {
+
+      -    const fullPath = path.resolve(cwd, filePath);
+
+      -    try {
+
+      -      if (content === null) {
+
+      -        // If the file didn't exist in the snapshot, make sure it doesn't
+      exist after restore
+
+      -        try {
+
+      -          await fs.unlink(fullPath);
+
+      -          directoriesDeleted.add(path.dirname(fullPath));
+
+      -        } catch (error) {
+
+      -          if (error instanceof Error && 'code' in error && (error.code
+      === 'ENOENT' || error.code === 'ENOTDIR')) {
+
+      -            // File or directory already doesn't exist, which is fine
+
+      -          } else {
+
+      -            throw error;
+
+      -          }
+
+      +  // Attempt to restore all files in parallel, collecting errors.
+
+      +  await Promise.all(entries.map(async ([filePath, content]) => {
+
+      +      const fullPath = path.resolve(cwd, filePath);
+
+      +      try {
+
+      +        if (content === null) {
+
+      +          // If the file didn't exist in the snapshot, make sure it
+      doesn't exist after restore.
+
+      +          try {
+
+      +            await fs.unlink(fullPath);
+
+      +            directoriesToClean.add(path.dirname(fullPath));
+
+      +          } catch (unlinkError) {
+
+      +              if (unlinkError instanceof Error && 'code' in unlinkError
+      && (unlinkError.code === 'ENOENT' || unlinkError.code === 'ENOTDIR')) {
+
+      +                  // This is fine, file is already gone.
+
+      +              } else {
+
+      +                  throw unlinkError; // This is a real error.
+
+      +              }
+
+      +          }
+
+      +        } else {
+
+      +          // Create directory structure if needed and write the original
+      content back.
+
+      +          await fs.mkdir(path.dirname(fullPath), { recursive: true });
+
+      +          await fs.writeFile(fullPath, content, 'utf-8');
+               }
+      -      } else {
+
+      -        // Create directory structure if needed
+
+      -        const dir = path.dirname(fullPath);
+
+      -        await fs.mkdir(dir, { recursive: true });
+
+      -        
+
+      -        // Write the original content back to the file
+
+      -        await fs.writeFile(fullPath, content, 'utf-8');
+
+      +      } catch (error) {
+
+      +        restoreErrors.push({ path: filePath, error });
+             }
+      -    } catch (error) {
+
+      -      console.error(`Failed to restore ${filePath}:`, error);
+
+      -      throw error;
+
+      -    }
+
+      -  }
+
+      +  }));
+         
+         // After all files are processed, clean up empty directories
+         // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      -  const sortedDirs = Array.from(directoriesDeleted)
+
+      +  const sortedDirs = Array.from(directoriesToClean)
+           .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+         
+         // Process each directory that had files deleted
+         for (const dir of sortedDirs) {
+           await removeEmptyParentDirectories(dir, projectRoot);
+         }
+      +
+
+      +  if (restoreErrors.length > 0) {
+
+      +    const errorSummary = restoreErrors
+
+      +      .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)
+
+      +      .join('\n');
+
+      +    throw new Error(`Rollback failed for ${restoreErrors.length}
+      file(s):\n${errorSummary}`);
+
+      +  }
+       };
+    patchStrategy: new-unified
+snapshot:
+  src/core/executor.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { FileOperation, FileSnapshot } from '../types';
+
+    import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+    unifiedDiffService } from 'diff-apply';
+
+    import { getErrorMessage, isEnoentError } from '../utils/logger';
+
+
+    const patchStrategies = {
+      'new-unified': (p: { originalContent: string; diffContent: string; }) => {
+        const service = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+        return service.applyDiff(p);
+      },
+      'multi-search-replace': (p: { originalContent: string; diffContent: string; }) => {
+        return multiSearchReplaceService.multiSearchReplaceService.applyDiff(p);
+      },
+      'unified': (p: { originalContent: string; diffContent: string; }) => {
+        return unifiedDiffService.unifiedDiffService.applyDiff(p.originalContent, p.diffContent);
+      },
+    };
+
+
+    export const readFileContent = async (filePath: string, cwd: string =
+    process.cwd()): Promise<string | null> => {
+      try {
+        return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null; // File doesn't exist
+        }
+        throw error;
+      }
+    };
+
+
+    export const writeFileContent = async (filePath: string, content: string,
+    cwd: string = process.cwd()): Promise<void> => {
+      const absolutePath = path.resolve(cwd, filePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, content, 'utf-8');
+    };
+
+
+    export const deleteFile = async (filePath: string, cwd: string =
+    process.cwd()): Promise<void> => {
+      try {
+        await fs.unlink(path.resolve(cwd, filePath));
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // File already deleted, which is fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const fileExists = async (filePath: string, cwd: string =
+    process.cwd()): Promise<boolean> => {
+      try {
+        await fs.access(path.resolve(cwd, filePath));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+
+    export const safeRename = async (fromPath: string, toPath:string):
+    Promise<void> => {
+        try {
+            await fs.rename(fromPath, toPath);
+        } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'EXDEV') {
+                await fs.copyFile(fromPath, toPath);
+                await fs.unlink(fromPath);
+            } else {
+                throw error;
+            }
+        }
+    };
+
+
+    export const renameFile = async (fromPath: string, toPath: string, cwd:
+    string = process.cwd()): Promise<void> => {
+      const fromAbsolutePath = path.resolve(cwd, fromPath);
+      const toAbsolutePath = path.resolve(cwd, toPath);
+      await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+      await safeRename(fromAbsolutePath, toAbsolutePath);
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      await Promise.all(
+        filePaths.map(async (filePath) => {
+          snapshot[filePath] = await readFileContent(filePath, cwd);
+        })
+      );
+      return snapshot;
+    };
+
+
+    export const applyOperations = async (operations: FileOperation[], cwd:
+    string = process.cwd()): Promise<Map<string, string>> => {
+      const newContents = new Map<string, string>();
+      // Operations must be applied sequentially to ensure that if one fails,
+      // we can roll back from a known state.
+      for (const op of operations) {
+        if (op.type === 'delete') {
+          await deleteFile(op.path, cwd);
+          continue;
+        }
+        if (op.type === 'rename') {
+          await renameFile(op.from, op.to, cwd);
+          continue;
+        }
+        
+        let finalContent: string;
+
+        if (op.patchStrategy === 'replace') {
+          finalContent = op.content;
+        } else {
+          // For patch strategies, apply them sequentially
+          const originalContent = await readFileContent(op.path, cwd);
+          if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+            throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+          }
+
+          try {
+            const diffParams = {
+              originalContent: originalContent ?? '',
+              diffContent: op.content,
+            };
+            
+            const patcher = patchStrategies[op.patchStrategy as keyof typeof patchStrategies];
+            if (!patcher) {
+              throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+            }
+            
+            const result = await patcher(diffParams);
+            if (result.success) {
+              finalContent = result.content;
+            } else {
+              throw new Error(result.error);
+            }
+          } catch (e) {
+            throw new Error(`Error applying patch for ${op.path} with strategy '${op.patchStrategy}': ${getErrorMessage(e)}`);
+          }
+        }
+        
+        await writeFileContent(op.path, finalContent, cwd);
+        newContents.set(op.path, finalContent);
+      }
+      return newContents;
+    };
+
+
+    // Helper to check if a directory is empty
+
+    const isDirectoryEmpty = async (dirPath: string): Promise<boolean> => {
+      try {
+        const files = await fs.readdir(dirPath);
+        return files.length === 0;
+      } catch (error) {
+        // If directory doesn't exist or is not accessible, consider it "not empty"
+        return false;
+      }
+    };
+
+
+    // Recursively remove all empty parent directories up to a limit
+
+    const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+    string): Promise<void> => {
+      if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+        return;
+      }
+      
+      try {
+        const isEmpty = await isDirectoryEmpty(dirPath);
+        if (isEmpty) {
+          await fs.rmdir(dirPath);
+          // Recursively check parent directory
+          await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+        }
+      } catch (error) {
+        // Ignore directory removal errors, but don't continue up the chain
+        if (!(error instanceof Error && 'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) {
+          console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+        }
+      }
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesDeleted = new Set<string>();
+
+      // Handle all file operations sequentially to ensure atomicity during rollback
+      for (const [filePath, content] of entries) {
+        const fullPath = path.resolve(cwd, filePath);
+        try {
+          if (content === null) {
+            // If the file didn't exist in the snapshot, make sure it doesn't exist after restore
+            try {
+              await fs.unlink(fullPath);
+              directoriesDeleted.add(path.dirname(fullPath));
+            } catch (error) {
+              if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+                // File or directory already doesn't exist, which is fine
+              } else {
+                throw error;
+              }
+            }
+          } else {
+            // Create directory structure if needed
+            const dir = path.dirname(fullPath);
+            await fs.mkdir(dir, { recursive: true });
+            
+            // Write the original content back to the file
+            await fs.writeFile(fullPath, content, 'utf-8');
+          }
+        } catch (error) {
+          console.error(`Failed to restore ${filePath}:`, error);
+          throw error;
+        }
+      }
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesDeleted)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+    };
+approved: true

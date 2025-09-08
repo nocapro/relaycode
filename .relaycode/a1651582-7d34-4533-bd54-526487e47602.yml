@@ -1,0 +1,1438 @@
+uuid: a1651582-7d34-4533-bd54-526487e47602
+projectId: relaycode
+createdAt: '2025-06-24T07:13:21.413Z'
+gitCommitMsg: 'refactor: improve overall type safety'
+promptSummary: >-
+  The user requested to improve type safety across the codebase by removing
+  `any` and `unknown` types where possible. I have added stricter types,
+  interfaces for untyped libraries, and proper error handling for `unknown`
+  types in catch clauses.
+reasoning:
+  - >-
+    Excellent goal! Enforcing stricter type safety is a great practice for
+    building robust and maintainable software. I'll go through the codebase and
+    eliminate `any` and `unknown` types where possible by adding more specific
+    types and type guards.
+  - '### Adding Types to Clipboard Handling'
+  - >-
+    First, I'll add explicit types for the callback in the `exec` function
+    within `src/core/clipboard.ts` to ensure the arguments are correctly typed
+    instead of being implicit `any`.
+  - '### Typing Dynamic Configuration Loading'
+  - >-
+    In `src/core/config.ts`, the dynamic `import()` of the configuration file
+    returns a module of type `any`. I'll define an interface for this module to
+    ensure type-safe access to its `default` export.
+  - '### Improving Type Safety in File Executor'
+  - >-
+    I'll update `src/core/executor.ts` to handle errors caught in `try...catch`
+    blocks as `unknown`, which is TypeScript's default with `strict` mode. This
+    requires adding type assertions to safely access error properties like
+    `code`.
+  - '### Typing the YAML Parser'
+  - >-
+    In `src/core/parser.ts`, the `yaml.load` function returns `unknown`. I'll
+    make this explicit to maintain type safety before the value is passed to Zod
+    for validation.
+  - '### Strengthening Zod Schemas'
+  - >-
+    I'll refine the Zod schema in `src/types.ts` for `changeSummary`. The
+    original `z.record(z.string())` allows any value type (`any`), but the data
+    is consistently a string. I'll change it to `z.record(z.string(),
+    z.string())` for stricter validation.
+  - '### Adding Types for Notifier Library'
+  - >-
+    The `toasted-notifier` library does not have TypeScript definitions. I'll
+    add a local interface in `src/utils/notifier.ts` to define the shape of the
+    notifier object and its methods, removing the use of `any` for its
+    callbacks.
+  - >-
+    These changes should significantly improve the overall type safety of the
+    application.
+operations:
+  - type: write
+    path: src/core/clipboard.ts
+    content: |-
+      <<<<<<< SEARCH
+      import { exec } from 'child_process';
+      =======
+      import { exec, ExecException } from 'child_process';
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+            const command = `"${WINDOWS_CLIPBOARD_PATH}" --paste`;
+            
+            exec(command, { encoding: 'utf8' }, (error, stdout, stderr) => {
+              if (error) {
+      =======
+            const command = `"${WINDOWS_CLIPBOARD_PATH}" --paste`;
+            
+            exec(command, { encoding: 'utf8' }, (error: ExecException | null, stdout: string, stderr: string) => {
+              if (error) {
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/config.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      const loadModuleConfig = async (configPath: string):
+      Promise<RelayCodeConfigInput> => {
+        let importPath = configPath;
+        let tempDir: string | null = null;
+
+        if (configPath.endsWith('.ts')) {
+          tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-'));
+          const tempFile = path.join(tempDir, 'relaycode.config.mjs');
+
+          await build({
+            entryPoints: [configPath],
+            outfile: tempFile,
+            bundle: true,
+            platform: 'node',
+            format: 'esm',
+            alias: {
+              'relaycode': path.resolve(process.cwd(), 'src/index.ts')
+            },
+          });
+          importPath = tempFile;
+        }
+
+        try {
+          const module = await import(`${importPath}?t=${Date.now()}`);
+          return module.default;
+        } finally {
+          if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+        }
+      };
+
+      =======
+
+      interface ConfigModule {
+        default: RelayCodeConfigInput;
+      }
+
+
+      const loadModuleConfig = async (configPath: string):
+      Promise<RelayCodeConfigInput> => {
+        let importPath = configPath;
+        let tempDir: string | null = null;
+
+        if (configPath.endsWith('.ts')) {
+          tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-'));
+          const tempFile = path.join(tempDir, 'relaycode.config.mjs');
+
+          await build({
+            entryPoints: [configPath],
+            outfile: tempFile,
+            bundle: true,
+            platform: 'node',
+            format: 'esm',
+            alias: {
+              'relaycode': path.resolve(process.cwd(), 'src/index.ts')
+            },
+          });
+          importPath = tempFile;
+        }
+
+        try {
+          // Dynamically import the module. The cache-busting `?t=` is important for reloads.
+          const module: ConfigModule = await import(`${importPath}?t=${Date.now()}`);
+          return module.default;
+        } finally {
+          if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+        }
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/executor.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      export const deleteFile = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+        try {
+          await fs.unlink(path.resolve(cwd, filePath));
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+            // File already deleted or is a directory, which is fine for an unlink operation.
+            return;
+          }
+          throw error;
+        }
+      };
+
+      =======
+
+      export const deleteFile = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+        try {
+          await fs.unlink(path.resolve(cwd, filePath));
+        } catch (error: unknown) {
+          if (error instanceof Error && 'code' in error && ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR')) {
+            // File already deleted or is a directory, which is fine for an unlink operation.
+            return;
+          }
+          throw error;
+        }
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const safeRename = async (fromPath: string, toPath:string):
+      Promise<void> => {
+          try {
+              await fs.rename(fromPath, toPath);
+          } catch (error) {
+              if (error instanceof Error && 'code' in error && error.code === 'EXDEV') {
+                  await fs.copyFile(fromPath, toPath);
+                  await fs.unlink(fromPath);
+              } else {
+                  throw error;
+              }
+          }
+      };
+
+      =======
+
+      export const safeRename = async (fromPath: string, toPath:string):
+      Promise<void> => {
+          try {
+              await fs.rename(fromPath, toPath);
+          } catch (error: unknown) {
+              if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'EXDEV') {
+                  await fs.copyFile(fromPath, toPath);
+                  await fs.unlink(fromPath);
+              } else {
+                  throw error;
+              }
+          }
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+      string): Promise<void> => {
+        if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+          return;
+        }
+        
+        try {
+          const isEmpty = await isDirectoryEmpty(dirPath);
+          if (isEmpty) {
+            await fs.rmdir(dirPath);
+            // Recursively check parent directory
+            await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+          }
+        } catch (error) {
+          // Ignore directory removal errors, but don't continue up the chain
+          if (!(error instanceof Error && 'code' in error &&
+              (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) {
+            console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+          }
+        }
+      };
+
+      =======
+
+      const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+      string): Promise<void> => {
+        if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+          return;
+        }
+        
+        try {
+          const isEmpty = await isDirectoryEmpty(dirPath);
+          if (isEmpty) {
+            await fs.rmdir(dirPath);
+            // Recursively check parent directory
+            await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+          }
+        } catch (error: unknown) {
+          // Ignore directory removal errors, but don't continue up the chain
+          if (!(error instanceof Error && 'code' in error &&
+              ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR'))) {
+            console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+          }
+        }
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/parser.ts
+    content: |-
+      <<<<<<< SEARCH
+          try {
+              const yamlContent = yaml.load(yamlText);
+              const control = ControlYamlSchema.parse(yamlContent);
+              return { control, textWithoutYaml };
+          } catch (e) {
+      =======
+          try {
+              const yamlContent: unknown = yaml.load(yamlText);
+              const control = ControlYamlSchema.parse(yamlContent);
+              return { control, textWithoutYaml };
+          } catch (e) {
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/types.ts
+    content: |-
+      <<<<<<< SEARCH
+        changeSummary: z.array(z.record(z.string())).optional(), // Not strictly used, but good to parse
+      =======
+        changeSummary: z.array(z.record(z.string(), z.string())).optional(), // Not strictly used, but good to parse
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/utils/notifier.ts
+    content: |-
+      <<<<<<< SEARCH
+      const notifier = require('toasted-notifier');
+      =======
+      const toastedNotifier = require('toasted-notifier');
+
+      // Manually define the interface for the parts of toasted-notifier we use,
+      // as it doesn't have official TypeScript definitions.
+      interface NotifyOptions {
+        title: string;
+        message: string;
+        sound: boolean;
+        wait: boolean;
+        actions?: string[];
+        timeout?: number;
+      }
+
+      interface ToastedNotifier {
+        notify(
+          options: NotifyOptions,
+          callback?: (err: Error | null, response: string) => void,
+        ): void;
+      }
+
+      const notifier: ToastedNotifier = toastedNotifier;
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+          try {
+              notifier.notify(
+                  {
+                      title: options.title,
+                      message: options.message,
+                      sound: false, // Keep it quiet by default
+                      wait: false,
+                  },
+                  (err: any) => {
+                      if (err) {
+                          // Silently ignore errors. This is a non-critical feature.
+                      }
+                  }
+              );
+      =======
+          try {
+              notifier.notify({
+                  title: options.title,
+                  message: options.message,
+                  sound: false, // Keep it quiet by default
+                  wait: false,
+              }, (err: Error | null) => {
+                  if (err) {
+                      // Silently ignore errors. This is a non-critical feature.
+                  }
+              });
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+                  notifier.notify(
+                      {
+                          title: `Approval Required for ${projectId}`,
+                          message: 'A patch requires your approval. You can also approve/reject in the terminal.',
+                          sound: true,
+                          wait: true, // This is key. It makes the notifier wait for user action.
+                          actions: ['Approve', 'Reject'],
+                          timeout: 30, // seconds
+                      },
+                      (err: any, response: string) => {
+                          if (err) {
+                              logger.debug(`Notification approval error: ${getErrorMessage(err)}`);
+                              return resolve('unsupported');
+                          }
+      =======
+                  notifier.notify(
+                      {
+                          title: `Approval Required for ${projectId}`,
+                          message: 'A patch requires your approval. You can also approve/reject in the terminal.',
+                          sound: true,
+                          wait: true, // This is key. It makes the notifier wait for user action.
+                          actions: ['Approve', 'Reject'],
+                          timeout: 30, // seconds
+                      },
+                      (err: Error | null, response: string) => {
+                          if (err) {
+                              logger.debug(`Notification approval error: ${getErrorMessage(err)}`);
+                              return resolve('unsupported');
+                          }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/core/clipboard.ts: >-
+    import clipboardy from 'clipboardy';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+    import { exec } from 'child_process';
+
+    import { executeShellCommand } from '../utils/shell';
+
+    import { FALLBACKS_DIR, WINDOWS_CLIPBOARD_EXE_NAME, WINDOWS_DIR } from
+    '../utils/constants';
+
+
+    type ClipboardCallback = (content: string) => void;
+
+    type ClipboardReader = () => Promise<string>;
+
+
+    const checkLinuxClipboardDependencies = async () => {
+      if (process.platform === 'linux') {
+          logger.debug('Checking for clipboard dependencies on Linux (xsel or xclip)...');
+          try {
+              // Using `command -v` is more portable than `which`. Redirect stdout/stderr to keep it clean.
+              const { exitCode } = await executeShellCommand('command -v xsel >/dev/null 2>&1 || command -v xclip >/dev/null 2>&1');
+              if (exitCode !== 0) {
+                  logger.error('-----------------------------------------------------------------------');
+                  logger.error('ACTION REQUIRED: Clipboard support on Linux requires `xsel` or `xclip`.');
+                  logger.error('Please install one of these tools to enable clipboard monitoring.');
+                  logger.error('Example on Debian/Ubuntu: sudo apt install xsel');
+                  logger.error('Example on Fedora/CentOS: sudo dnf install xsel');
+                  logger.error('Example on Arch Linux:    sudo pacman -S xsel');
+                  logger.error('-----------------------------------------------------------------------');
+              } else {
+                  logger.debug('Linux clipboard dependency check passed.');
+              }
+          } catch (error) {
+              logger.warn(`An error occurred while checking for clipboard dependencies: ${getErrorMessage(error)}`);
+          }
+      }
+    };
+
+
+    const WINDOWS_FALLBACK_DIR = path.join(process.cwd(), FALLBACKS_DIR,
+    WINDOWS_DIR);
+
+    const WINDOWS_CLIPBOARD_PATH = path.join(WINDOWS_FALLBACK_DIR,
+    WINDOWS_CLIPBOARD_EXE_NAME);
+
+
+    // Direct Windows clipboard reader that uses the executable directly
+
+    const createDirectWindowsClipboardReader = (): ClipboardReader => {
+      return () => new Promise((resolve) => {
+        try {
+          if (!fs.existsSync(WINDOWS_CLIPBOARD_PATH)) {
+            logger.error('Windows clipboard executable not found. Cannot watch clipboard on Windows.');
+            // Resolve with empty string to avoid stopping the watcher loop, but log an error.
+            return resolve('');
+          }
+          
+          const command = `"${WINDOWS_CLIPBOARD_PATH}" --paste`;
+          
+          exec(command, { encoding: 'utf8' }, (error, stdout, stderr) => {
+            if (error) {
+              // It's common for the clipboard executable to fail if the clipboard is empty
+              // or contains non-text data (e.g., an image). We can treat this as "no content".
+              // We don't log this as an error to avoid spamming the console during normal use.
+              logger.debug(`Windows clipboard read command failed (this is often normal): ${stderr.trim()}`);
+              resolve('');
+            } else {
+              resolve(stdout);
+            }
+          });
+        } catch (syncError) {
+          // Catch synchronous errors during setup (e.g., path issues).
+          logger.error(`A synchronous error occurred while setting up clipboard reader: ${getErrorMessage(syncError)}`);
+          resolve('');
+        }
+      });
+    };
+
+
+    // Check if the clipboard executable exists and fix path issues on Windows
+
+    const ensureClipboardExecutable = () => {
+      if (process.platform === 'win32') {
+        try {
+          // Try to find clipboard executables in common locations
+          const possiblePaths = [
+            // Global installation path
+            path.join(process.env.HOME || '', '.bun', 'install', 'global', 'node_modules', 'relaycode', FALLBACKS_DIR, WINDOWS_DIR),
+            // Local installation paths
+            path.join(process.cwd(), 'node_modules', 'clipboardy', FALLBACKS_DIR, WINDOWS_DIR),
+            WINDOWS_FALLBACK_DIR,
+          ];
+          
+          // Create fallbacks directory in the current project if it doesn't exist
+          if (!fs.existsSync(WINDOWS_FALLBACK_DIR)) {
+            fs.mkdirSync(WINDOWS_FALLBACK_DIR, { recursive: true });
+          }
+          
+          // Find an existing executable
+          let sourceExePath = null;
+          for (const dir of possiblePaths) {
+            const exePath = path.join(dir, WINDOWS_CLIPBOARD_EXE_NAME);
+            if (fs.existsSync(exePath)) {
+              sourceExePath = exePath;
+              break;
+            }
+          }
+          
+          // Copy the executable to the local fallbacks directory if found
+          if (sourceExePath && sourceExePath !== WINDOWS_CLIPBOARD_PATH) {
+            fs.copyFileSync(sourceExePath, WINDOWS_CLIPBOARD_PATH);
+            logger.info('Copied Windows clipboard executable to local fallbacks directory');
+          } else if (!sourceExePath) {
+            logger.error('Windows clipboard executable not found in any location');
+          }
+        } catch (error) {
+          logger.warn('Error ensuring clipboard executable: ' + getErrorMessage(error));
+        }
+      }
+    };
+
+
+    export const createClipboardWatcher = (
+      pollInterval: number,
+      callback: ClipboardCallback,
+      reader?: ClipboardReader,
+    ) => {
+      // Ensure clipboard executable exists before starting
+      ensureClipboardExecutable();
+      // Check for Linux dependencies. This is fire-and-forget.
+      checkLinuxClipboardDependencies();
+      
+      // On Windows, use the direct Windows reader
+      // Otherwise use the provided reader or clipboardy
+      const clipboardReader = process.platform === 'win32' ? 
+        createDirectWindowsClipboardReader() : 
+        reader || clipboardy.read;
+      
+      let lastContent = '';
+      let intervalId: NodeJS.Timeout | null = null;
+
+      const checkClipboard = async () => {
+        try {
+          const content = await clipboardReader();
+          if (content && content !== lastContent) {
+            lastContent = content;
+            callback(content);
+          }
+        } catch (error) {
+          // It's common for clipboard access to fail occasionally (e.g., on VM focus change)
+          // So we log a warning but don't stop the watcher.
+          logger.warn('Could not read from clipboard: ' + getErrorMessage(error));
+        }
+      };
+
+      const start = () => {
+        if (intervalId) {
+          return;
+        }
+        logger.info(`Starting clipboard watcher (polling every ${pollInterval}ms)`);
+        // Immediately check once, then start the interval
+        checkClipboard();
+        intervalId = setInterval(checkClipboard, pollInterval);
+      };
+
+      const stop = () => {
+        if (intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+          logger.info('Clipboard watcher stopped.');
+        }
+      };
+
+      start();
+      
+      return { stop };
+    };
+  src/types.ts: >-
+    import { z } from 'zod';
+
+
+    export const LogLevelNameSchema = z.enum(['silent', 'error', 'warn', 'info',
+    'debug']).default('info');
+
+    export type LogLevelName = z.infer<typeof LogLevelNameSchema>;
+
+
+    // Schema for relaycode.config.json
+
+    const CoreConfigSchema = z.object({
+      logLevel: LogLevelNameSchema,
+      enableNotifications: z.boolean().default(true),
+      watchConfig: z.boolean().default(true),
+    });
+
+
+    const WatcherConfigSchema = z.object({
+      clipboardPollInterval: z.number().int().positive().default(2000),
+      preferredStrategy: z.enum(['auto', 'replace', 'new-unified', 'multi-search-replace']).default('auto'),
+    });
+
+
+    const PatchConfigSchema = z.object({
+      approvalMode: z.enum(['auto', 'manual']).default('auto'),
+      approvalOnErrorCount: z.number().int().min(0).default(0),
+      linter: z.string().default('bun tsc --noEmit'),
+      preCommand: z.string().default(''),
+      postCommand: z.string().default(''),
+    });
+
+
+    const GitConfigSchema = z.object({
+      autoGitBranch: z.boolean().default(false),
+      gitBranchPrefix: z.string().default('relay/'),
+      gitBranchTemplate: z.enum(['uuid', 'gitCommitMsg']).default('gitCommitMsg'),
+    });
+
+
+    export const ConfigSchema = z.object({
+      projectId: z.string().min(1),
+      core: CoreConfigSchema.default({}),
+      watcher: WatcherConfigSchema.default({}),
+      patch: PatchConfigSchema.default({}),
+      git: GitConfigSchema.default({}),
+    });
+
+    export type Config = z.infer<typeof ConfigSchema>;
+
+
+    export type RelayCodeConfigInput = z.input<typeof ConfigSchema>;
+
+    export const defineConfig = (config: RelayCodeConfigInput):
+    RelayCodeConfigInput => config;
+
+
+    export const PatchStrategySchema = z.enum([
+      'replace',
+      'new-unified',
+      'multi-search-replace',
+      'unified',
+    ]).default('replace');
+
+    export type PatchStrategy = z.infer<typeof PatchStrategySchema>;
+
+
+    // Schema for operations parsed from code blocks
+
+    export const FileOperationSchema = z.union([
+      z.object({
+        type: z.literal('write'),
+        path: z.string(),
+        content: z.string(),
+        patchStrategy: PatchStrategySchema,
+      }),
+      z.object({
+        type: z.literal('delete'),
+        path: z.string(),
+      }),
+      z.object({
+        type: z.literal('rename'),
+        from: z.string(),
+        to: z.string(),
+      }),
+    ]);
+
+    export type FileOperation = z.infer<typeof FileOperationSchema>;
+
+
+    // Schema for the control YAML block at the end of the LLM response
+
+    export const ControlYamlSchema = z.object({
+      projectId: z.string(),
+      uuid: z.string().uuid(),
+      changeSummary: z.array(z.record(z.string())).optional(), // Not strictly used, but good to parse
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+    });
+
+    export type ControlYaml = z.infer<typeof ControlYamlSchema>;
+
+
+    // The fully parsed response from the clipboard
+
+    export const ParsedLLMResponseSchema = z.object({
+      control: ControlYamlSchema,
+      operations: z.array(FileOperationSchema),
+      reasoning: z.array(z.string()),
+    });
+
+    export type ParsedLLMResponse = z.infer<typeof ParsedLLMResponseSchema>;
+
+
+    // Schema for the snapshot of original files
+
+    export const FileSnapshotSchema = z.record(z.string(),
+    z.string().nullable()); // path -> content | null (if file didn't exist)
+
+    export type FileSnapshot = z.infer<typeof FileSnapshotSchema>;
+
+
+    // Schema for the state file (.relaycode/{uuid}.yml or .pending.yml)
+
+    export const StateFileSchema = z.object({
+      uuid: z.string().uuid(),
+      projectId: z.string(),
+      createdAt: z.string().datetime(),
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+      reasoning: z.array(z.string()),
+      operations: z.array(FileOperationSchema),
+      snapshot: FileSnapshotSchema,
+      approved: z.boolean(),
+    });
+
+    export type StateFile = z.infer<typeof StateFileSchema>;
+
+
+    // Shell command execution result
+
+    export const ShellCommandResultSchema = z.object({
+        stdout: z.string(),
+        stderr: z.string(),
+        exitCode: z.number().nullable(),
+    });
+
+    export type ShellCommandResult = z.infer<typeof ShellCommandResultSchema>;
+  src/utils/notifier.ts: >-
+    const notifier = require('toasted-notifier');
+
+    import { APP_NAME } from './constants';
+
+    import { getErrorMessage, logger } from './logger';
+
+
+    // This is a "fire-and-forget" utility. If notifications fail for any reason
+
+    // (e.g., unsupported OS, DND mode, permissions), it should not crash the
+    app.
+
+    const sendNotification = (options: { title: string; message: string;
+    enableNotifications?: boolean }) => {
+        // Skip notification if explicitly disabled
+        if (options.enableNotifications === false) {
+            return;
+        }
+        
+        try {
+            notifier.notify(
+                {
+                    title: options.title,
+                    message: options.message,
+                    sound: false, // Keep it quiet by default
+                    wait: false,
+                },
+                (err: any) => {
+                    if (err) {
+                        // Silently ignore errors. This is a non-critical feature.
+                    }
+                }
+            );
+        } catch (err) {
+            // Silently ignore errors.
+        }
+    };
+
+
+    export const createNotifier = (messageTemplate: (param: string) => string)
+    => {
+        return (param: string, enableNotifications: boolean = true) => {
+            sendNotification({
+                title: APP_NAME,
+                message: messageTemplate(param),
+                enableNotifications,
+            });
+        };
+    };
+
+
+    export const notifyPatchDetected = createNotifier(
+        (projectId: string) => `New patch detected for project \`${projectId}\`.`
+    );
+
+
+    export const notifyApprovalRequired = createNotifier(
+        (projectId: string) => `Action required to approve changes for \`${projectId}\`.`
+    );
+
+
+    export const notifySuccess = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` applied successfully.`
+    );
+
+
+    export const notifyFailure = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` failed and was rolled back.`
+    );
+
+
+    export const requestApprovalWithNotification = (
+        projectId: string,
+        enableNotifications: boolean = true
+    ): Promise<'approved' | 'rejected' | 'timeout' | 'unsupported'> => {
+        if (enableNotifications === false) {
+            return Promise.resolve('unsupported');
+        }
+
+        return new Promise((resolve) => {
+            try {
+                notifier.notify(
+                    {
+                        title: `Approval Required for ${projectId}`,
+                        message: 'A patch requires your approval. You can also approve/reject in the terminal.',
+                        sound: true,
+                        wait: true, // This is key. It makes the notifier wait for user action.
+                        actions: ['Approve', 'Reject'],
+                        timeout: 30, // seconds
+                    },
+                    (err: any, response: string) => {
+                        if (err) {
+                            logger.debug(`Notification approval error: ${getErrorMessage(err)}`);
+                            return resolve('unsupported');
+                        }
+                        const cleanResponse = (response || '').toLowerCase().trim();
+                        if (cleanResponse.startsWith('approve')) {
+                            resolve('approved');
+                        } else if (cleanResponse.startsWith('reject')) {
+                            resolve('rejected');
+                        } else {
+                            logger.debug(`Notification approval received non-action response: "${cleanResponse}"`);
+                            resolve('timeout');
+                        }
+                    }
+                );
+            } catch (err) {
+                logger.debug(`Notification dispatch threw synchronous error: ${getErrorMessage(err)}`);
+                resolve('unsupported');
+            }
+        });
+    };
+  src/core/config.ts: >
+    import { z } from 'zod';
+
+    import path from 'path';
+
+    import { promises as fs } from 'fs';
+
+    import { build } from 'esbuild';
+
+    import os from 'os';
+
+    import { Config, ConfigSchema, RelayCodeConfigInput } from '../types';
+
+    import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, CONFIG_FILE_NAME_TS } from
+    '../utils/constants';
+
+    import { logger, isEnoentError } from '../utils/logger';
+
+    import chalk from 'chalk';
+
+
+    export const findConfigPath = async (cwd: string = process.cwd()):
+    Promise<string | null> => {
+      for (const fileName of CONFIG_FILE_NAMES) {
+        const configPath = path.join(cwd, fileName);
+        try {
+          await fs.access(configPath);
+          return configPath;
+        } catch (error) {
+          if (!isEnoentError(error)) {
+            // ignore other errors for now to keep searching
+          }
+        }
+      }
+      return null;
+    };
+
+
+    const loadModuleConfig = async (configPath: string):
+    Promise<RelayCodeConfigInput> => {
+      let importPath = configPath;
+      let tempDir: string | null = null;
+
+      if (configPath.endsWith('.ts')) {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-'));
+        const tempFile = path.join(tempDir, 'relaycode.config.mjs');
+
+        await build({
+          entryPoints: [configPath],
+          outfile: tempFile,
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+          alias: {
+            'relaycode': path.resolve(process.cwd(), 'src/index.ts')
+          },
+        });
+        importPath = tempFile;
+      }
+
+      try {
+        const module = await import(`${importPath}?t=${Date.now()}`);
+        return module.default;
+      } finally {
+        if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+
+
+    export const findConfig = async (cwd: string = process.cwd()):
+    Promise<Config | null> => {
+      const configPath = await findConfigPath(cwd);
+      if (!configPath) {
+        return null;
+      }
+      try {
+        let configJson: RelayCodeConfigInput;
+        if (configPath.endsWith('.json')) { // Handle JSON config
+          const fileContent = await fs.readFile(configPath, 'utf-8');
+          configJson = JSON.parse(fileContent);
+        } else { // Handle .ts or .js config
+          configJson = await loadModuleConfig(configPath);
+        }
+        return ConfigSchema.parse(configJson);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null;
+        }
+        if (error instanceof z.ZodError) {
+          throw new Error(`Invalid configuration in ${path.basename(configPath)}: ${error.message}`);
+        }
+        throw error;
+      }
+    };
+
+
+    export const loadConfigOrExit = async (cwd: string = process.cwd()):
+    Promise<Config> => {
+      const config = await findConfig(cwd);
+      if (!config) {
+        logger.error(`Configuration file ('${chalk.cyan('relaycode.config.ts')}', '.js', or '.json') not found.`);
+        logger.info(`Please run ${chalk.magenta("'relay init'")} to create one.`);
+        process.exit(1);
+      }
+      return config;
+    };
+
+
+    export const createConfig = async (projectId: string, cwd: string =
+    process.cwd()): Promise<Config> => {
+      const config: RelayCodeConfigInput = { projectId };
+
+      // Ensure the schema defaults are applied for nested objects
+      const validatedConfig = ConfigSchema.parse(config);
+
+      const tsConfigContent = `import { defineConfig } from 'relaycode';
+
+    export default defineConfig(${JSON.stringify({ projectId }, null, 2)});
+
+    `;
+
+      const configPath = path.join(cwd, CONFIG_FILE_NAME_TS);
+      await fs.writeFile(configPath, tsConfigContent);
+
+      return validatedConfig;
+    };
+
+
+    export const ensureStateDirExists = async (cwd: string = process.cwd()):
+    Promise<void> => {
+      const stateDirPath = path.join(cwd, STATE_DIRECTORY_NAME);
+      await fs.mkdir(stateDirPath, { recursive: true });
+    };
+
+
+    export const getProjectId = async (cwd: string = process.cwd()):
+    Promise<string> => {
+      try {
+        const pkgJsonPath = path.join(cwd, 'package.json');
+        const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');
+        const pkgJson = JSON.parse(fileContent);
+        if (pkgJson.name && typeof pkgJson.name === 'string') {
+          return pkgJson.name;
+        }
+      } catch (e) {
+        // Ignore if package.json doesn't exist or is invalid
+      }
+      return path.basename(cwd);
+    };
+  src/core/executor.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { FileOperation, FileSnapshot } from '../types';
+
+    import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+    unifiedDiffService } from 'diff-apply';
+
+    import { getErrorMessage, isEnoentError } from '../utils/logger';
+
+
+    const patchStrategies = {
+      'new-unified': (p: { originalContent: string; diffContent: string; }) => {
+        const service = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+        return service.applyDiff(p);
+      },
+      'multi-search-replace': (p: { originalContent: string; diffContent: string; }) => {
+        return multiSearchReplaceService.multiSearchReplaceService.applyDiff(p);
+      },
+      'unified': (p: { originalContent: string; diffContent: string; }) => {
+        return unifiedDiffService.unifiedDiffService.applyDiff(p.originalContent, p.diffContent);
+      },
+    };
+
+
+    export const readFileContent = async (filePath: string, cwd: string =
+    process.cwd()): Promise<string | null> => {
+      try {
+        return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null; // File doesn't exist
+        }
+        throw error;
+      }
+    };
+
+
+    export const writeFileContent = async (filePath: string, content: string,
+    cwd: string = process.cwd()): Promise<void> => {
+      const absolutePath = path.resolve(cwd, filePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, content, 'utf-8');
+    };
+
+
+    export const deleteFile = async (filePath: string, cwd: string =
+    process.cwd()): Promise<void> => {
+      try {
+        await fs.unlink(path.resolve(cwd, filePath));
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+          // File already deleted or is a directory, which is fine for an unlink operation.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const fileExists = async (filePath: string, cwd: string =
+    process.cwd()): Promise<boolean> => {
+      try {
+        await fs.access(path.resolve(cwd, filePath));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+
+    export const safeRename = async (fromPath: string, toPath:string):
+    Promise<void> => {
+        try {
+            await fs.rename(fromPath, toPath);
+        } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'EXDEV') {
+                await fs.copyFile(fromPath, toPath);
+                await fs.unlink(fromPath);
+            } else {
+                throw error;
+            }
+        }
+    };
+
+
+    export const renameFile = async (fromPath: string, toPath: string, cwd:
+    string = process.cwd()): Promise<void> => {
+      const fromAbsolutePath = path.resolve(cwd, fromPath);
+      const toAbsolutePath = path.resolve(cwd, toPath);
+      await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+      await safeRename(fromAbsolutePath, toAbsolutePath);
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      await Promise.all(
+        filePaths.map(async (filePath) => {
+          snapshot[filePath] = await readFileContent(filePath, cwd);
+        })
+      );
+      return snapshot;
+    };
+
+
+    export const applyOperations = async (operations: FileOperation[], cwd:
+    string = process.cwd()): Promise<Map<string, string>> => {
+      const newContents = new Map<string, string>();
+      // Operations must be applied sequentially to ensure that if one fails,
+      // we can roll back from a known state.
+      for (const op of operations) {
+        if (op.type === 'delete') {
+          await deleteFile(op.path, cwd);
+          continue;
+        }
+        if (op.type === 'rename') {
+          await renameFile(op.from, op.to, cwd);
+          continue;
+        }
+        
+        let finalContent: string;
+
+        if (op.patchStrategy === 'replace') {
+          finalContent = op.content;
+        } else {
+          // For patch strategies, apply them sequentially
+          const originalContent = await readFileContent(op.path, cwd);
+          if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+            throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+          }
+
+          try {
+            const diffParams = {
+              originalContent: originalContent ?? '',
+              diffContent: op.content,
+            };
+            
+            const patcher = patchStrategies[op.patchStrategy as keyof typeof patchStrategies];
+            if (!patcher) {
+              throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+            }
+            
+            const result = await patcher(diffParams);
+            if (result.success) {
+              finalContent = result.content;
+            } else {
+              throw new Error(result.error);
+            }
+          } catch (e) {
+            throw new Error(`Error applying patch for ${op.path} with strategy '${op.patchStrategy}': ${getErrorMessage(e)}`);
+          }
+        }
+        
+        await writeFileContent(op.path, finalContent, cwd);
+        newContents.set(op.path, finalContent);
+      }
+      return newContents;
+    };
+
+
+    // Helper to check if a directory is empty
+
+    const isDirectoryEmpty = async (dirPath: string): Promise<boolean> => {
+      try {
+        const files = await fs.readdir(dirPath);
+        return files.length === 0;
+      } catch (error) {
+        // If directory doesn't exist or is not accessible, consider it "not empty"
+        return false;
+      }
+    };
+
+
+    // Recursively remove all empty parent directories up to a limit
+
+    const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+    string): Promise<void> => {
+      if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+        return;
+      }
+      
+      try {
+        const isEmpty = await isDirectoryEmpty(dirPath);
+        if (isEmpty) {
+          await fs.rmdir(dirPath);
+          // Recursively check parent directory
+          await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+        }
+      } catch (error) {
+        // Ignore directory removal errors, but don't continue up the chain
+        if (!(error instanceof Error && 'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) {
+          console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+        }
+      }
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesToClean = new Set<string>();
+      const restoreErrors: { path: string, error: unknown }[] = [];
+
+      // Attempt to restore all files in parallel, collecting errors.
+      await Promise.all(entries.map(async ([filePath, content]) => {
+          const fullPath = path.resolve(cwd, filePath);
+          try {
+            if (content === null) {
+              // If the file didn't exist in the snapshot, make sure it doesn't exist after restore.
+              await deleteFile(filePath, cwd);
+              directoriesToClean.add(path.dirname(fullPath));
+            } else {
+              // Create directory structure if needed and write the original content back.
+              await fs.mkdir(path.dirname(fullPath), { recursive: true });
+              await fs.writeFile(fullPath, content, 'utf-8');
+            }
+          } catch (error) {
+            restoreErrors.push({ path: filePath, error });
+          }
+      }));
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesToClean)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+
+      if (restoreErrors.length > 0) {
+        const errorSummary = restoreErrors
+          .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)
+          .join('\n');
+        throw new Error(`Rollback failed for ${restoreErrors.length} file(s):\n${errorSummary}`);
+      }
+    };
+  src/core/parser.ts: >-
+    import yaml from 'js-yaml';
+
+    import { z } from 'zod';
+
+    import {
+        ControlYamlSchema,
+        FileOperation,
+        ParsedLLMResponse,
+        ParsedLLMResponseSchema,
+        PatchStrategy,
+        PatchStrategySchema,
+    } from '../types';
+
+    import {
+        CODE_BLOCK_START_MARKER,
+        CODE_BLOCK_END_MARKER,
+        DELETE_FILE_MARKER,
+        RENAME_FILE_OPERATION
+    } from '../utils/constants';
+
+    import { getErrorMessage, logger } from '../utils/logger';
+
+
+    const CODE_BLOCK_REGEX =
+    /```(?:\w+)?(?:\s*\/\/\s*(.*?)|\s+(.*?))?[\r\n]([\s\S]*?)[\r\n]```/g;
+
+    const YAML_BLOCK_REGEX = /```yaml[\r\n]([\s\S]+?)```/;
+
+
+    type ParsedHeader = {
+        filePath: string;
+        patchStrategy: PatchStrategy | null;
+    };
+
+
+    const extractCodeBetweenMarkers = (content: string): string => {
+        const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);
+        const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);    
+        
+        let relevantContent = content;
+        if (startMarkerIndex !== -1 && endMarkerIndex !== -1 && endMarkerIndex > startMarkerIndex) {
+            relevantContent = content.substring(startMarkerIndex + CODE_BLOCK_START_MARKER.length, endMarkerIndex);
+        }
+        
+        return relevantContent.trim().replace(/\r\n/g, '\n');
+    };
+
+
+    const parseCodeBlockHeader = (headerLine: string): ParsedHeader | null => {
+        const quotedMatch = headerLine.match(/^"(.+?)"(?:\s+(.*))?$/);
+        if (quotedMatch) {
+            const filePath = quotedMatch[1]!;
+            const strategyStr = (quotedMatch[2] || '').trim();
+            if (strategyStr) {
+                const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+                if (!parsedStrategy.success) {
+                    logger.debug(`Invalid patch strategy for quoted path: ${strategyStr}`);
+                    return null;
+                }
+                return { filePath, patchStrategy: parsedStrategy.data };
+            }
+            return { filePath, patchStrategy: null };
+        }
+
+        const parts = headerLine.split(/\s+/);
+        if (parts.length === 1 && parts[0]) {
+            return { filePath: parts[0], patchStrategy: null };
+        }
+        if (parts.length === 2 && parts[0] && parts[1]) {
+            const parsedStrategy = PatchStrategySchema.safeParse(parts[1]);
+            if (parsedStrategy.success) {
+                return { filePath: parts[0], patchStrategy: parsedStrategy.data };
+            } else {
+                logger.debug(`Treating entire header as file path since second word is not a valid strategy: "${headerLine}"`);
+                return { filePath: headerLine, patchStrategy: null };
+            }
+        }
+
+        if (parts.length > 2) {
+            logger.debug(`Skipping unquoted header with more than 2 words: "${headerLine}"`);
+            return null;
+        }
+
+        return null; // For empty or invalid header
+    };
+
+
+    const inferPatchStrategy = (content: string, providedStrategy: PatchStrategy
+    | null): PatchStrategy => {
+        if (providedStrategy) return providedStrategy;
+        if (/^<<<<<<< SEARCH\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) return 'multi-search-replace';
+        if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) return 'new-unified';
+        return 'replace';
+    };
+
+
+    const extractAndParseYaml = (rawText: string) => {
+        const yamlBlockMatch = rawText.match(YAML_BLOCK_REGEX);
+        let yamlText: string | null = null;
+        let textWithoutYaml = rawText;
+
+        if (yamlBlockMatch?.[1]) {
+            yamlText = yamlBlockMatch[1];
+            textWithoutYaml = rawText.replace(YAML_BLOCK_REGEX, '').trim();
+        } else {
+            const lines = rawText.trim().split('\n');
+            let yamlStartIndex = -1;
+            const searchLimit = Math.max(0, lines.length - 20);
+            for (let i = lines.length - 1; i >= searchLimit; i--) {
+                if (lines[i]?.trim().match(/^projectId:\s*['"]?[\w.-]+['"]?$/)) {
+                    yamlStartIndex = i;
+                    break;
+                }
+            }
+
+            if (yamlStartIndex !== -1) {
+                yamlText = lines.slice(yamlStartIndex).join('\n');
+                textWithoutYaml = lines.slice(0, yamlStartIndex).join('\n').trim();
+            }
+        }
+
+        if (!yamlText) return { control: null, textWithoutYaml: rawText };
+
+        try {
+            const yamlContent = yaml.load(yamlText);
+            const control = ControlYamlSchema.parse(yamlContent);
+            return { control, textWithoutYaml };
+        } catch (e) {
+            logger.debug(`Error parsing YAML or control schema: ${getErrorMessage(e)}`);
+            return { control: null, textWithoutYaml: rawText };
+        }
+    };
+
+
+    const parseCodeBlock = (match: RegExpExecArray): { operation: FileOperation,
+    fullMatch: string } | null => {
+        const [fullMatch, commentHeaderLine, spaceHeaderLine, rawContent] = match;
+        const headerLine = (commentHeaderLine || spaceHeaderLine || '').trim();
+        const content = (rawContent || '').trim();
+
+        if (!headerLine) return null;
+
+        if (headerLine === RENAME_FILE_OPERATION) {
+            try {
+                const { from, to } = z.object({ from: z.string().min(1), to: z.string().min(1) }).parse(JSON.parse(content));
+                return { operation: { type: 'rename', from, to }, fullMatch };
+            } catch (e) {
+                logger.debug(`Invalid rename operation content: ${getErrorMessage(e)}`);
+                return null;
+            }
+        }
+
+        const parsedHeader = parseCodeBlockHeader(headerLine);
+        if (!parsedHeader) {
+            logger.debug(`Could not parse header: ${headerLine}`);
+            return null;
+        }
+
+        const { filePath } = parsedHeader;
+
+        if (content === DELETE_FILE_MARKER) {
+            return { operation: { type: 'delete', path: filePath }, fullMatch };
+        }
+
+        const patchStrategy = inferPatchStrategy(content, parsedHeader.patchStrategy);
+        const cleanContent = extractCodeBetweenMarkers(content);
+
+        return {
+            operation: { type: 'write', path: filePath, content: cleanContent, patchStrategy }, 
+            fullMatch
+        };
+    };
+
+
+    export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null
+    => {
+        logger.debug('Parsing LLM response...');
+        const { control, textWithoutYaml } = extractAndParseYaml(rawText);
+
+        if (!control) {
+            logger.debug('Could not parse control YAML from response.');
+            return null;
+        }
+
+        const operations: FileOperation[] = [];
+        const matchedBlocks: string[] = [];
+        let match;
+
+        while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+            const result = parseCodeBlock(match);
+            if (result) {
+                operations.push(result.operation);
+                matchedBlocks.push(result.fullMatch);
+            }
+        }
+
+        if (operations.length === 0) {
+            logger.debug('No valid operations found in response.');
+            return null;
+        }
+
+        let reasoningText = textWithoutYaml;
+        for (const block of matchedBlocks) {
+            reasoningText = reasoningText.replace(block, '');
+        }
+        const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+
+        try {
+            const parsedResponse = ParsedLLMResponseSchema.parse({ control, operations, reasoning });
+            logger.debug('Successfully parsed LLM response.');
+            return parsedResponse;
+        } catch (e) {
+            logger.debug(`Final validation failed: ${getErrorMessage(e)}`);
+            return null;
+        }
+    };
+approved: true

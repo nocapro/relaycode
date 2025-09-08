@@ -1,0 +1,70 @@
+e2e_patch_tests:
+  - name: edit-file-with-spaces-in-path
+    description: Should correctly edit a file that has spaces in its path
+    markdown_content: |
+      ```diff // "src/components/My Component.tsx" standard-diff
+      --- "src/components/My Component.tsx"
+      +++ "src/components/My Component.tsx"
+      @@ ... @@
+       export const MyComponent = () => (
+      -  <div>Hello</div>
+      +  <div>Hello World</div>
+       );
+      ```
+    initial_state:
+      - path: "src/components/My Component.tsx"
+        content: |
+          export const MyComponent = () => (
+            <div>Hello</div>
+          );
+    expected_state:
+      - path: "src/components/My Component.tsx"
+        content: |
+          export const MyComponent = () => (
+            <div>Hello World</div>
+          );
+
+  - name: edit-empty-file
+    description: Should correctly add content to an empty file
+    markdown_content: |
+      ```typescript // src/empty.js
+      // This file is no longer empty.
+      export const ready = true;
+      ```
+    initial_state:
+      - path: "src/empty.js"
+        content: ""
+    expected_state:
+      - path: "src/empty.js"
+        content: |
+          // This file is no longer empty.
+          export const ready = true;
+
+  - name: create-and-then-edit-file
+    description: Should handle creating a file and then editing it in the same transaction
+    markdown_content: |
+      First, create a new file.
+      ```typescript // src/service.ts
+      export class Service {
+        run() { console.log('running'); }
+      }
+      ```
+
+      Now, add a method to it.
+      ```diff // src/service.ts standard-diff
+      --- src/service.ts
+      +++ src/service.ts
+      @@ ... @@
+       export class Service {
+      +  stop() { console.log('stopping'); }
+         run() { console.log('running'); }
+       }
+      ```
+    initial_state: []
+    expected_state:
+      - path: "src/service.ts"
+        content: |
+          export class Service {
+            stop() { console.log('stopping'); }
+            run() { console.log('running'); }
+          }

@@ -1,0 +1,540 @@
+uuid: a631215b-d355-46b6-94e8-80f0c057100b
+projectId: relaycode
+createdAt: '2025-06-21T13:02:19.469Z'
+reasoning:
+  - >-
+    Of course! To enhance `relay watch`, I will implement a mechanism to detect
+    changes in the `relaycode.config.json` file. When a modification is
+    detected, the watch process will automatically reload the configuration and
+    restart its services with the updated settings. This ensures that any
+    adjustments to your project's configuration are applied in real-time without
+    needing to manually restart the watcher.
+  - 'Here are the changes I''ll make:'
+  - 1.  I will modify `src/commands/watch.ts`.
+  - >-
+    2.  I will import Node.js's `fs` and `path` modules to watch the
+    configuration file.
+  - '3.  The `watchCommand` function will be refactored to:'
+  - '*   Initially load the configuration and start the clipboard watcher.'
+  - '*   Set up a file watcher on `relaycode.config.json`.'
+  - >-
+    *   Upon detecting a change, it will debounce the event to prevent multiple
+    rapid reloads, then safely reload the configuration and restart the
+    clipboard watcher with the new settings.
+  - >-
+    *   If the configuration becomes invalid or is deleted, it will log an error
+    and pause the services until the file is corrected.
+  - This will make the `relay watch` command more robust and user-friendly.
+operations:
+  - type: write
+    path: src/commands/watch.ts
+    content: >-
+      --- src/commands/watch.ts
+
+      +++ src/commands/watch.ts
+
+      @@ -6,6 +6,8 @@
+       import { CONFIG_FILE_NAME } from '../utils/constants';
+       import { notifyPatchDetected } from '../utils/notifier';
+       import { Config } from '../types';
+      +import fs from 'fs';
+
+      +import path from 'path';
+       
+       const getSystemPrompt = (projectId: string, preferredStrategy: Config['preferredStrategy']): string => {
+           const header = `
+      @@ -176,33 +178,61 @@
+           return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+       }
+       
+       export const watchCommand = async (): Promise<void> => {
+      -  const config = await findConfig();
+
+      +  let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null
+      = null;
+
+      +  const configPath = path.resolve(process.cwd(), CONFIG_FILE_NAME);
+
+      +  let debounceTimer: NodeJS.Timeout | null = null;
+       
+      -  if (!config) {
+
+      +  const startServices = (config: Config) => {
+
+      +    // Stop existing watcher if it's running
+
+      +    if (clipboardWatcher) {
+
+      +      clipboardWatcher.stop();
+
+      +    }
+
+      +
+
+      +    logger.setLevel(config.logLevel);
+
+      +    logger.debug(`Log level set to: ${config.logLevel}`);
+
+      +    logger.debug(`Preferred strategy set to:
+      ${config.preferredStrategy}`);
+
+      +
+
+      +    logger.log(getSystemPrompt(config.projectId,
+      config.preferredStrategy));
+
+      +
+
+      +    clipboardWatcher =
+      createClipboardWatcher(config.clipboardPollInterval, async (content) => {
+
+      +      logger.info('New clipboard content detected. Attempting to
+      parse...');
+
+      +      const parsedResponse = parseLLMResponse(content);
+
+      +
+
+      +      if (!parsedResponse) {
+
+      +        logger.warn('Clipboard content is not a valid relaycode patch.
+      Ignoring.');
+
+      +        return;
+
+      +      }
+
+      +
+
+      +      notifyPatchDetected(config.projectId);
+
+      +      logger.success('Valid patch format detected. Processing...');
+
+      +      await processPatch(config, parsedResponse);
+
+      +      logger.info('--------------------------------------------------');
+
+      +      logger.info('Watching for next patch...');
+
+      +    });
+
+      +  };
+
+      +
+
+      +  const handleConfigChange = () => {
+
+      +    if (debounceTimer) clearTimeout(debounceTimer);
+
+      +    debounceTimer = setTimeout(async () => {
+
+      +      logger.info(`Configuration file change detected. Reloading...`);
+
+      +      try {
+
+      +        const newConfig = await findConfig();
+
+      +        if (newConfig) {
+
+      +          logger.success('Configuration reloaded. Restarting
+      services...');
+
+      +          startServices(newConfig);
+
+      +        } else {
+
+      +          logger.error(`${CONFIG_FILE_NAME} is invalid or has been
+      deleted. Services paused.`);
+
+      +          if (clipboardWatcher) {
+
+      +            clipboardWatcher.stop();
+
+      +            clipboardWatcher = null;
+
+      +          }
+
+      +        }
+
+      +      } catch (error) {
+
+      +        logger.error(`Error reloading configuration: ${error instanceof
+      Error ? error.message : String(error)}`);
+
+      +      }
+
+      +    }, 250);
+
+      +  };
+
+      +
+
+      +  // Initial startup
+
+      +  const initialConfig = await findConfig();
+
+      +  if (!initialConfig) {
+           logger.error(`Configuration file '${CONFIG_FILE_NAME}' not found.`);
+           logger.info("Please run 'relay init' to create one.");
+           process.exit(1);
+         }
+      -  
+
+      -  logger.setLevel(config.logLevel);
+
+      +
+         logger.success('Configuration loaded. Starting relaycode watch...');
+      -  logger.debug(`Log level set to: ${config.logLevel}`);
+
+      -  logger.debug(`Preferred strategy set to: ${config.preferredStrategy}`);
+
+      -
+
+      -  // Display the system prompt
+
+      -  logger.log(getSystemPrompt(config.projectId,
+      config.preferredStrategy));
+
+      -
+
+      -  createClipboardWatcher(config.clipboardPollInterval, async (content) =>
+      {
+
+      -    logger.info('New clipboard content detected. Attempting to
+      parse...');
+
+      -    const parsedResponse = parseLLMResponse(content);
+
+      -
+
+      -    if (!parsedResponse) {
+
+      -      logger.warn('Clipboard content is not a valid relaycode patch.
+      Ignoring.');
+
+      -      return;
+
+      -    }
+
+      -    
+
+      -    notifyPatchDetected(config.projectId);
+
+      -    logger.success('Valid patch format detected. Processing...');
+
+      -    await processPatch(config, parsedResponse);
+
+      -    logger.info('--------------------------------------------------');
+
+      -    logger.info('Watching for next patch...');
+
+      -  });
+
+      +  startServices(initialConfig);
+
+      +
+
+      +  // Watch for changes after initial setup
+
+      +  fs.watch(configPath, handleConfigChange);
+       };
+    patchStrategy: new-unified
+snapshot:
+  src/commands/watch.ts: >-
+    import { findConfig } from '../core/config';
+
+    import { createClipboardWatcher } from '../core/clipboard';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { CONFIG_FILE_NAME } from '../utils/constants';
+
+    import { notifyPatchDetected } from '../utils/notifier';
+
+    import { Config } from '../types';
+
+
+    const getSystemPrompt = (projectId: string, preferredStrategy:
+    Config['preferredStrategy']): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+        const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+        const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+    \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+    the \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+    ...
+
+    \`\`\``;
+
+        const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+        const syntaxNewUnified = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath new-unified
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+        const syntaxMultiSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath multi-search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`multi-search-replace\` patch strategy for all
+    modifications.`;
+
+        const sectionNewUnified = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+        const sectionMultiSearchReplace = `---
+
+    ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    :start_line: (optional)
+
+    :end_line: (optional)
+
+    -------
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+        const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    `;
+
+        const finalSteps = `---
+
+    ### Final Steps
+
+
+    1.  Add your step-by-step reasoning in plain text before each code block.
+
+    2.  ALWAYS add the following YAML block at the very end of your response.
+    Use the exact projectId shown here. Generate a new random uuid for each
+    response.
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary:
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        \`\`\`
+    `;
+        
+        const footer = `---------------------------------------------------------------------------`;
+
+        let syntax = '';
+        let strategyDetails = '';
+
+        switch (preferredStrategy) {
+            case 'replace':
+                syntax = syntaxReplace;
+                strategyDetails = ''; // Covered in 'otherOps'
+                break;
+            case 'new-unified':
+                syntax = syntaxNewUnified;
+                strategyDetails = sectionNewUnified;
+                break;
+            case 'multi-search-replace':
+                syntax = syntaxMultiSearchReplace;
+                strategyDetails = sectionMultiSearchReplace;
+                break;
+            case 'auto':
+            default:
+                syntax = syntaxAuto;
+                strategyDetails = `${sectionNewUnified}\n${sectionMultiSearchReplace}`;
+                break;
+        }
+
+        return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    }
+
+
+    export const watchCommand = async (): Promise<void> => {
+      const config = await findConfig();
+
+      if (!config) {
+        logger.error(`Configuration file '${CONFIG_FILE_NAME}' not found.`);
+        logger.info("Please run 'relay init' to create one.");
+        process.exit(1);
+      }
+      
+      logger.setLevel(config.logLevel);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      logger.debug(`Log level set to: ${config.logLevel}`);
+      logger.debug(`Preferred strategy set to: ${config.preferredStrategy}`);
+
+      // Display the system prompt
+      logger.log(getSystemPrompt(config.projectId, config.preferredStrategy));
+
+      createClipboardWatcher(config.clipboardPollInterval, async (content) => {
+        logger.info('New clipboard content detected. Attempting to parse...');
+        const parsedResponse = parseLLMResponse(content);
+
+        if (!parsedResponse) {
+          logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+          return;
+        }
+        
+        notifyPatchDetected(config.projectId);
+        logger.success('Valid patch format detected. Processing...');
+        await processPatch(config, parsedResponse);
+        logger.info('--------------------------------------------------');
+        logger.info('Watching for next patch...');
+      });
+    };
+approved: true

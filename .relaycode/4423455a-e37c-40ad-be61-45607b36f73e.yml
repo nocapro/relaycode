@@ -1,0 +1,941 @@
+uuid: 4423455a-e37c-40ad-be61-45607b36f73e
+projectId: relaycode
+createdAt: '2025-06-24T04:49:28.790Z'
+gitCommitMsg: 'fix(ts): Resolve compilation errors from strict checks'
+promptSummary: >-
+  Fix a series of TypeScript compilation errors across several files, primarily
+  related to strict type checking and incorrect type definitions in test
+  utilities.
+reasoning:
+  - >-
+    I've analyzed the TypeScript errors and have a plan to resolve them. The
+    errors stem from a few main issues:
+  - >-
+    1.  Strict TypeScript settings (`noUncheckedIndexedAccess`) causing issues
+    with array access in `src/core/parser.ts` and `test/test.util.ts`.
+  - >-
+    2.  A recent refactoring of the configuration structure from flat to nested,
+    which was not fully reflected in the test utility types, causing numerous
+    errors in the e2e tests.
+  - 3.  A simple unused import in `test/e2e/init.test.ts`.
+  - >-
+    I'll address these by making the code more robust against potentially
+    `undefined` values from array indexing and by updating the type definitions
+    in the test utilities to be more flexible, which will resolve the cascade of
+    errors in the test files.
+  - '### 1. Fix type errors in parser'
+  - >-
+    First, I'll fix the type errors in `src/core/parser.ts` by adding checks to
+    ensure that array elements exist before they are used. This will satisfy the
+    `noUncheckedIndexedAccess` TypeScript compiler option.
+  - '### 2. Update test utilities to fix cascading type errors'
+  - >-
+    Next, I'll modify `test/test.util.ts`. I will update the type of
+    `configOverrides` and `overrides` parameters to `Record<string, any>` to
+    allow passing flat configuration objects for testing convenience, which will
+    resolve all the `TS2353` errors in the e2e test files. I'll also fix the
+    `TS2538` indexing errors within `createTestConfig` by safely handling path
+    parts.
+  - '### 3. Remove unused import'
+  - >-
+    Finally, I'll remove the unused `ConfigSchema` import from
+    `test/e2e/init.test.ts` to clean up the compiler warnings.
+  - >-
+    These changes should resolve all the reported TypeScript errors and allow
+    the project to compile successfully.
+  - '---'
+operations:
+  - type: write
+    path: src/core/parser.ts
+    content: >-
+      --- src/core/parser.ts
+
+      +++ src/core/parser.ts
+
+      @@ -165,19 +165,21 @@
+                       // - 2 words: it must be `path strategy`.
+                       // - >2 words: it's a description and should be ignored.
+                       // This prevents misinterpreting descriptive text in the header as a file path.
+      -                if (parts.length === 1) {
+
+      -                    filePath = parts[0];
+
+      -                } else if (parts.length === 2) {
+
+      -                    const [pathPart, strategyPart] = parts;
+
+      -                    const parsedStrategy =
+      PatchStrategySchema.safeParse(strategyPart);
+
+      -                    if (parsedStrategy.success) {
+
+      -                        filePath = pathPart;
+
+      -                        patchStrategy = parsedStrategy.data;
+
+      -                        strategyProvided = true;
+
+      -                    } else {
+
+      -                        // If the second word is not a valid strategy,
+      treat the entire header as a file path
+
+      -                        filePath = headerLine;
+
+      -                        logger.debug(`Treating entire header as file path
+      since second word is not a valid strategy: "${headerLine}"`);
+
+      -                    }
+
+      +                if (parts.length === 1 && parts[0]) {
+
+      +                    filePath = parts[0];
+
+      +                } else if (parts.length === 2 && parts[0] && parts[1]) {
+
+      +                    const pathPart = parts[0];
+
+      +                    const strategyPart = parts[1];
+
+      +                    const parsedStrategy =
+      PatchStrategySchema.safeParse(strategyPart);
+
+      +                    if (parsedStrategy.success) {
+
+      +                        filePath = pathPart;
+
+      +                        patchStrategy = parsedStrategy.data;
+
+      +                        strategyProvided = true;
+
+      +                    } else {
+
+      +                        // If the second word is not a valid strategy,
+      treat the entire header as a file path
+
+      +                        filePath = headerLine;
+
+      +                        logger.debug(`Treating entire header as file path
+      since second word is not a valid strategy: "${headerLine}"`);
+
+      +                    }
+                       } else if (parts.length > 2) {
+                           logger.debug(`Skipping unquoted header with more than 2 words: "${headerLine}"`);
+                       }
+    patchStrategy: new-unified
+  - type: write
+    path: test/test.util.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      export async function runProcessPatch(
+          context: E2ETestContext,
+          configOverrides: Partial<Config>,
+          operations: TestOperation[],
+          options: { prompter?: Prompter, responseOverrides?: { uuid?: string, projectId?: string, reasoning?: string[] } } = {}
+      ): Promise<{ uuid: string; config: Config }> {
+
+      =======
+
+      export async function runProcessPatch(
+          context: E2ETestContext,
+          configOverrides: Record<string, any>,
+          operations: TestOperation[],
+          options: { prompter?: Prompter, responseOverrides?: { uuid?: string, projectId?: string, reasoning?: string[] } } = {}
+      ): Promise<{ uuid: string; config: Config }> {
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      export const createTestConfig = async (cwd: string, overrides:
+      Partial<Config> = {}): Promise<Config> => {
+
+      =======
+
+      export const createTestConfig = async (cwd: string, overrides:
+      Record<string, any> = {}): Promise<Config> => {
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+          for (const [flatKey, nestedPath] of Object.entries(flatToNestedMapping)) {
+              if (flatKey in normalizedOverrides) {
+                  const value = normalizedOverrides[flatKey];
+                  delete normalizedOverrides[flatKey];
+                  
+                  const pathParts = nestedPath.split('.');
+                  let current = normalizedOverrides;
+                  for (let i = 0; i < pathParts.length - 1; i++) {
+                      if (!current[pathParts[i]]) {
+                          current[pathParts[i]] = {};
+                      }
+                      current = current[pathParts[i]];
+                  }
+                  current[pathParts[pathParts.length - 1]] = value;
+              }
+          }
+      =======
+          for (const [flatKey, nestedPath] of Object.entries(flatToNestedMapping)) {
+              if (flatKey in normalizedOverrides) {
+                  const value = normalizedOverrides[flatKey];
+                  delete normalizedOverrides[flatKey];
+                  
+                  const pathParts = nestedPath.split('.');
+                  let current: any = normalizedOverrides;
+                  for (let i = 0; i < pathParts.length - 1; i++) {
+                      const part = pathParts[i];
+                      if (!part) continue;
+                      if (!current[part]) {
+                          current[part] = {};
+                      }
+                      current = current[part];
+                  }
+                  const lastPart = pathParts[pathParts.length - 1];
+                  if (lastPart) {
+                      current[lastPart] = value;
+                  }
+              }
+          }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: test/e2e/init.test.ts
+    content: |-
+      --- test/e2e/init.test.ts
+      +++ test/e2e/init.test.ts
+      @@ -3,8 +3,7 @@
+       import path from 'path';
+       import { initCommand } from '../../src/commands/init';
+       import { setupE2ETest, E2ETestContext, createTestFile } from '../test.util';
+       import { CONFIG_FILE_NAME_TS, CONFIG_FILE_NAME_JSON, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME } from '../../src/utils/constants';
+      -import { ConfigSchema } from '../../src/types';
+       import { logger } from '../../src/utils/logger';
+       import { findConfig, findConfigPath } from '../../src/core/config';
+    patchStrategy: new-unified
+snapshot:
+  src/core/parser.ts: >-
+    import yaml from 'js-yaml';
+
+    import { z } from 'zod';
+
+    import {
+        ControlYamlSchema,
+        FileOperation,
+        ParsedLLMResponse,
+        ParsedLLMResponseSchema,
+        PatchStrategy,
+        PatchStrategySchema,
+    } from '../types';
+
+    import {
+        CODE_BLOCK_START_MARKER,
+        CODE_BLOCK_END_MARKER,
+        DELETE_FILE_MARKER,
+        RENAME_FILE_OPERATION
+    } from '../utils/constants';
+
+    import { logger } from '../utils/logger';
+
+
+    const CODE_BLOCK_REGEX =
+    /```(?:\w+)?(?:\s*\/\/\s*(.*?)|\s+(.*?))?[\r\n]([\s\S]*?)[\r\n]```/g;
+
+    const YAML_BLOCK_REGEX = /```yaml[\r\n]([\s\S]+?)```/;
+
+
+    const extractCodeBetweenMarkers = (content: string): string => {
+        const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);
+        const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);
+
+        if (startMarkerIndex === -1 || endMarkerIndex === -1 || endMarkerIndex <= startMarkerIndex) {
+            // Normalize line endings to Unix-style \n for consistency
+            return content.trim().replace(/\r\n/g, '\n');
+        }
+
+        const startIndex = startMarkerIndex + CODE_BLOCK_START_MARKER.length;
+        // Normalize line endings to Unix-style \n for consistency
+        return content.substring(startIndex, endMarkerIndex).trim().replace(/\r\n/g, '\n');
+    };
+
+
+    export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null
+    => {
+        try {
+            logger.debug('Parsing LLM response...');
+            let yamlText: string | null = null;
+            let textWithoutYaml: string = rawText;
+
+            const yamlBlockMatch = rawText.match(YAML_BLOCK_REGEX);
+            if (yamlBlockMatch && yamlBlockMatch[1]) {
+                logger.debug('Found YAML code block.');
+                yamlText = yamlBlockMatch[1];
+                textWithoutYaml = rawText.replace(YAML_BLOCK_REGEX, '').trim();
+            } else {
+                logger.debug('No YAML code block found. Looking for raw YAML content at the end.');
+                const lines = rawText.trim().split('\n');
+                let yamlStartIndex = -1;
+                // Search from the end, but not too far, maybe last 15 lines
+                const searchLimit = Math.max(0, lines.length - 15);
+                for (let i = lines.length - 1; i >= searchLimit; i--) {
+                    const trimmedLine = lines[i]?.trim();
+                    if (trimmedLine && trimmedLine.match(/^projectId:\s*['"]?[\w.-]+['"]?$/)) {
+                        yamlStartIndex = i;
+                        break;
+                    }
+                }
+
+                if (yamlStartIndex !== -1) {
+                    logger.debug(`Found raw YAML starting at line ${yamlStartIndex}.`);
+                    const yamlLines = lines.slice(yamlStartIndex);
+                    const textWithoutYamlLines = lines.slice(0, yamlStartIndex);
+                    yamlText = yamlLines.join('\n');
+                    textWithoutYaml = textWithoutYamlLines.join('\n').trim();
+                }
+            }
+            
+            logger.debug(`YAML content: ${yamlText ? 'Found' : 'Not found'}`);
+            if (!yamlText) {
+                logger.debug('No YAML content found');
+                return null;
+            }
+
+            let control;
+            try {
+                const yamlContent = yaml.load(yamlText);
+                logger.debug(`YAML content parsed: ${JSON.stringify(yamlContent)}`);
+                control = ControlYamlSchema.parse(yamlContent);
+                logger.debug(`Control schema parsed: ${JSON.stringify(control)}`);
+            } catch (e) {
+                logger.debug(`Error parsing YAML or control schema: ${e}`);
+                return null;
+            }
+            
+            const operations: FileOperation[] = [];
+            const matchedBlocks: string[] = [];
+            
+            let match;
+            logger.debug('Looking for code blocks...');
+            let blockCount = 0;
+            while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+                blockCount++;
+                logger.debug(`Found code block #${blockCount}`);
+                const [fullMatch, commentHeaderLine, spaceHeaderLine, rawContent] = match;
+
+                // Get the header line from either the comment style or space style
+                const headerLineUntrimmed = commentHeaderLine || spaceHeaderLine || '';
+                
+                if (typeof headerLineUntrimmed !== 'string' || typeof rawContent !== 'string') {
+                    logger.debug('Header line or raw content is not a string, skipping');
+                    continue;
+                }
+
+                const headerLine = headerLineUntrimmed.trim();
+                const content = rawContent.trim();
+
+                // Handle rename operation as a special case
+                if (headerLine === RENAME_FILE_OPERATION) {
+                    logger.debug(`Found rename-file operation`);
+                    matchedBlocks.push(fullMatch);
+                    try {
+                        const renameData = JSON.parse(content);
+                        const RenameFileContentSchema = z.object({ from: z.string().min(1), to: z.string().min(1) });
+                        const renameOp = RenameFileContentSchema.parse(renameData);
+                        operations.push({ type: 'rename', from: renameOp.from, to: renameOp.to });
+                    } catch (e) {
+                        logger.debug(`Invalid rename operation content, skipping: ${e instanceof Error ? e.message : String(e)}`);
+                    }
+                    continue;
+                }
+
+
+                if (headerLine === '') {
+                    logger.debug('Empty header line, skipping');
+                    continue;
+                }
+
+                logger.debug(`Header line: ${headerLine}`);
+                matchedBlocks.push(fullMatch);
+                
+                let filePath = '';
+                let strategyProvided = false;
+                let patchStrategy: PatchStrategy = 'replace'; // Default
+                
+                const quotedMatch = headerLine.match(/^"(.+?)"(?:\s+(.*))?$/);
+                if (quotedMatch) {
+                    filePath = quotedMatch[1]!;
+                    const strategyStr = (quotedMatch[2] || '').trim();
+                    if (strategyStr) {
+                        const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+                        if (!parsedStrategy.success) {
+                            logger.debug('Invalid patch strategy for quoted path, skipping');
+                            continue;
+                        }
+                        patchStrategy = parsedStrategy.data;
+                        strategyProvided = true;
+                    }
+                } else {
+                    const parts = headerLine.split(/\s+/);
+                    // For unquoted paths, we are strict:
+                    // - 1 word: it's a file path.
+                    // - 2 words: it must be `path strategy`.
+                    // - >2 words: it's a description and should be ignored.
+                    // This prevents misinterpreting descriptive text in the header as a file path.
+                    if (parts.length === 1) {
+                        filePath = parts[0];
+                    } else if (parts.length === 2) {
+                        const [pathPart, strategyPart] = parts;
+                        const parsedStrategy = PatchStrategySchema.safeParse(strategyPart);
+                        if (parsedStrategy.success) {
+                            filePath = pathPart;
+                            patchStrategy = parsedStrategy.data;
+                            strategyProvided = true;
+                        } else {
+                            // If the second word is not a valid strategy, treat the entire header as a file path
+                            filePath = headerLine;
+                            logger.debug(`Treating entire header as file path since second word is not a valid strategy: "${headerLine}"`);
+                        }
+                    } else if (parts.length > 2) {
+                        logger.debug(`Skipping unquoted header with more than 2 words: "${headerLine}"`);
+                    }
+                }
+
+                if (!strategyProvided) {
+                    // Check for multi-search-replace format with a more precise pattern
+                    // Looking for the exact pattern at the start of a line AND the ending marker
+                    if (/^<<<<<<< SEARCH\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) {
+                        patchStrategy = 'multi-search-replace';
+                        logger.debug('Inferred patch strategy: multi-search-replace');
+                    } 
+                    // Check for new-unified format with more precise pattern
+                    else if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) {
+                        patchStrategy = 'new-unified';
+                        logger.debug('Inferred patch strategy: new-unified');
+                    }
+                    // If neither pattern is detected, keep the default 'replace' strategy
+                    else {
+                        logger.debug('No specific patch format detected, using default replace strategy');
+                    }
+                }
+
+                logger.debug(`File path: ${filePath}`);
+                logger.debug(`Patch strategy: ${patchStrategy}`);
+                
+                if (!filePath) {
+                    logger.debug('Empty file path, skipping');
+                    continue;
+                }
+
+                if (content === DELETE_FILE_MARKER) {
+                    logger.debug(`Adding delete operation for: ${filePath}`);
+                    operations.push({ type: 'delete', path: filePath });
+                } else {
+                    const cleanContent = extractCodeBetweenMarkers(content);
+                    logger.debug(`Adding write operation for: ${filePath}`);
+                    operations.push({ 
+                        type: 'write', 
+                        path: filePath, 
+                        content: cleanContent, 
+                        patchStrategy 
+                    });
+                }
+            }
+            
+            logger.debug(`Found ${blockCount} code blocks, ${operations.length} operations`);
+            
+            let reasoningText = textWithoutYaml;
+            for (const block of matchedBlocks) {
+                reasoningText = reasoningText.replace(block, '');
+            }
+            const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+
+            if (operations.length === 0) {
+                logger.debug('No operations found, returning null');
+                return null;
+            }
+
+            try {
+                const parsedResponse = ParsedLLMResponseSchema.parse({
+                    control,
+                    operations,
+                    reasoning,
+                });
+                logger.debug('Successfully parsed LLM response');
+                return parsedResponse;
+            } catch (e) {
+                logger.debug(`Error parsing final response schema: ${e}`);
+                return null;
+            }
+        } catch (e) {
+            if (e instanceof z.ZodError) {
+                logger.debug(`ZodError: ${JSON.stringify(e.errors)}`);
+            } else {
+                logger.debug(`Unexpected error: ${e}`);
+            }
+            return null;
+        }
+    };
+  test/test.util.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import os from 'os';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import chalk from 'chalk';
+
+    import { Config, PatchStrategy } from '../src/types';
+
+    import { CONFIG_FILE_NAME_JSON } from '../src/utils/constants';
+
+    import { logger } from '../src/utils/logger';
+
+    import { processPatch } from '../src/core/transaction';
+
+    import { parseLLMResponse } from '../src/core/parser';
+
+
+    export type Prompter = (message: string) => Promise<boolean>;
+
+    export interface TestDir {
+        path: string;
+        cleanup: () => Promise<void>;
+    }
+
+
+    export const setupTestDirectory = async (): Promise<TestDir> => {
+        const testDirPath = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-test-'));
+
+        const cleanup = async () => {
+            await fs.rm(testDirPath, { recursive: true, force: true });
+        };
+
+        return { path: testDirPath, cleanup };
+    };
+
+
+    export interface E2ETestContext {
+        testDir: TestDir;
+        cleanup: () => Promise<void>;
+    }
+
+
+    export const setupE2ETest = async (options: { withTsconfig?: boolean } =
+    {}): Promise<E2ETestContext> => {
+        chalk.level = 0; // Disable colors for all tests
+
+        const testDir = await setupTestDirectory();
+
+        if (options.withTsconfig) {
+            await createTestFile(testDir.path, 'tsconfig.json', JSON.stringify({
+                "compilerOptions": { "strict": true, "noEmit": true, "isolatedModules": true },
+                "include": ["src/**/*.ts"]
+            }, null, 2));
+        }
+        
+        // Suppress logger output
+        const originalLogger = {
+            info: (logger as any).info,
+            log: (logger as any).log,
+            warn: (logger as any).warn,
+            error: (logger as any).error,
+            success: (logger as any).success,
+            prompt: (logger as any).prompt,
+        };
+        
+        (logger as any).info = () => {};
+        (logger as any).log = () => {};
+        (logger as any).warn = () => {};
+        (logger as any).error = () => {};
+        if ((logger as any).success) (logger as any).success = () => {};
+        if ((logger as any).prompt) (logger as any).prompt = () => {};
+
+
+        const cleanup = async () => {
+            // Restore logger
+            (logger as any).info = originalLogger.info;
+            (logger as any).log = originalLogger.log;
+            (logger as any).warn = originalLogger.warn;
+            (logger as any).error = originalLogger.error;
+            if (originalLogger.success) (logger as any).success = originalLogger.success;
+            if (originalLogger.prompt) (logger as any).prompt = originalLogger.prompt;
+            
+            // Give fs operations time to complete before cleanup
+            await new Promise(resolve => setTimeout(resolve, 150));
+            
+            // Cleanup directory
+            await testDir.cleanup();
+        };
+
+        return { testDir, cleanup };
+    };
+
+
+    export interface TestOperation {
+        type: 'edit' | 'new' | 'delete';
+        path: string;
+        content?: string;
+        strategy?: PatchStrategy;
+    }
+
+
+    export function createLLMResponseString(
+        operations: TestOperation[],
+        overrides: { uuid?: string, projectId?: string, reasoning?: string[] } = {}
+    ): { response: string, uuid: string } {
+        const uuid = overrides.uuid ?? uuidv4();
+        const projectId = overrides.projectId ?? 'test-project';
+        const reasoning = overrides.reasoning ?? [LLM_RESPONSE_START];
+
+        const blocks = operations.map(op => {
+            if (op.type === 'delete') {
+                return createDeleteFileBlock(op.path);
+            }
+            return createFileBlock(op.path, op.content ?? '', op.strategy);
+        });
+
+        const changeSummary = operations.map(op => ({ [op.type]: op.path }));
+
+        const response = [
+            ...reasoning,
+            ...blocks,
+            LLM_RESPONSE_END(uuid, changeSummary, projectId)
+        ].join('\n');
+
+        return { response, uuid };
+    }
+
+
+    export async function runProcessPatch(
+        context: E2ETestContext,
+        configOverrides: Partial<Config>,
+        operations: TestOperation[],
+        options: { prompter?: Prompter, responseOverrides?: { uuid?: string, projectId?: string, reasoning?: string[] } } = {}
+    ): Promise<{ uuid: string; config: Config }> {
+        const config = await createTestConfig(context.testDir.path, configOverrides);
+        
+        const { response, uuid } = createLLMResponseString(operations, { ...options.responseOverrides, projectId: options.responseOverrides?.projectId ?? config.projectId });
+
+        const parsedResponse = parseLLMResponse(response);
+        if (!parsedResponse) {
+            throw new Error("Failed to parse mock LLM response");
+        }
+
+        await processPatch(config, parsedResponse, { prompter: options.prompter, cwd: context.testDir.path });
+        
+        return { uuid, config };
+    }
+
+
+
+    // Helper function to deep merge objects
+
+    const deepMerge = (target: any, source: any): any => {
+        const result = { ...target };
+        for (const key in source) {
+            if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                result[key] = deepMerge(target[key] || {}, source[key]);
+            } else {
+                result[key] = source[key];
+            }
+        }
+        return result;
+    };
+
+
+    export const createTestConfig = async (cwd: string, overrides:
+    Partial<Config> = {}): Promise<Config> => {
+        const defaultConfig: Config = {
+            projectId: 'test-project',
+            core: {
+                logLevel: 'info',
+                enableNotifications: false,
+                watchConfig: true,
+            },
+            watcher: {
+                clipboardPollInterval: 100,
+                preferredStrategy: 'auto',
+            },
+            patch: {
+                approvalMode: 'auto',
+                approvalOnErrorCount: 0,
+                linter: `bun -e "process.exit(0)"`, // A command that always succeeds
+                preCommand: '',
+                postCommand: '',
+            },
+            git: {
+                autoGitBranch: false,
+                gitBranchPrefix: 'relay/',
+                gitBranchTemplate: 'gitCommitMsg',
+            },
+        };
+        
+        // Handle legacy flat config overrides by mapping them to the new nested structure
+        const normalizedOverrides: any = { ...overrides };
+        
+        // Map flat properties to nested structure for backward compatibility
+        const flatToNestedMapping: Record<string, string> = {
+            'approvalMode': 'patch.approvalMode',
+            'approvalOnErrorCount': 'patch.approvalOnErrorCount',
+            'linter': 'patch.linter',
+            'preCommand': 'patch.preCommand',
+            'postCommand': 'patch.postCommand',
+            'clipboardPollInterval': 'watcher.clipboardPollInterval',
+            'preferredStrategy': 'watcher.preferredStrategy',
+            'logLevel': 'core.logLevel',
+            'enableNotifications': 'core.enableNotifications',
+            'watchConfig': 'core.watchConfig',
+            'autoGitBranch': 'git.autoGitBranch',
+            'gitBranchPrefix': 'git.gitBranchPrefix',
+            'gitBranchTemplate': 'git.gitBranchTemplate',
+        };
+        
+        for (const [flatKey, nestedPath] of Object.entries(flatToNestedMapping)) {
+            if (flatKey in normalizedOverrides) {
+                const value = normalizedOverrides[flatKey];
+                delete normalizedOverrides[flatKey];
+                
+                const pathParts = nestedPath.split('.');
+                let current = normalizedOverrides;
+                for (let i = 0; i < pathParts.length - 1; i++) {
+                    if (!current[pathParts[i]]) {
+                        current[pathParts[i]] = {};
+                    }
+                    current = current[pathParts[i]];
+                }
+                current[pathParts[pathParts.length - 1]] = value;
+            }
+        }
+        
+        const config = deepMerge(defaultConfig, normalizedOverrides);
+        await fs.writeFile(path.join(cwd, CONFIG_FILE_NAME_JSON), JSON.stringify(config, null, 2));
+        return config;
+    };
+
+
+    export const createTestFile = async (cwd: string, filePath: string, content:
+    string): Promise<void> => {
+        const absolutePath = path.resolve(cwd, filePath);
+        const dir = path.dirname(absolutePath);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(absolutePath, content);
+    };
+
+
+    export const LLM_RESPONSE_START = `
+
+    I have analyzed your request and here are the changes.
+
+    First, I will edit the main file.
+
+    `;
+
+
+    export const LLM_RESPONSE_END = (uuid: string, changeSummary: { [key:
+    string]: string }[] = [], projectId: string = 'test-project') => `
+
+    \`\`\`yaml
+
+    projectId: ${projectId}
+
+    uuid: ${uuid}
+
+    changeSummary: ${JSON.stringify(changeSummary)}
+
+    \`\`\`
+
+    `;
+
+
+    export const createFileBlock = (filePath: string, content: string,
+    patchStrategy?: PatchStrategy): string => {
+        const strategyString = patchStrategy ? ` ${patchStrategy}` : '';
+        return `
+    \`\`\`typescript // ${filePath}${strategyString}
+
+    // START
+
+
+    ${content}
+
+
+    // END
+
+    \`\`\`
+
+    `;
+
+    };
+
+
+    export const createDeleteFileBlock = (filePath: string): string => {
+        return `
+    \`\`\`typescript // ${filePath}
+
+    //TODO: delete this file
+
+    \`\`\`
+
+    `;
+
+    };
+  test/e2e/init.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { initCommand } from '../../src/commands/init';
+
+    import { setupE2ETest, E2ETestContext, createTestFile } from '../test.util';
+
+    import { CONFIG_FILE_NAME_TS, CONFIG_FILE_NAME_JSON, STATE_DIRECTORY_NAME,
+    GITIGNORE_FILE_NAME } from '../../src/utils/constants';
+
+    import { ConfigSchema } from '../../src/types';
+
+    import { logger } from '../../src/utils/logger';
+
+    import { findConfig, findConfigPath } from '../../src/core/config';
+
+
+    describe('e2e/init', () => {
+        let context: E2ETestContext;
+
+        beforeEach(async () => {
+            context = await setupE2ETest();
+        });
+
+        afterEach(async () => {
+            if (context) await context.cleanup();
+        });
+
+        it('should create config file with correct defaults, state directory, and .gitignore', async () => {
+            await initCommand(context.testDir.path);
+
+            // Check for config file
+            const configPath = await findConfigPath(context.testDir.path);
+            expect(configPath).toBeTruthy();
+            expect(configPath).toBe(path.join(context.testDir.path, CONFIG_FILE_NAME_TS));
+
+            // Read config using the findConfig function to handle TypeScript files
+            const config = await findConfig(context.testDir.path);
+            expect(config).toBeTruthy();
+            
+            // Validate against schema to check defaults
+            expect(config!.projectId).toBe(path.basename(context.testDir.path));
+            expect(config!.watcher.clipboardPollInterval).toBe(2000);
+            expect(config!.patch.approvalMode).toBe('auto');
+            expect(config!.patch.linter).toBe('bun tsc --noEmit');
+
+            // Check for state directory
+            const stateDirPath = path.join(context.testDir.path, STATE_DIRECTORY_NAME);
+            const stateDirExists = await fs.stat(stateDirPath).then(s => s.isDirectory()).catch(() => false);
+            expect(stateDirExists).toBe(true);
+
+            // Check for .gitignore
+            const gitignorePath = path.join(context.testDir.path, GITIGNORE_FILE_NAME);
+            const gitignoreExists = await fs.access(gitignorePath).then(() => true).catch(() => false);
+            expect(gitignoreExists).toBe(true);
+
+            const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+            expect(gitignoreContent).toContain(`/${STATE_DIRECTORY_NAME}/`);
+        });
+
+        it('should use package.json name for projectId if available', async () => {
+            const pkgName = 'my-awesome-project';
+            await createTestFile(context.testDir.path, 'package.json', JSON.stringify({ name: pkgName }));
+
+            await initCommand(context.testDir.path);
+
+            const config = await findConfig(context.testDir.path);
+            expect(config).toBeTruthy();
+            expect(config!.projectId).toBe(pkgName);
+        });
+
+        it('should append to existing .gitignore', async () => {
+            const initialContent = '# Existing rules\nnode_modules/';
+            await createTestFile(context.testDir.path, GITIGNORE_FILE_NAME, initialContent);
+
+            await initCommand(context.testDir.path);
+
+            const gitignoreContent = await fs.readFile(path.join(context.testDir.path, GITIGNORE_FILE_NAME), 'utf-8');
+            expect(gitignoreContent).toContain(initialContent);
+            expect(gitignoreContent).toContain(`/${STATE_DIRECTORY_NAME}/`);
+        });
+
+        it('should not add entry to .gitignore if it already exists', async () => {
+            const entry = `/${STATE_DIRECTORY_NAME}/`;
+            const initialContent = `# Existing rules\n${entry}`;
+            await createTestFile(context.testDir.path, GITIGNORE_FILE_NAME, initialContent);
+
+            await initCommand(context.testDir.path);
+
+            const gitignoreContent = await fs.readFile(path.join(context.testDir.path, GITIGNORE_FILE_NAME), 'utf-8');
+            const occurrences = (gitignoreContent.match(new RegExp(entry, 'g')) || []).length;
+            expect(occurrences).toBe(1);
+        });
+
+        it('should not overwrite an existing relaycode.config.json', async () => {
+            const customConfig = { projectId: 'custom', customField: true };
+            await createTestFile(context.testDir.path, CONFIG_FILE_NAME_JSON, JSON.stringify(customConfig));
+
+            await initCommand(context.testDir.path);
+
+            // Should still find the JSON config and not overwrite it
+            const configPath = await findConfigPath(context.testDir.path);
+            expect(configPath).toBe(path.join(context.testDir.path, CONFIG_FILE_NAME_JSON));
+            
+            const configContent = await fs.readFile(path.join(context.testDir.path, CONFIG_FILE_NAME_JSON), 'utf-8');
+            const config = JSON.parse(configContent);
+            expect(config.projectId).toBe('custom');
+            expect(config.customField).toBe(true);
+        });
+
+        it('should output the system prompt with the correct project ID', async () => {
+            const capturedOutput: string[] = [];
+            const originalLog = logger.log;
+            (logger as any).log = (message: string) => capturedOutput.push(message);
+
+            const pkgName = 'my-prompt-project';
+            await createTestFile(context.testDir.path, 'package.json', JSON.stringify({ name: pkgName }));
+
+            await initCommand(context.testDir.path);
+
+            (logger as any).log = originalLog; // Restore
+
+            const outputString = capturedOutput.join('\n');
+            expect(outputString).toContain(`Project ID: ${pkgName}`);
+        });
+
+        it('should log an error if .gitignore is not writable', async () => {
+            const gitignorePath = path.join(context.testDir.path, GITIGNORE_FILE_NAME);
+            await createTestFile(context.testDir.path, GITIGNORE_FILE_NAME, '# initial');
+            
+            const capturedErrors: string[] = [];
+            const originalError = logger.error;
+            (logger as any).error = (message: string) => capturedErrors.push(message);
+
+            try {
+                await fs.chmod(gitignorePath, 0o444); // Read-only
+
+                // initCommand doesn't throw, it just logs an error.
+                await initCommand(context.testDir.path);
+
+                const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+                expect(gitignoreContent).toBe('# initial'); // Should not have changed
+                expect(capturedErrors.length).toBe(1);
+                expect(capturedErrors[0]).toContain(`Failed to update ${GITIGNORE_FILE_NAME}`);
+            } finally {
+                // Restore logger
+                (logger as any).error = originalError;
+                
+                // Make writable again for cleanup
+                await fs.chmod(gitignorePath, 0o666);
+            }
+        });
+    });
+approved: true

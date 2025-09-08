@@ -1,0 +1,1329 @@
+uuid: d26922d5-4556-4299-97d5-e51c91178229
+projectId: relaycode
+createdAt: '2025-09-04T01:57:16.487Z'
+linesAdded: 61
+linesRemoved: 4
+gitCommitMsg: 'fix(e2e): resolve test failures with stricter patching logic'
+promptSummary: >-
+  Fix failing e2e tests by improving fuzzy matching logic, parser strictness,
+  and file operation validation.
+reasoning:
+  - >-
+    gm, anton here. got a bunch of failing e2e tests. looks like the fuzzy logic
+    was a bit too fuzzy and the parser was too chill about some things. shipping
+    a fix to tighten things up. should be gucci now.
+  - >-
+    First, I'm teaching the `standard-diff` strategy how to handle those fuzzy
+    `@@ ... @@` hunk headers. It was too strict before.
+  - >-
+    Next, I'm making the fuzzy patcher for `standard-diff` smarter. If a hunk
+    has no context lines (just adds/deletes), doing a fuzzy search across the
+    whole file is super risky. It was matching things it shouldn't. Now, it will
+    only do an exact match at the specified line number for these context-less
+    hunks.
+  - >-
+    The parser was too lenient with invalid patch strategies. Now, if you
+    provide a strategy that doesn't exist (e.g., `invalid-strategy`), the whole
+    code block will be ignored. This will cause parsing to fail if it's the only
+    block, which is the correct behavior.
+  - >-
+    The delete operation was succeeding even if the file didn't exist. That's
+    not right. Added a check to make sure we're actually deleting something
+    that's tracked in the transaction.
+  - >-
+    Finally, updated the e2e test runner to correctly handle cases where parsing
+    is *expected* to fail. A failed parse for a test case that expects failure
+    is a success.
+  - These changes should get all the tests passing again. Peace out.
+operations:
+  - type: write
+    path: packages/apply-multi-diff/src/strategies/standard-diff.ts
+    content: >-
+      --- packages/apply-multi-diff/src/strategies/standard-diff.ts
+
+      +++ packages/apply-multi-diff/src/strategies/standard-diff.ts
+
+      @@ -84,10 +84,11 @@
+         const lines = diffContent.split("\n");
+         const hunks: Hunk[] = [];
+         let currentHunk: Omit<Hunk, 'lines'> & { lines: string[] } | null = null;
+         const hunkHeaderRegex = /^@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@/;
+      +  const fuzzyHunkHeaderRegex = /^@@ .* @@/;
+       
+         for (const line of lines) {
+           if (line.startsWith("---") || line.startsWith("+++")) continue;
+       
+      -    const match = line.match(hunkHeaderRegex);
+
+      +    let match = line.match(hunkHeaderRegex);
+           if (match) {
+             if (currentHunk) hunks.push(currentHunk);
+             currentHunk = {
+      @@ -97,6 +98,16 @@
+               newLineCount: match[6] ? parseInt(match[6], 10) : 1,
+               lines: [],
+             };
+      +    } else if (fuzzyHunkHeaderRegex.test(line)) {
+
+      +      if (currentHunk) hunks.push(currentHunk);
+
+      +       currentHunk = {
+
+      +        originalStartLine: 1, // For fuzzy hunks, we don't have a line
+      number, so we'll start search from the top.
+
+      +        originalLineCount: 1,
+
+      +        newStartLine: 1,
+
+      +        newLineCount: 1,
+
+      +        lines: [],
+
+      +      };
+           } else if (currentHunk) {
+             // Handle context lines (space prefix), additions (+), deletions (-), and empty lines
+             if (line.startsWith(" ") || line.startsWith("+") || line.startsWith("-")) {
+    patchStrategy: new-unified
+  - type: write
+    path: packages/apply-multi-diff/src/strategies/standard-diff.ts
+    content: >-
+      --- packages/apply-multi-diff/src/strategies/standard-diff.ts
+
+      +++ packages/apply-multi-diff/src/strategies/standard-diff.ts
+
+      @@ -179,6 +179,16 @@
+           }
+         }
+       
+      +  const contextLineCount = hunk.lines.filter(l => l.startsWith('
+      ')).length;
+
+      +  if (contextLineCount === 0 && pattern.length > 0) {
+
+      +    // For hunks without any context lines (pure additions/deletions),
+
+      +    // we already tried an exact match at the expected line number in
+      STAGE 1.
+
+      +    // A global fuzzy search is too risky as it could match anywhere,
+      leading to incorrect patches.
+
+      +    // This is a common failure mode for single-line changes where the
+      content is similar to other lines.
+
+      +    // So we fail here if the exact match didn't work.
+
+      +    return { success: false };
+
+      +  }
+
+      +
+         // --- STAGE 2: Fuzzy Match (Global Search) ---
+         let bestMatchIndex = -1;
+         let minDistance = Infinity;
+    patchStrategy: new-unified
+  - type: write
+    path: packages/relaycode-core/src/parser.ts
+    content: >-
+      --- packages/relaycode-core/src/parser.ts
+
+      +++ packages/relaycode-core/src/parser.ts
+
+      @@ -50,9 +50,15 @@
+         if (!filePath) return null;
+       
+         const strategyStr = match[3] || '';
+      -  const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+
+      +  if (strategyStr) {
+
+      +    const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+
+      +    if (!parsedStrategy.success) {
+
+      +      return null; // Explicit but invalid strategy
+
+      +    }
+
+      +    return { filePath, patchStrategy: parsedStrategy.data };
+
+      +  }
+       
+      -  return { filePath, patchStrategy: parsedStrategy.success ?
+      parsedStrategy.data : null };
+
+      +  return { filePath, patchStrategy: null }; // No strategy provided
+       };
+       
+       const inferPatchStrategy = (content: string, providedStrategy: PatchStrategy | null): PatchStrategy => {
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -53,6 +53,9 @@
+       
+         for (const op of operations) {
+           if (op.type === 'delete') {
+      +      if (!fileStates.has(op.path) || fileStates.get(op.path) === null) {
+
+      +        throw new Error(`Attempted to delete a file that does not exist
+      or was already deleted: ${op.path}`);
+
+      +      }
+             await deleteFile(op.path, cwd);
+             fileStates.set(op.path, null);
+           } else if (op.type === 'rename') {
+    patchStrategy: new-unified
+  - type: write
+    path: test/e2e/patcher.test.ts
+    content: >-
+      --- test/e2e/patcher.test.ts
+
+      +++ test/e2e/patcher.test.ts
+
+      @@ -75,6 +75,14 @@
+       uuid: 00000000-0000-0000-0000-000000000000
+       `;
+             const parsedResponse = parseLLMResponse(markdownWithYaml);
+      +
+
+      +      if (testCase.expected_outcome === 'failure' && !parsedResponse) {
+
+      +        // This is a valid failure case where the parser rejects the
+      input.
+
+      +        // For example, an invalid patch strategy.
+
+      +        expect(parsedResponse).toBeNull();
+
+      +        return; // Test passes.
+
+      +      }
+
+      +
+             expect(parsedResponse).not.toBeNull();
+             if (!parsedResponse) throw new Error('Test case markdown failed to parse');
+    patchStrategy: new-unified
+snapshot:
+  packages/apply-multi-diff/src/strategies/standard-diff.ts: >-
+    import { ERROR_CODES } from "../constants";
+
+    import type { ApplyDiffResult } from "../types";
+
+    import { createErrorResult } from "../utils/error";
+
+    import { levenshtein } from "../utils/string";
+
+
+    export type Hunk = {
+      originalStartLine: number;
+      originalLineCount: number;
+      newStartLine: number;
+      newLineCount: number;
+      lines: string[];
+    };
+
+
+    export const getToolDescription = (cwd: string): string => {
+      return `apply_diff Tool: Standard Diff Format
+
+    Applies unified diff to a file. Supports fuzzy matching and hunk splitting.
+
+
+    Parameters:
+      :file_path: Path to file relative to ${cwd}
+      :diff_content: Unified diff format with ---\` headers, followed by one or more \`@@ ... @@\` hunk headers.
+
+    - Lines starting with \` \` (a space) are context and must match the
+    original file.
+
+    - Lines starting with \`-\` will be removed.
+
+    - Lines starting with \`+\` will be added.
+
+
+    Example:
+
+
+    <apply_diff file_path="src/component.tsx">
+
+    \`\`\`diff
+
+    --- a/src/component.tsx
+
+    +++ b/src/component.tsx
+
+    @@ -10,7 +10,8 @@
+     function MyComponent() {
+    -  const [count, setCount] = useState(0);
+
+    +  const [count, setCount] = useState(1);
+
+    +  const [name, setName] = useState('');
+
+       return (
+         <div>
+    \`\`\`
+
+    </apply_diff>`;
+
+    };
+
+
+    export const _parseHunks_for_debug = (diffContent: string): Hunk[] | null =>
+    {
+      const lines = diffContent.split("\n");
+      const hunks: Hunk[] = [];
+      let currentHunk: Omit<Hunk, 'lines'> & { lines: string[] } | null = null;
+      const hunkHeaderRegex = /^@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@/;
+
+      for (const line of lines) {
+        if (line.startsWith("---") || line.startsWith("+++")) continue;
+
+        const match = line.match(hunkHeaderRegex);
+        if (match) {
+          if (currentHunk) hunks.push(currentHunk);
+          currentHunk = {
+            originalStartLine: parseInt(match[1] ?? '0', 10),
+            originalLineCount: match[3] ? parseInt(match[3], 10) : 1,
+            newStartLine: parseInt(match[4] ?? '0', 10),
+            newLineCount: match[6] ? parseInt(match[6], 10) : 1,
+            lines: [],
+          };
+        } else if (currentHunk) {
+          // Handle context lines (space prefix), additions (+), deletions (-), and empty lines
+          if (line.startsWith(" ") || line.startsWith("+") || line.startsWith("-")) {
+            currentHunk.lines.push(line);
+          }
+        }
+      }
+      if (currentHunk) hunks.push(currentHunk);
+      return hunks.length > 0 ? hunks : null;
+    };
+
+
+    const applyHunkAt = (
+      sourceLines: readonly string[],
+      hunk: Hunk,
+      startIndex: number
+    ): string[] => {
+      const result: string[] = [...sourceLines.slice(0, startIndex)];
+      let sourceIdx = startIndex;
+
+      for (const hunkLine of hunk.lines) {
+        const lineContent = hunkLine.substring(1);
+        if (hunkLine.startsWith("+")) {
+          result.push(lineContent);
+          continue;
+        }
+
+        // For context or deletion, find the line in the source to handle drift.
+        let foundIdx = -1;
+        const searchEnd = Math.min(sourceIdx + 10, sourceLines.length);
+        for (let i = sourceIdx; i < searchEnd; i++) {
+          if (sourceLines[i] === lineContent) {
+            foundIdx = i;
+            break;
+          }
+        }
+
+        if (foundIdx !== -1) {
+          // Found the line. Preserve drift (lines between sourceIdx and foundIdx).
+          for (let i = sourceIdx; i < foundIdx; i++) {
+            const line = sourceLines[i];
+            if (line !== undefined) {
+              result.push(line);
+            }
+          }
+          if (hunkLine.startsWith(" ")) {
+            const line = sourceLines[foundIdx];
+            if (line !== undefined) {
+              result.push(line);
+            }
+          }
+          sourceIdx = foundIdx + 1;
+        } else {
+          // Not found nearby (fuzzy match case). Assume current line corresponds.
+          if (hunkLine.startsWith(" ")) {
+            const line = sourceLines[sourceIdx];
+            if (line !== undefined) result.push(line);
+          }
+          sourceIdx++;
+        }
+      }
+      result.push(...sourceLines.slice(sourceIdx));
+      return result;
+    };
+
+
+    export const _findAndApplyHunk_for_debug = (
+      sourceLines: readonly string[],
+      hunk: Hunk
+    ): { success: true; newLines: string[] } | { success: false } => {
+      const pattern = hunk.lines
+        .filter((l) => l.startsWith(" ") || l.startsWith("-"))
+        .map((l) => l.substring(1));
+
+      if (pattern.length === 0) {
+        // Pure insertion. Trust the line number.
+        // A pure insertion hunk's originalStartLine refers to the line *after* which
+        // the content should be inserted. Line `n` is at index `n-1`. After line `n` is index `n`.
+        const insertionPoint = hunk.originalStartLine;
+        const result = [...sourceLines];
+        const additions = hunk.lines
+          .filter((l) => l.startsWith("+"))
+          .map((l) => l.substring(1));
+        result.splice(insertionPoint, 0, ...additions);
+        return { success: true, newLines: result };
+      }
+
+      // --- STAGE 1: Exact Match (Fast Path) ---
+      const expectedStartIndex = hunk.originalStartLine - 1;
+      if (expectedStartIndex >= 0 && expectedStartIndex + pattern.length <= sourceLines.length) {
+        const slice = sourceLines.slice(expectedStartIndex, expectedStartIndex + pattern.length);
+        if (slice.join("\n") === pattern.join("\n")) {
+          return { success: true, newLines: applyHunkAt(sourceLines, hunk, expectedStartIndex) };
+        }
+      }
+
+      // --- STAGE 2: Fuzzy Match (Global Search) ---
+      let bestMatchIndex = -1;
+      let minDistance = Infinity;
+      const patternText = pattern.join("\n");
+      const maxDistanceThreshold = Math.floor(patternText.length * 0.30); // 30% difference tolerance
+
+      for (let i = 0; i <= sourceLines.length - pattern.length; i++) {
+        const sliceText = sourceLines.slice(i, i + pattern.length).join("\n");
+        const distance = levenshtein(patternText, sliceText);
+        if (distance < minDistance) {
+          minDistance = distance;
+          bestMatchIndex = i;
+        }
+        if (distance === 0) break; // Perfect match found
+      }
+
+      if (bestMatchIndex !== -1 && minDistance <= maxDistanceThreshold) {
+        return { success: true, newLines: applyHunkAt(sourceLines, hunk, bestMatchIndex) };
+      }
+
+      return { success: false };
+    };
+
+
+
+    export const _splitHunk_for_debug = (hunk: Hunk): Hunk[] => {
+      const subHunks: Hunk[] = [];
+      const context = 2; 
+      let i = 0;
+      while (i < hunk.lines.length) {
+        // Skip leading context
+        while (i < hunk.lines.length && hunk.lines[i]?.startsWith(" ")) i++;
+        if (i === hunk.lines.length) break;
+
+        const changeBlockStart = i;
+        // Find end of this change block
+        while (i < hunk.lines.length && !hunk.lines[i]?.startsWith(" ")) i++;
+        const changeBlockEnd = i;
+
+        const subHunkStart = Math.max(0, changeBlockStart - context);
+        const subHunkEnd = Math.min(hunk.lines.length, changeBlockEnd + context);
+        
+        const subHunkLines = hunk.lines.slice(subHunkStart, subHunkEnd);
+
+        subHunks.push({
+          ...hunk, // Carry over metadata, although it's less accurate for sub-hunks
+          lines: subHunkLines,
+        });
+      }
+      return subHunks;
+    };
+
+
+    export const applyDiff = (
+      originalContent: string,
+      diffContent: string
+    ): ApplyDiffResult => {
+      const hunks = _parseHunks_for_debug(diffContent);
+      if (!hunks) {
+        return createErrorResult(
+          ERROR_CODES.INVALID_DIFF_FORMAT,
+          "Invalid diff format. Could not parse any hunks."
+        );
+      }
+      
+      // Basic validation for overlapping hunks
+      for (let i = 0; i < hunks.length; i++) {
+        for (let j = i + 1; j < hunks.length; j++) {
+          const h1 = hunks[i];
+          const h2 = hunks[j];
+          if (!h1 || !h2) continue;
+          const h1End = h1.originalStartLine + h1.originalLineCount;
+          if (Math.max(h1.originalStartLine, h2.originalStartLine) < Math.min(h1End, h2.originalStartLine + h2.originalLineCount)) {
+            return createErrorResult(ERROR_CODES.OVERLAPPING_HUNKS, "Hunks overlap, which is not supported.");
+          }
+        }
+      }
+
+      let lines: readonly string[] = originalContent.split("\n");
+      let appliedSuccessfully = true;
+
+      for (const hunk of hunks) {
+        const result = _findAndApplyHunk_for_debug(lines, hunk);
+        if (result.success) {
+          lines = result.newLines;
+        } else {
+          // --- FALLBACK: Hunk Splitting ---
+          const subHunks = _splitHunk_for_debug(hunk);
+          if (subHunks.length <= 1) { // No benefit in splitting a single change block
+            appliedSuccessfully = false;
+            break;
+          }
+
+          let allSubHunksApplied = true;
+          for (const subHunk of subHunks) {
+            const subResult = _findAndApplyHunk_for_debug(lines, subHunk);
+            if (subResult.success) {
+              lines = subResult.newLines;
+            } else {
+              allSubHunksApplied = false;
+              break;
+            }
+          }
+
+          if (!allSubHunksApplied) {
+            appliedSuccessfully = false;
+            break;
+          }
+        }
+      }
+
+      if (!appliedSuccessfully) {
+        return createErrorResult(
+          ERROR_CODES.CONTEXT_MISMATCH,
+          "Could not apply modification. A hunk could not be matched, even with fuzzy search and hunk splitting fallbacks."
+        );
+      }
+
+      let content = lines.join("\n");
+      
+      // Handle specific case: adding content to a file that lacks a trailing newline
+      // Only add newline if the diff explicitly shows we're adding lines
+      if (!originalContent.endsWith("\n") && diffContent.includes("+line 2")) {
+        content += "\n";
+      }
+      
+      return { success: true, content };
+    };
+  packages/relaycode-core/src/parser.ts: >
+    import yaml from 'js-yaml';
+
+    import { logger } from './logger';
+
+    import { z } from 'zod';
+
+    import {
+      ControlYamlSchema,
+      FileOperation,
+      ParsedLLMResponse,
+      ParsedLLMResponseSchema,
+      PatchStrategy,
+      PatchStrategySchema,
+    } from './types';
+
+    import {
+      DELETE_FILE_MARKER,
+      RENAME_FILE_OPERATION
+    } from './constants';
+
+
+    const CODE_BLOCK_REGEX = /```(?:\w+)?\s*([^\r\n]*?)\r?\n([\s\S]*?)```/g;
+
+
+    type ParsedHeader = {
+      filePath: string;
+      patchStrategy: PatchStrategy | null;
+    };
+
+
+    const parseCodeBlockHeader = (headerLine: string): ParsedHeader | null => {
+      // This regex handles:
+      // 1. A quoted file path, optionally followed by a strategy.
+      // 2. An unquoted file path, optionally followed by a strategy.
+      // It's more robust than splitting by space.
+      const match = headerLine.match(/^(?:"([^"]+)"|(\S+))(?:\s+(\S+))?$/);
+
+      if (!match) {
+        // If the regex fails, it might be a path with spaces that isn't quoted.
+        // The instructions say paths with spaces MUST be quoted, but we can be lenient.
+        // We'll check if the last word is a strategy. If so, the rest is the path.
+        const parts = headerLine.split(/\s+/);
+        if (parts.length > 1) {
+          const lastPart = parts[parts.length - 1]!;
+          const parsedStrategy = PatchStrategySchema.safeParse(lastPart);
+          if (parsedStrategy.success) {
+            const filePath = parts.slice(0, -1).join(' ');
+            return { filePath, patchStrategy: parsedStrategy.data };
+          }
+        }
+        // Otherwise, assume the whole line is a file path with no strategy.
+        return headerLine.trim() ? { filePath: headerLine.trim(), patchStrategy: null } : null;
+      }
+
+      const filePath = match[1] || match[2]; // Group 1 is quoted, group 2 is unquoted.
+      if (!filePath) return null;
+
+      const strategyStr = match[3] || '';
+      const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+
+      return { filePath, patchStrategy: parsedStrategy.success ? parsedStrategy.data : null };
+    };
+
+
+    const inferPatchStrategy = (content: string, providedStrategy: PatchStrategy
+    | null): PatchStrategy => {
+      if (providedStrategy) return providedStrategy;
+      if (/^<<<<<<< SEARCH\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) return 'search-replace';
+      if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) return 'standard-diff';
+      return 'replace';
+    };
+
+
+    const extractAndParseYaml = (rawText: string) => {
+      // Strategy 1: Find all fenced YAML blocks and try to parse the last one.
+      const yamlBlockMatches = [...rawText.matchAll(/```\s*(?:yaml|yml)[\r\n]([\s\S]+?)```/gi)];
+
+      if (yamlBlockMatches.length > 0) {
+        const lastMatch = yamlBlockMatches[yamlBlockMatches.length - 1]!;
+        try {
+          const yamlContent: unknown = yaml.load(lastMatch[1]!);
+          const control = ControlYamlSchema.parse(yamlContent);
+          // Success! This is our control block.
+          const textWithoutYaml = rawText.substring(0, lastMatch.index) + rawText.substring(lastMatch.index! + lastMatch[0].length);
+          return { control, textWithoutYaml: textWithoutYaml.trim() };
+        } catch (e) {
+          // The last block was not a valid control block.
+          // We will now fall through to the non-fenced strategy, assuming the fenced block was just an example.
+        }
+      }
+
+      // Strategy 2: Look for a non-fenced block at the end.
+      const lines = rawText.trim().split('\n');
+      let yamlStartIndex = -1;
+      // Heuristic: project ID is required, so we look for that.
+      const searchLimit = Math.max(0, lines.length - 20);
+      for (let i = lines.length - 1; i >= searchLimit; i--) {
+        if (lines[i]?.trim().match(/^projectId:/)) {
+          yamlStartIndex = i;
+          break;
+        }
+      }
+
+      if (yamlStartIndex !== -1) {
+        const yamlText = lines.slice(yamlStartIndex).join('\n');
+        try {
+          const yamlContent: unknown = yaml.load(yamlText);
+          const control = ControlYamlSchema.parse(yamlContent);
+          // Success!
+          const textWithoutYaml = lines.slice(0, yamlStartIndex).join('\n');
+          return { control, textWithoutYaml: textWithoutYaml.trim() };
+        } catch (e) {
+          // Non-fenced YAML block at the end was not a valid control block.
+        }
+      }
+
+      // If both strategies fail, there's no valid control block.
+      return { control: null, textWithoutYaml: rawText };
+    };
+
+
+    const parseCodeBlock = (match: RegExpExecArray): { operation: FileOperation,
+    fullMatch: string } | null => {
+      const [fullMatch, rawHeader, rawContent] = match;
+      let headerLine = (rawHeader || '').trim();
+
+      // CRITICAL FIX: Do not strip the trailing newline. Preserve the raw content from the regex.
+      const content = rawContent || '';
+
+      logger.debug(`[parser] Matched block header: '${rawHeader}'`);
+      logger.debug(`[parser] Raw content (JSON encoded):`, JSON.stringify(content));
+
+      const commentIndex = headerLine.indexOf('//');
+      if (commentIndex !== -1) {
+        // If we find `//`, we assume what follows is the file path and optional strategy.
+        headerLine = headerLine.substring(commentIndex + 2).trim();
+        // This handles formats like `typescript // "path/to/my component.ts" standard-diff`.
+      }
+
+      if (headerLine.startsWith('//')) {
+        headerLine = headerLine.substring(2).trim();
+      }
+
+      if (!headerLine) return null;
+
+      if (headerLine === RENAME_FILE_OPERATION) {
+        try {
+          const { from, to } = z.object({ from: z.string().min(1), to: z.string().min(1) }).parse(JSON.parse(content));
+          return { operation: { type: 'rename', from, to }, fullMatch };
+        } catch (e) {
+          return null;
+        }
+      }
+
+      const parsedHeader = parseCodeBlockHeader(headerLine);
+      if (!parsedHeader) {
+        return null;
+      }
+
+      const { filePath } = parsedHeader;
+
+      if (content.trim() === DELETE_FILE_MARKER) {
+        return { operation: { type: 'delete', path: filePath }, fullMatch };
+      }
+
+      const patchStrategy = inferPatchStrategy(content, parsedHeader.patchStrategy);
+
+      // CRITICAL FIX: No more START/END marker logic.
+      // For 'replace' strategy, we only clean up a potential single leading newline,
+      // which can be an artifact of markdown formatting. All other content is preserved.
+      const cleanContent = (patchStrategy === 'replace')
+        ? content.replace(/^\r?\n/, '')
+        : content;
+
+      if (patchStrategy === 'replace') {
+        logger.debug(`[parser] Final 'replace' content (JSON encoded):`, JSON.stringify(cleanContent));
+      }
+
+      return {
+        operation: { type: 'write', path: filePath, content: cleanContent, patchStrategy },
+        fullMatch
+      };
+    };
+
+
+    export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null
+    => {
+      const { control, textWithoutYaml } = extractAndParseYaml(rawText);
+
+      if (!control) {
+        return null;
+      }
+
+      const operations: FileOperation[] = [];
+      const matchedBlocks: string[] = [];
+      let match;
+
+      while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+        const result = parseCodeBlock(match);
+        if (result) {
+          operations.push(result.operation);
+          matchedBlocks.push(result.fullMatch);
+        }
+      }
+
+      if (operations.length === 0) {
+        return null;
+      }
+
+      let reasoningText = textWithoutYaml;
+      for (const block of matchedBlocks) {
+        reasoningText = reasoningText.replace(block, '');
+      }
+      const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+
+      try {
+        const parsedResponse = ParsedLLMResponseSchema.parse({ control, operations, reasoning });
+        return parsedResponse;
+      } catch (e) {
+        return null;
+      }
+    };
+  src/core/transaction.ts: >
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from 'relaycode-core';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { deleteFile, readFileContent, removeEmptyParentDirectories,
+    renameFile, writeFileContent } from '../utils/fs';
+
+    import path from 'path';
+
+    import chalk from 'chalk';
+
+    import { applyOperations as applyOperationsCore, calculateLineChanges as
+    calculateLineChangesCore } from 'relaycode-core';
+
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState, updatePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt';
+
+    import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+    notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+        yes?: boolean;
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      await Promise.all(
+        filePaths.map(async (filePath) => {
+          snapshot[filePath] = await readFileContent(filePath, cwd);
+        })
+      );
+      return snapshot;
+    };
+
+
+    /**
+     * Applies a series of file operations to the filesystem and returns the new in-memory file states.
+     * This function processes operations sequentially, applying patches (like diffs) against the evolving
+     * state of files, and performing filesystem actions (write, delete, rename) along the way.
+     * @param operations The file operations to apply.
+     * @param originalFiles The initial state of the files.
+     * @param cwd The working directory.
+     * @returns A map representing the final state of all affected files.
+     */
+    export const applyOperations = async (
+      operations: FileOperation[],
+      originalFiles: Map<string, string | null>,
+      cwd: string = process.cwd()
+    ): Promise<Map<string, string | null>> => {
+      // This map tracks the evolving in--memory state of files as we apply operations.
+      const fileStates = new Map<string, string | null>(originalFiles);
+
+      for (const op of operations) {
+        if (op.type === 'delete') {
+          await deleteFile(op.path, cwd);
+          fileStates.set(op.path, null);
+        } else if (op.type === 'rename') {
+          await renameFile(op.from, op.to, cwd);
+          const content = fileStates.get(op.from);
+          fileStates.set(op.from, null);
+          if (content !== undefined) {
+            fileStates.set(op.to, content);
+          }
+        } else if (op.type === 'write') {
+          // For a write operation (which could be a patch), we apply it to the current in-memory state.
+          const singleOpResult = await applyOperationsCore([op], fileStates);
+          if (!singleOpResult.success) {
+            throw new Error(`Failed applying single write op to ${op.path}: ${singleOpResult.error}`);
+          }
+          
+          const newContent = singleOpResult.newFileStates.get(op.path);
+          if (typeof newContent === 'string') {
+            await writeFileContent(op.path, newContent, cwd);
+            fileStates.set(op.path, newContent);
+          }
+        }
+      }
+      return fileStates;
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesToClean = new Set<string>();
+      const restoreErrors: { path: string, error: unknown }[] = [];
+
+      // Attempt to restore all files in parallel, collecting errors.
+      await Promise.all(entries.map(async ([filePath, content]) => {
+          const fullPath = path.resolve(cwd, filePath);
+          try {
+            if (content === null) {
+              // If the file didn't exist in the snapshot, make sure it doesn't exist after restore.
+              await deleteFile(filePath, cwd);
+              directoriesToClean.add(path.dirname(fullPath));
+            } else {
+              // Create directory structure if needed and write the original content back.
+              await writeFileContent(filePath, content, cwd);
+            }
+          } catch (error) {
+            restoreErrors.push({ path: filePath, error });
+          }
+      }));
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesToClean)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+
+      if (restoreErrors.length > 0) {
+        const errorSummary = restoreErrors
+          .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)
+          .join('\n');
+        throw new Error(`Rollback failed for ${restoreErrors.length} file(s):\n${errorSummary}`);
+      }
+    };
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        originalFiles: Map<string, string | null>,
+        newFiles: Map<string, string | null>
+    ): { added: number; removed: number } => {
+        // Simply delegate to the core function.
+        // The core function's signature is slightly different, but it serves the same purpose.
+        return calculateLineChangesCore(op, originalFiles, newFiles);
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true, isError:
+    boolean = true): Promise<void> => {
+        if (isError) {
+            logger.warn(`Rolling back changes: ${reason}`);
+        }
+
+        let rollbackSuccessful = false;
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+            rollbackSuccessful = true;
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            notifyRollbackFailure(uuid, enableNotifications);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                if (isError && rollbackSuccessful) {
+                    notifyFailure(uuid, enableNotifications);
+                }
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    type ApprovalOptions = {
+        config: Config;
+        cwd: string;
+        prompter: Prompter;
+        skipConfirmation: boolean;
+    }
+
+
+    const handleApproval = async ({ config, cwd, prompter, skipConfirmation }:
+    ApprovalOptions): Promise<boolean> => {
+        const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+        logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+        
+        const getManualApproval = async (reason: string): Promise<boolean> => {
+            logger.warn(reason);
+            
+            const notificationResult = await requestApprovalWithNotification(config.projectId, config.core.enableNotifications);
+
+            if (notificationResult === 'approved') {
+                logger.info('Approved via notification.');
+                return true;
+            }
+            if (notificationResult === 'rejected') {
+                logger.info('Rejected via notification.');
+                return false;
+            }
+
+            if (notificationResult === 'timeout') {
+                logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');
+            }
+
+            return await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+        };
+
+        if (skipConfirmation) {
+            logger.success('  - Changes approved via -y/--yes flag.');
+            return true;
+        }
+        if (config.patch.approvalMode === 'manual') {
+            return await getManualApproval('Manual approval required because "approvalMode" is set to "manual".');
+        }
+        // auto mode
+        const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+        if (canAutoApprove) {
+            logger.success('  - Changes automatically approved based on your configuration.');
+            return true;
+        }
+        return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const skipConfirmation = options?.yes === true;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        const { minFileChanges, maxFileChanges } = config.patch;
+        const operationCount = operations.length;
+        if (minFileChanges > 0 && operationCount < minFileChanges) {
+            logger.warn(`Skipping patch: Not enough file changes (expected at least ${minFileChanges}, got ${operationCount}).`);
+            return;
+        }
+        if (maxFileChanges && operationCount > maxFileChanges) {
+            logger.warn(`Skipping patch: Too many file changes (expected at most ${maxFileChanges}, got ${operationCount}).`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            const originalFiles = new Map<string, string | null>();
+            affectedFilePaths.forEach(p => originalFiles.set(p, snapshot[p] ?? null));
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newFileStates = await applyOperations(operations, originalFiles, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, originalFiles, newFileStates);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log(chalk.bold('\nPre-flight summary:'));
+            logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+            logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+            const isApproved = await handleApproval({ config, cwd, prompter, skipConfirmation });
+
+            if (isApproved) {
+                stateFile.approved = true;
+                (stateFile as any).linesAdded = totalAdded;
+                (stateFile as any).linesRemoved = totalRemoved;
+                await updatePendingState(cwd, stateFile); // Update state with approval and stats before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.core.enableNotifications);
+                await handleAutoGitBranch(config, stateFile, cwd);
+            } else {
+                logger.warn('Operation cancelled by user. Rolling back changes...');
+                await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        }
+    };
+
+
+    const handleAutoGitBranch = async (config: Config, stateFile: StateFile,
+    cwd: string): Promise<void> => {
+        if (!config.git.autoGitBranch) return;
+
+        let branchNameSegment = '';
+        if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+            branchNameSegment = stateFile.gitCommitMsg;
+        } else {
+            branchNameSegment = stateFile.uuid;
+        }
+
+        const sanitizedSegment = branchNameSegment
+            .trim()
+            .toLowerCase()
+            .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+            .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+            .replace(/-+/g, '-') // Collapse consecutive hyphens
+            .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+            .slice(0, 70); // Truncate
+
+        if (sanitizedSegment) {
+            const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+            logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+            const command = `git checkout -b "${branchName}"`;
+            const result = await executeShellCommand(command, cwd);
+            if (result.exitCode === 0) {
+                logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+            } else {
+                // Exit code 128 from `git checkout -b` often means the branch already exists.
+                if (result.exitCode === 128 && result.stderr.includes('already exists')) {
+                    logger.warn(`Could not create branch '${chalk.magenta(branchName)}' because it already exists.`);
+                } else {
+                    logger.warn(`Could not create git branch '${chalk.magenta(branchName)}'.`);
+                }
+                logger.debug(`'${command}' failed with: ${result.stderr}`);
+            }
+        } else {
+            logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+        }
+    };
+  test/e2e/patcher.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import fsSync from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+    from '../test.util';
+
+    import { parseLLMResponse } from 'relaycode-core';
+
+    import { readStateFile } from '../../src';
+
+
+    interface FileState {
+      path: string;
+      content?: string;
+      exists?: boolean;
+    }
+
+
+    interface E2ETestCase {
+      name: string;
+      description: string;
+      markdown_content: string;
+      initial_state: FileState[];
+      expected_state?: FileState[];
+      expected_outcome?: 'success' | 'failure';
+    }
+
+
+    interface TestFixtures {
+      e2e_patch_tests: E2ETestCase[];
+    }
+
+
+    const loadFixturesFromDir = (dirPath: string): TestFixtures => {
+      const allFixtures: TestFixtures = {
+        e2e_patch_tests: [],
+      };
+      const files = fsSync.readdirSync(dirPath);
+      for (const file of files) {
+        if (path.extname(file) === '.yml' || path.extname(file) === '.yaml') {
+          const filePath = path.join(dirPath, file);
+          const fixture = yaml.load(
+            fsSync.readFileSync(filePath, 'utf-8')
+          ) as Partial<TestFixtures>;
+          if (fixture.e2e_patch_tests) {
+            allFixtures.e2e_patch_tests.push(...fixture.e2e_patch_tests);
+          }
+        }
+      }
+      return allFixtures;
+    };
+
+    const fixturePath = path.join(__dirname, '../fixtures/e2e');
+
+    const fixtures = loadFixturesFromDir(fixturePath);
+
+
+    describe('e2e/patcher (from fixtures)', () => {
+      let context: E2ETestContext;
+
+      beforeEach(async () => {
+        context = await setupE2ETest();
+      });
+
+      afterEach(async () => {
+        if (context) await context.cleanup();
+      });
+
+      fixtures.e2e_patch_tests.forEach(testCase => {
+        it(testCase.description, async () => {
+          // 1. Set up initial state
+          for (const file of testCase.initial_state) {
+            await createTestFile(context.testDir.path, file.path, file.content ?? '');
+          }
+
+          // 2. Parse the markdown to get operations
+          // Dynamically add the required YAML control block to the test case markdown.
+          // The parser now requires this block to be present.
+          const projectId = path.basename(context.testDir.path);
+          const markdownWithYaml = `${testCase.markdown_content}
+
+    projectId: ${projectId}
+
+    uuid: 00000000-0000-0000-0000-000000000000
+
+    `;
+          const parsedResponse = parseLLMResponse(markdownWithYaml);
+          expect(parsedResponse).not.toBeNull();
+          if (!parsedResponse) throw new Error('Test case markdown failed to parse');
+
+          // Map FileOperation from core to the TestOperation type expected by the test utility.
+          // This is needed because the test utility has a different 'type' for write operations ('edit'/'new')
+          // and uses 'strategy' instead of 'patchStrategy'.
+          const initialFilePaths = new Set(testCase.initial_state.map(file => file.path));
+          const operations = parsedResponse.operations.map(op => {
+            if (op.type === 'write') {
+              return {
+                type: initialFilePaths.has(op.path) ? ('edit' as const) : ('new' as const),
+                path: op.path,
+                content: op.content,
+                strategy: op.patchStrategy,
+              };
+            }
+            return op;
+          });
+
+          // 3. Run the patch process
+          // We can't destructure `success` as it's not returned. We determine success by checking the state file later.
+          const { uuid } = await runProcessPatch(context, {}, operations, {
+            responseOverrides: { reasoning: [] },
+          });
+
+          const expectedSuccess = testCase.expected_outcome !== 'failure';
+          const committedState = await readStateFile(context.testDir.path, uuid);
+          const success = !!committedState;
+          expect(success).toBe(expectedSuccess);
+
+          // 4. Verify the final state
+          if (expectedSuccess) {
+            const stateToVerify = testCase.expected_state ?? testCase.initial_state;
+
+            for (const file of stateToVerify) {
+              const filePath = path.join(context.testDir.path, file.path);
+              const fileExists = await fs
+                .access(filePath)
+                .then(() => true)
+                .catch(() => false);
+
+              if (file.exists === false) {
+                expect(fileExists).toBe(false);
+              } else {
+                expect(fileExists).toBe(true);
+                const finalContent = await fs.readFile(filePath, 'utf-8');
+                const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+                expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+              }
+            }
+          } else {
+            // Expected failure
+
+            // Verify that initial state is unchanged
+            for (const file of testCase.initial_state) {
+              const filePath = path.join(context.testDir.path, file.path);
+              const finalContent = await fs.readFile(filePath, 'utf-8');
+              const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+              expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+            }
+          }
+        });
+      });
+    });
+approved: true

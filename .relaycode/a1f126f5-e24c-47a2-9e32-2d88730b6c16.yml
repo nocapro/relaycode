@@ -1,0 +1,997 @@
+uuid: a1f126f5-e24c-47a2-9e32-2d88730b6c16
+projectId: relaycode
+createdAt: '2025-06-24T05:56:20.900Z'
+gitCommitMsg: 'refactor: Improve DRYness across logger, transaction, and watch modules'
+promptSummary: >-
+  The user requested to make the codebase significantly more DRY (Don't Repeat
+  Yourself) to reduce the amount of code. I identified three areas for safe
+  refactoring: centralizing logging logic in `logger.ts`, simplifying line-diff
+  calculation in `transaction.ts`, and consolidating related configuration maps
+  in `watch.ts`.
+reasoning:
+  - >-
+    I've analyzed the codebase to identify opportunities for making it more DRY
+    (Don't Repeat Yourself) and reducing code, as you requested. I've found a
+    few areas where we can safely refactor to centralize logic without
+    introducing regressions. Here are the changes I'll be making:
+  - >-
+    1.  **Refactor `src/utils/logger.ts`**: The various logging methods (`info`,
+    `success`, `warn`, etc.) contain repetitive conditional logic to check the
+    current log level. I'll introduce a private `logMessage` helper function
+    within the module to centralize this check, making the logger implementation
+    more concise and maintainable.
+  - >-
+    2.  **Refactor `src/core/transaction.ts`**: The `calculateLineChanges`
+    function includes logic to calculate added and removed lines by comparing
+    two arrays of strings. This calculation is performed twice (once for
+    additions, once for removals). I will extract this logic into a new
+    `countLineDiff` helper function to avoid repetition and improve readability.
+  - >-
+    3.  **Refactor `src/commands/watch.ts`**: In the `getSystemPrompt` function,
+    there are two separate map objects (`syntaxMap` and `strategyDetailsMap`) to
+    store related information about different patching strategies. I will
+    combine these into a single, more structured `strategyInfo` map to better
+    represent the relationship between a strategy's syntax and its detailed
+    explanation, making the code more organized.
+  - Let's begin with the changes.
+  - First, I'll refactor the logger to be more DRY.
+  - Next, I'll simplify the `calculateLineChanges` function in `transaction.ts`.
+  - Finally, I'll consolidate the strategy configuration maps in `watch.ts`.
+  - >-
+    These changes make the code more concise and adhere to the DRY principle,
+    all while preserving the existing functionality.
+operations:
+  - type: write
+    path: src/utils/logger.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      let currentLogLevel: LogLevelName = 'info'; // Default level
+
+
+      export const logger = {
+        setLevel: (level: LogLevelName) => {
+          if (level in LogLevels) {
+            currentLogLevel = level;
+          }
+        },
+        info: (message: string) => {
+          if (LogLevels.info <= LogLevels[currentLogLevel]) {
+            console.log(chalk.blue(message));
+          }
+        },
+        success: (message: string) => {
+          if (LogLevels.info <= LogLevels[currentLogLevel]) {
+            console.log(chalk.green(message));
+          }
+        },
+        warn: (message: string) => {
+          if (LogLevels.warn <= LogLevels[currentLogLevel]) {
+            console.log(chalk.yellow(message));
+          }
+        },
+        error: (message: string) => {
+          if (LogLevels.error <= LogLevels[currentLogLevel]) {
+            console.log(chalk.red(message));
+          }
+        },
+        debug: (message: string) => {
+          if (LogLevels.debug <= LogLevels[currentLogLevel]) {
+            console.log(chalk.gray(message));
+          }
+        },
+        log: (message: string) => {
+          // General log, treat as info
+          if (LogLevels.info <= LogLevels[currentLogLevel]) {
+            console.log(message);
+          }
+        },
+        prompt: (message: string) => {
+          // Prompts are special and should be shown unless silent
+              if (currentLogLevel !== 'silent') {
+                console.log(chalk.cyan(message));
+              }
+            },
+          };
+      =======
+
+      let currentLogLevel: LogLevelName = 'info'; // Default level
+
+
+      const logMessage = (level: keyof typeof LogLevels, message: string,
+      colorFn?: (s: string) => string) => {
+          if (LogLevels[level] <= LogLevels[currentLogLevel]) {
+              console.log(colorFn ? colorFn(message) : message);
+          }
+      }
+
+
+      export const logger = {
+        setLevel: (level: LogLevelName) => {
+          if (level in LogLevels) {
+            currentLogLevel = level;
+          }
+        },
+        info: (message: string) => logMessage('info', message, chalk.blue),
+        success: (message: string) => logMessage('info', message, chalk.green),
+        warn: (message: string) => logMessage('warn', message, chalk.yellow),
+        error: (message: string) => logMessage('error', message, chalk.red),
+        debug: (message: string) => logMessage('debug', message, chalk.gray),
+        log: (message: string) => logMessage('info', message),
+        prompt: (message: string) => {
+          // Prompts are special and should be shown unless silent
+              if (currentLogLevel !== 'silent') {
+                console.log(chalk.cyan(message));
+              }
+            },
+          };
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -10,6 +10,15 @@
+           yes?: boolean;
+       };
+       
+      +const countLineDiff = (baseLines: string[], newLines: string[]): number
+      => {
+
+      +    const baseSet = new Set(baseLines);
+
+      +    let diff = 0;
+
+      +    for (const line of newLines) {
+
+      +        if (!baseSet.has(line)) diff++;
+
+      +    }
+
+      +    return diff;
+
+      +}
+
+      +
+       const calculateLineChanges = (
+           op: FileOperation,
+           snapshot: FileSnapshot,
+      @@ -35,22 +44,11 @@
+           
+           // This is a simplified diff, for a more accurate count a real diff algorithm is needed,
+           // but this is fast and good enough for a summary.
+      -    const oldSet = new Set(oldLines);
+
+      -    const newSet = new Set(newLines);
+
+      -    
+
+      -    let added = 0;
+
+      -    for (const line of newLines) {
+
+      -        if (!oldSet.has(line)) added++;
+
+      -    }
+
+      -
+
+      -    let removed = 0;
+
+      -    for (const line of oldLines) {
+
+      -        if (!newSet.has(line)) removed++;
+
+      -    }
+
+      -    
+
+      -    return { added, removed };
+
+      +    return {
+
+      +        added: countLineDiff(oldLines, newLines),
+
+      +        removed: countLineDiff(newLines, oldLines),
+
+      +    };
+       };
+       
+       const logCompletionSummary = (
+    patchStrategy: new-unified
+  - type: write
+    path: src/commands/watch.ts
+    content: |-
+      <<<<<<< SEARCH
+          const footer = `---------------------------------------------------------------------------`;
+
+          const syntaxMap = {
+              auto: syntaxAuto,
+              replace: syntaxReplace,
+              'new-unified': syntaxNewUnified,
+              'multi-search-replace': syntaxMultiSearchReplace,
+          };
+
+          const strategyDetailsMap = {
+              auto: `${sectionNewUnified}\n${sectionMultiSearchReplace}`,
+              replace: '', // Covered in 'otherOps'
+              'new-unified': sectionNewUnified,
+              'multi-search-replace': sectionMultiSearchReplace,
+          };
+
+          const syntax = syntaxMap[preferredStrategy] ?? syntaxMap.auto;
+          const strategyDetails = strategyDetailsMap[preferredStrategy] ?? strategyDetailsMap.auto;
+
+          return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+      };
+      =======
+          const footer = `---------------------------------------------------------------------------`;
+
+          const strategyInfo = {
+              auto: { syntax: syntaxAuto, details: `${sectionNewUnified}\n${sectionMultiSearchReplace}` },
+              replace: { syntax: syntaxReplace, details: '' },
+              'new-unified': { syntax: syntaxNewUnified, details: sectionNewUnified },
+              'multi-search-replace': { syntax: syntaxMultiSearchReplace, details: sectionMultiSearchReplace },
+          };
+
+          const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
+          const syntax = preferred.syntax;
+          const strategyDetails = preferred.details;
+
+          return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+      };
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/utils/logger.ts: |-
+    import chalk from 'chalk';
+    import { LogLevelName } from '../types';
+
+    const LogLevels = {
+      silent: 0,
+      error: 1,
+      warn: 2,
+      info: 3,
+      debug: 4,
+    } as const;
+
+    let currentLogLevel: LogLevelName = 'info'; // Default level
+
+    export const logger = {
+      setLevel: (level: LogLevelName) => {
+        if (level in LogLevels) {
+          currentLogLevel = level;
+        }
+      },
+      info: (message: string) => {
+        if (LogLevels.info <= LogLevels[currentLogLevel]) {
+          console.log(chalk.blue(message));
+        }
+      },
+      success: (message: string) => {
+        if (LogLevels.info <= LogLevels[currentLogLevel]) {
+          console.log(chalk.green(message));
+        }
+      },
+      warn: (message: string) => {
+        if (LogLevels.warn <= LogLevels[currentLogLevel]) {
+          console.log(chalk.yellow(message));
+        }
+      },
+      error: (message: string) => {
+        if (LogLevels.error <= LogLevels[currentLogLevel]) {
+          console.log(chalk.red(message));
+        }
+      },
+      debug: (message: string) => {
+        if (LogLevels.debug <= LogLevels[currentLogLevel]) {
+          console.log(chalk.gray(message));
+        }
+      },
+      log: (message: string) => {
+        // General log, treat as info
+        if (LogLevels.info <= LogLevels[currentLogLevel]) {
+          console.log(message);
+        }
+      },
+      prompt: (message: string) => {
+        // Prompts are special and should be shown unless silent
+            if (currentLogLevel !== 'silent') {
+              console.log(chalk.cyan(message));
+            }
+          },
+        };
+        
+        export const getErrorMessage = (error: unknown): string => {
+            return error instanceof Error ? error.message : String(error);
+        };
+        
+        export const isEnoentError = (error: unknown): boolean => {
+            return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+        };
+  src/core/transaction.ts: >
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { createSnapshot, restoreSnapshot, applyOperations } from
+    './executor';
+
+    import chalk from 'chalk';
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt'
+
+    import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+    notifyPatchDetected } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+        yes?: boolean;
+    };
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        snapshot: FileSnapshot,
+        newContents: Map<string, string>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newContents.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        // This is a simplified diff, for a more accurate count a real diff algorithm is needed,
+        // but this is fast and good enough for a summary.
+        const oldSet = new Set(oldLines);
+        const newSet = new Set(newLines);
+        
+        let added = 0;
+        for (const line of newLines) {
+            if (!oldSet.has(line)) added++;
+        }
+
+        let removed = 0;
+        for (const line of oldLines) {
+            if (!newSet.has(line)) removed++;
+        }
+        
+        return { added, removed };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true, isError:
+    boolean = true): Promise<void> => {
+        if (isError) {
+            logger.warn(`Rolling back changes: ${reason}`);
+        }
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                if (isError) {
+                    notifyFailure(uuid, enableNotifications);
+                }
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    type ApprovalOptions = {
+        config: Config;
+        cwd: string;
+        prompter: Prompter;
+        skipConfirmation: boolean;
+    }
+
+
+    const handleApproval = async ({ config, cwd, prompter, skipConfirmation }:
+    ApprovalOptions): Promise<boolean> => {
+        const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+        logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+        
+        const getManualApproval = async (reason: string): Promise<boolean> => {
+            logger.warn(reason);
+            
+            const notificationResult = await requestApprovalWithNotification(config.projectId, config.core.enableNotifications);
+
+            if (notificationResult === 'approved') {
+                logger.info('Approved via notification.');
+                return true;
+            }
+            if (notificationResult === 'rejected') {
+                logger.info('Rejected via notification.');
+                return false;
+            }
+
+            if (notificationResult === 'timeout') {
+                logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');
+            }
+
+            return await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+        };
+
+        if (skipConfirmation) {
+            logger.success('  - Changes approved via -y/--yes flag.');
+            return true;
+        }
+        if (config.patch.approvalMode === 'manual') {
+            return await getManualApproval('Manual approval required because "approvalMode" is set to "manual".');
+        }
+        // auto mode
+        const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+        if (canAutoApprove) {
+            logger.success('  - Changes automatically approved based on your configuration.');
+            return true;
+        }
+        return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const skipConfirmation = options?.yes === true;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newContents = await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, snapshot, newContents);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log(chalk.bold('\nPre-flight summary:'));
+            logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+            logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+            const isApproved = await handleApproval({ config, cwd, prompter, skipConfirmation });
+
+            if (isApproved) {
+                stateFile.approved = true;
+                await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.core.enableNotifications);
+                await handleAutoGitBranch(config, stateFile, cwd);
+            } else {
+                logger.warn('Operation cancelled by user. Rolling back changes...');
+                await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        }
+    };
+
+
+    const handleAutoGitBranch = async (config: Config, stateFile: StateFile,
+    cwd: string): Promise<void> => {
+        if (!config.git.autoGitBranch) return;
+
+        let branchNameSegment = '';
+        if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+            branchNameSegment = stateFile.gitCommitMsg;
+        } else {
+            branchNameSegment = stateFile.uuid;
+        }
+
+        const sanitizedSegment = branchNameSegment
+            .trim()
+            .toLowerCase()
+            .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+            .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+            .replace(/-+/g, '-') // Collapse consecutive hyphens
+            .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+            .slice(0, 70); // Truncate
+
+        if (sanitizedSegment) {
+            const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+            logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+            const command = `git checkout -b "${branchName}"`;
+            const result = await executeShellCommand(command, cwd);
+            if (result.exitCode === 0) {
+                logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+            } else {
+                // Exit code 128 from `git checkout -b` often means the branch already exists.
+                if (result.exitCode === 128 && result.stderr.includes('already exists')) {
+                    logger.warn(`Could not create branch '${chalk.magenta(branchName)}' because it already exists.`);
+                } else {
+                    logger.warn(`Could not create git branch '${chalk.magenta(branchName)}'.`);
+                }
+                logger.debug(`'${command}' failed with: ${result.stderr}`);
+            }
+        } else {
+            logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+        }
+    };
+  src/commands/watch.ts: >-
+    import { findConfig, loadConfigOrExit, findConfigPath } from
+    '../core/config';
+
+    import { createClipboardWatcher } from '../core/clipboard';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { Config } from '../types';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+
+    const getSystemPrompt = (projectId: string, preferredStrategy:
+    Config['watcher']['preferredStrategy']): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+        const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+        const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+    \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+    the \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+    ...
+
+    \`\`\``;
+
+        const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+        const syntaxNewUnified = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath new-unified
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+        const syntaxMultiSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath multi-search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`multi-search-replace\` patch strategy for all
+    modifications.`;
+
+        const sectionNewUnified = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+        const sectionMultiSearchReplace = `---
+
+    ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    [new content to replace with]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+        const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+        const finalSteps = `---
+
+    ### Final Steps
+
+
+    1.  Add your step-by-step reasoning in plain text before each code block.
+
+    2.  ALWAYS add the following YAML block at the very end of your response.
+    Use the exact projectId shown here. Generate a new random uuid for each
+    response.
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary:
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: "A brief summary of my request."
+        gitCommitMsg: "feat: A concise, imperative git commit message."
+        \`\`\`
+    `;
+        
+        const footer = `---------------------------------------------------------------------------`;
+
+        const syntaxMap = {
+            auto: syntaxAuto,
+            replace: syntaxReplace,
+            'new-unified': syntaxNewUnified,
+            'multi-search-replace': syntaxMultiSearchReplace,
+        };
+
+        const strategyDetailsMap = {
+            auto: `${sectionNewUnified}\n${sectionMultiSearchReplace}`,
+            replace: '', // Covered in 'otherOps'
+            'new-unified': sectionNewUnified,
+            'multi-search-replace': sectionMultiSearchReplace,
+        };
+
+        const syntax = syntaxMap[preferredStrategy] ?? syntaxMap.auto;
+        const strategyDetails = strategyDetailsMap[preferredStrategy] ?? strategyDetailsMap.auto;
+
+        return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    };
+
+
+    export const watchCommand = async (options: { yes?: boolean } = {}, cwd:
+    string = process.cwd()): Promise<{ stop: () => void }> => {
+      let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+      let configWatcher: fs.FSWatcher | null = null;
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.core.logLevel);
+        logger.debug(`Log level set to: ${config.core.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.watcher.preferredStrategy));
+
+        clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+          logger.info('New clipboard content detected. Attempting to parse...');
+          const parsedResponse = parseLLMResponse(content);
+
+          if (!parsedResponse) {
+            logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+            return;
+          }
+
+          // Check project ID before notifying and processing.
+          if (parsedResponse.control.projectId !== config.projectId) {
+            logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+            return;
+          }
+
+          await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+          logger.info('--------------------------------------------------');
+          logger.info('Watching for next patch...');
+        });
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`Configuration file is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      const configPath = await findConfigPath(cwd);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      if (initialConfig.core.watchConfig && configPath) {
+        logger.info(`Configuration file watching is enabled for ${path.basename(configPath)}.`);
+        configWatcher = fs.watch(configPath, handleConfigChange);
+      } else {
+        logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');
+      }
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+approved: true

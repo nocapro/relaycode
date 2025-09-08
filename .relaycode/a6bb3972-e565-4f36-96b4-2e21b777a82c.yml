@@ -1,0 +1,1058 @@
+uuid: a6bb3972-e565-4f36-96b4-2e21b777a82c
+projectId: relaycode
+createdAt: '2025-06-24T07:18:56.072Z'
+gitCommitMsg: 'refactor(core): extract fs operations to utils/fs'
+promptSummary: >-
+  The user requested to separate file system operations into a new file to
+  improve separation of concerns.
+reasoning:
+  - >-
+    To improve the project's structure and separate concerns, I will extract the
+    file system operations from `src/core/executor.ts` into a dedicated new
+    file, `src/utils/fs.ts`. This refactoring will make the code more modular
+    and easier to maintain.
+  - >-
+    1.  **Create `src/utils/fs.ts`**: This new file will contain all file
+    system-related functions, such as reading, writing, deleting, and renaming
+    files.
+  - >-
+    2.  **Refactor `src/core/executor.ts`**: I will remove the file system
+    functions from this file and import them from the new `src/utils/fs.ts`
+    module. This leaves `executor.ts` to focus solely on applying patch
+    strategies and managing transaction snapshots.
+  - >-
+    3.  **Update `src/core/state.ts`**: I'll modify this file to import
+    `fileExists` and `safeRename` from the new `src/utils/fs.ts` instead of
+    `src/core/executor.ts`.
+  - >-
+    4.  **Update `src/index.ts`**: I will adjust the module exports to reflect
+    the new file structure, exporting file system utilities from
+    `src/utils/fs.ts` and transaction-related functions from
+    `src/core/executor.ts`.
+  - >-
+    This change clarifies the responsibilities of each module within the `core`
+    and `utils` directories.
+  - >-
+    First, I'll create the new file `src/utils/fs.ts` to house all file system
+    operations.
+  - >-
+    Next, I'll refactor `src/core/executor.ts` to remove the file system logic
+    and import it from our new module.
+  - Now, I'll update `src/core/state.ts` to use the new `fs` utility module.
+  - >-
+    Finally, I'll update `src/index.ts` to correctly export functions from their
+    new locations.
+operations:
+  - type: write
+    path: src/utils/fs.ts
+    content: >-
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import { getErrorMessage, isEnoentError } from './logger';
+
+
+      export const readFileContent = async (filePath: string, cwd: string =
+      process.cwd()): Promise<string | null> => {
+        try {
+          return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+        } catch (error) {
+          if (isEnoentError(error)) {
+            return null; // File doesn't exist
+          }
+          throw error;
+        }
+      };
+
+
+      export const writeFileContent = async (filePath: string, content: string,
+      cwd: string = process.cwd()): Promise<void> => {
+        const absolutePath = path.resolve(cwd, filePath);
+        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+        await fs.writeFile(absolutePath, content, 'utf-8');
+      };
+
+
+      export const deleteFile = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+        try {
+          await fs.unlink(path.resolve(cwd, filePath));
+        } catch (error: unknown) {
+          if (error instanceof Error && 'code' in error && ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR')) {
+            // File already deleted or is a directory, which is fine for an unlink operation.
+            return;
+          }
+          throw error;
+        }
+      };
+
+
+      export const fileExists = async (filePath: string, cwd: string =
+      process.cwd()): Promise<boolean> => {
+        try {
+          await fs.access(path.resolve(cwd, filePath));
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+
+      export const safeRename = async (fromPath: string, toPath:string):
+      Promise<void> => {
+          try {
+              await fs.rename(fromPath, toPath);
+          } catch (error: unknown) {
+              if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'EXDEV') {
+                  await fs.copyFile(fromPath, toPath);
+                  await fs.unlink(fromPath);
+              } else {
+                  throw error;
+              }
+          }
+      };
+
+
+      export const renameFile = async (fromPath: string, toPath: string, cwd:
+      string = process.cwd()): Promise<void> => {
+        const fromAbsolutePath = path.resolve(cwd, fromPath);
+        const toAbsolutePath = path.resolve(cwd, toPath);
+        await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+        await safeRename(fromAbsolutePath, toAbsolutePath);
+      };
+
+
+      // Helper to check if a directory is empty
+
+      export const isDirectoryEmpty = async (dirPath: string): Promise<boolean>
+      => {
+        try {
+          const files = await fs.readdir(dirPath);
+          return files.length === 0;
+        } catch (error) {
+          // If directory doesn't exist or is not accessible, consider it "not empty"
+          return false;
+        }
+      };
+
+
+      // Recursively remove all empty parent directories up to a limit
+
+      export const removeEmptyParentDirectories = async (dirPath: string,
+      rootDir: string): Promise<void> => {
+        if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+          return;
+        }
+        
+        try {
+          const isEmpty = await isDirectoryEmpty(dirPath);
+          if (isEmpty) {
+            await fs.rmdir(dirPath);
+            // Recursively check parent directory
+            await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+          }
+        } catch (error: unknown) {
+          // Ignore directory removal errors, but don't continue up the chain
+          if (!(error instanceof Error && 'code' in error &&
+              ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR'))) {
+            console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+          }
+        }
+      };
+    patchStrategy: replace
+  - type: write
+    path: src/core/executor.ts
+    content: >-
+      --- src/core/executor.ts
+
+      +++ src/core/executor.ts
+
+      @@ -1,10 +1,11 @@
+
+      -import { promises as fs } from 'fs';
+       import path from 'path';
+       import { FileOperation, FileSnapshot } from '../types';
+       import { newUnifiedDiffStrategyService, multiSearchReplaceService, unifiedDiffService } from 'diff-apply';
+      -import { getErrorMessage, isEnoentError } from '../utils/logger';
+
+      +import { getErrorMessage } from '../utils/logger';
+
+      +import { deleteFile, readFileContent, removeEmptyParentDirectories,
+      renameFile, writeFileContent } from '../utils/fs';
+       
+       const patchStrategies = {
+         'new-unified': (p: { originalContent: string; diffContent: string; }) => {
+      @@ -19,85 +20,6 @@
+         },
+       };
+       
+      -export const readFileContent = async (filePath: string, cwd: string =
+      process.cwd()): Promise<string | null> => {
+
+      -  try {
+
+      -    return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+
+      -  } catch (error) {
+
+      -    if (isEnoentError(error)) {
+
+      -      return null; // File doesn't exist
+
+      -    }
+
+      -    throw error;
+
+      -  }
+
+      -};
+
+      -
+
+      -export const writeFileContent = async (filePath: string, content: string,
+      cwd: string = process.cwd()): Promise<void> => {
+
+      -  const absolutePath = path.resolve(cwd, filePath);
+
+      -  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+
+      -  await fs.writeFile(absolutePath, content, 'utf-8');
+
+      -};
+
+      -
+
+      -export const deleteFile = async (filePath: string, cwd: string =
+      process.cwd()): Promise<void> => {
+
+      -  try {
+
+      -    await fs.unlink(path.resolve(cwd, filePath));
+
+      -  } catch (error: unknown) {
+
+      -    if (error instanceof Error && 'code' in error && ((error as
+      NodeJS.ErrnoException).code === 'ENOENT' || (error as
+      NodeJS.ErrnoException).code === 'ENOTDIR')) {
+
+      -      // File already deleted or is a directory, which is fine for an
+      unlink operation.
+
+      -      return;
+
+      -    }
+
+      -    throw error;
+
+      -  }
+
+      -};
+
+      -
+
+      -export const fileExists = async (filePath: string, cwd: string =
+      process.cwd()): Promise<boolean> => {
+
+      -  try {
+
+      -    await fs.access(path.resolve(cwd, filePath));
+
+      -    return true;
+
+      -  } catch {
+
+      -    return false;
+
+      -  }
+
+      -};
+
+      -
+
+      -export const safeRename = async (fromPath: string, toPath:string):
+      Promise<void> => {
+
+      -    try {
+
+      -        await fs.rename(fromPath, toPath);
+
+      -    } catch (error: unknown) {
+
+      -        if (error instanceof Error && 'code' in error && (error as
+      NodeJS.ErrnoException).code === 'EXDEV') {
+
+      -            await fs.copyFile(fromPath, toPath);
+
+      -            await fs.unlink(fromPath);
+
+      -        } else {
+
+      -            throw error;
+
+      -        }
+
+      -    }
+
+      -};
+
+      -
+
+      -export const renameFile = async (fromPath: string, toPath: string, cwd:
+      string = process.cwd()): Promise<void> => {
+
+      -  const fromAbsolutePath = path.resolve(cwd, fromPath);
+
+      -  const toAbsolutePath = path.resolve(cwd, toPath);
+
+      -  await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+
+      -  await safeRename(fromAbsolutePath, toAbsolutePath);
+
+      -};
+
+      -
+       export const createSnapshot = async (filePaths: string[], cwd: string = process.cwd()): Promise<FileSnapshot> => {
+         const snapshot: FileSnapshot = {};
+         await Promise.all(
+      @@ -155,44 +77,6 @@
+         return newContents;
+       };
+       
+      -// Helper to check if a directory is empty
+
+      -const isDirectoryEmpty = async (dirPath: string): Promise<boolean> => {
+
+      -  try {
+
+      -    const files = await fs.readdir(dirPath);
+
+      -    return files.length === 0;
+
+      -  } catch (error) {
+
+      -    // If directory doesn't exist or is not accessible, consider it "not
+      empty"
+
+      -    return false;
+
+      -  }
+
+      -};
+
+      -
+
+      -// Recursively remove all empty parent directories up to a limit
+
+      -const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+      string): Promise<void> => {
+
+      -  if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+
+      -    return;
+
+      -  }
+
+      -  
+
+      -  try {
+
+      -    const isEmpty = await isDirectoryEmpty(dirPath);
+
+      -    if (isEmpty) {
+
+      -      await fs.rmdir(dirPath);
+
+      -      // Recursively check parent directory
+
+      -      await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+
+      -    }
+
+      -  } catch (error: unknown) {
+
+      -    // Ignore directory removal errors, but don't continue up the chain
+
+      -    if (!(error instanceof Error && 'code' in error &&
+
+      -        ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as
+      NodeJS.ErrnoException).code === 'ENOTDIR'))) {
+
+      -      console.warn(`Failed to clean up directory ${dirPath}:`,
+      getErrorMessage(error));
+
+      -    }
+
+      -  }
+
+      -};
+
+      -
+       export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string = process.cwd()): Promise<void> => {
+         const projectRoot = path.resolve(cwd);
+         const entries = Object.entries(snapshot);
+      @@ -207,8 +91,7 @@
+                 directoriesToClean.add(path.dirname(fullPath));
+               } else {
+                 // Create directory structure if needed and write the original content back.
+      -          await fs.mkdir(path.dirname(fullPath), { recursive: true });
+
+      -          await fs.writeFile(fullPath, content, 'utf-8');
+
+      +          await writeFileContent(filePath, content, cwd);
+               }
+             } catch (error) {
+               restoreErrors.push({ path: filePath, error });
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/state.ts
+    content: |-
+      --- src/core/state.ts
+      +++ src/core/state.ts
+      @@ -2,7 +2,7 @@
+       import path from 'path';
+       import yaml from 'js-yaml';
+       import { StateFile, StateFileSchema } from '../types';
+       import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX, STATE_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME } from '../utils/constants';
+       import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+      -import { fileExists, safeRename } from './executor';
+      +import { fileExists, safeRename } from '../utils/fs';
+       
+       const stateDirectoryCache = new Map<string, boolean>();
+    patchStrategy: new-unified
+  - type: write
+    path: src/index.ts
+    content: >-
+      --- src/index.ts
+
+      +++ src/index.ts
+
+      @@ -2,14 +2,7 @@
+       // Core logic
+       export { createClipboardWatcher } from './core/clipboard';
+       export { findConfig, createConfig, getProjectId, ensureStateDirExists, loadConfigOrExit, findConfigPath } from './core/config';
+      -export {
+
+      -    applyOperations,
+
+      -    createSnapshot,
+
+      -    deleteFile,
+
+      -    readFileContent,
+
+      -    restoreSnapshot,
+
+      -    writeFileContent,
+
+      -    fileExists,
+
+      -    renameFile
+
+      -} from './core/executor';
+
+      +export { applyOperations, createSnapshot, restoreSnapshot } from
+      './core/executor';
+       export { parseLLMResponse } from './core/parser';
+       export {
+           commitState,
+      @@ -34,6 +27,14 @@
+       
+       // Utils
+       export { executeShellCommand, getErrorCount } from './utils/shell';
+      +export {
+
+      +    deleteFile,
+
+      +    readFileContent,
+
+      +    writeFileContent,
+
+      +    fileExists,
+
+      +    renameFile,
+
+      +    safeRename,
+
+      +} from './utils/fs';
+       export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+       export { getConfirmation } from './utils/prompt';
+       export { formatTransactionDetails } from './utils/formatters';
+    patchStrategy: new-unified
+snapshot:
+  src/utils/fs.ts: null
+  src/core/executor.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { FileOperation, FileSnapshot } from '../types';
+
+    import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+    unifiedDiffService } from 'diff-apply';
+
+    import { getErrorMessage, isEnoentError } from '../utils/logger';
+
+
+    const patchStrategies = {
+      'new-unified': (p: { originalContent: string; diffContent: string; }) => {
+        const service = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+        return service.applyDiff(p);
+      },
+      'multi-search-replace': (p: { originalContent: string; diffContent: string; }) => {
+        return multiSearchReplaceService.multiSearchReplaceService.applyDiff(p);
+      },
+      'unified': (p: { originalContent: string; diffContent: string; }) => {
+        return unifiedDiffService.unifiedDiffService.applyDiff(p.originalContent, p.diffContent);
+      },
+    };
+
+
+    export const readFileContent = async (filePath: string, cwd: string =
+    process.cwd()): Promise<string | null> => {
+      try {
+        return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null; // File doesn't exist
+        }
+        throw error;
+      }
+    };
+
+
+    export const writeFileContent = async (filePath: string, content: string,
+    cwd: string = process.cwd()): Promise<void> => {
+      const absolutePath = path.resolve(cwd, filePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, content, 'utf-8');
+    };
+
+
+    export const deleteFile = async (filePath: string, cwd: string =
+    process.cwd()): Promise<void> => {
+      try {
+        await fs.unlink(path.resolve(cwd, filePath));
+      } catch (error: unknown) {
+        if (error instanceof Error && 'code' in error && ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR')) {
+          // File already deleted or is a directory, which is fine for an unlink operation.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const fileExists = async (filePath: string, cwd: string =
+    process.cwd()): Promise<boolean> => {
+      try {
+        await fs.access(path.resolve(cwd, filePath));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+
+    export const safeRename = async (fromPath: string, toPath:string):
+    Promise<void> => {
+        try {
+            await fs.rename(fromPath, toPath);
+        } catch (error: unknown) {
+            if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'EXDEV') {
+                await fs.copyFile(fromPath, toPath);
+                await fs.unlink(fromPath);
+            } else {
+                throw error;
+            }
+        }
+    };
+
+
+    export const renameFile = async (fromPath: string, toPath: string, cwd:
+    string = process.cwd()): Promise<void> => {
+      const fromAbsolutePath = path.resolve(cwd, fromPath);
+      const toAbsolutePath = path.resolve(cwd, toPath);
+      await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+      await safeRename(fromAbsolutePath, toAbsolutePath);
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      await Promise.all(
+        filePaths.map(async (filePath) => {
+          snapshot[filePath] = await readFileContent(filePath, cwd);
+        })
+      );
+      return snapshot;
+    };
+
+
+    export const applyOperations = async (operations: FileOperation[], cwd:
+    string = process.cwd()): Promise<Map<string, string>> => {
+      const newContents = new Map<string, string>();
+      // Operations must be applied sequentially to ensure that if one fails,
+      // we can roll back from a known state.
+      for (const op of operations) {
+        if (op.type === 'delete') {
+          await deleteFile(op.path, cwd);
+          continue;
+        }
+        if (op.type === 'rename') {
+          await renameFile(op.from, op.to, cwd);
+          continue;
+        }
+        
+        let finalContent: string;
+
+        if (op.patchStrategy === 'replace') {
+          finalContent = op.content;
+        } else {
+          // For patch strategies, apply them sequentially
+          const originalContent = await readFileContent(op.path, cwd);
+          if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+            throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+          }
+
+          try {
+            const diffParams = {
+              originalContent: originalContent ?? '',
+              diffContent: op.content,
+            };
+            
+            const patcher = patchStrategies[op.patchStrategy as keyof typeof patchStrategies];
+            if (!patcher) {
+              throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+            }
+            
+            const result = await patcher(diffParams);
+            if (result.success) {
+              finalContent = result.content;
+            } else {
+              throw new Error(result.error);
+            }
+          } catch (e) {
+            throw new Error(`Error applying patch for ${op.path} with strategy '${op.patchStrategy}': ${getErrorMessage(e)}`);
+          }
+        }
+        
+        await writeFileContent(op.path, finalContent, cwd);
+        newContents.set(op.path, finalContent);
+      }
+      return newContents;
+    };
+
+
+    // Helper to check if a directory is empty
+
+    const isDirectoryEmpty = async (dirPath: string): Promise<boolean> => {
+      try {
+        const files = await fs.readdir(dirPath);
+        return files.length === 0;
+      } catch (error) {
+        // If directory doesn't exist or is not accessible, consider it "not empty"
+        return false;
+      }
+    };
+
+
+    // Recursively remove all empty parent directories up to a limit
+
+    const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+    string): Promise<void> => {
+      if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+        return;
+      }
+      
+      try {
+        const isEmpty = await isDirectoryEmpty(dirPath);
+        if (isEmpty) {
+          await fs.rmdir(dirPath);
+          // Recursively check parent directory
+          await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+        }
+      } catch (error: unknown) {
+        // Ignore directory removal errors, but don't continue up the chain
+        if (!(error instanceof Error && 'code' in error &&
+            ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR'))) {
+          console.warn(`Failed to clean up directory ${dirPath}:`, getErrorMessage(error));
+        }
+      }
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesToClean = new Set<string>();
+      const restoreErrors: { path: string, error: unknown }[] = [];
+
+      // Attempt to restore all files in parallel, collecting errors.
+      await Promise.all(entries.map(async ([filePath, content]) => {
+          const fullPath = path.resolve(cwd, filePath);
+          try {
+            if (content === null) {
+              // If the file didn't exist in the snapshot, make sure it doesn't exist after restore.
+              await deleteFile(filePath, cwd);
+              directoriesToClean.add(path.dirname(fullPath));
+            } else {
+              // Create directory structure if needed and write the original content back.
+              await fs.mkdir(path.dirname(fullPath), { recursive: true });
+              await fs.writeFile(fullPath, content, 'utf-8');
+            }
+          } catch (error) {
+            restoreErrors.push({ path: filePath, error });
+          }
+      }));
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesToClean)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+
+      if (restoreErrors.length > 0) {
+        const errorSummary = restoreErrors
+          .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)
+          .join('\n');
+        throw new Error(`Rollback failed for ${restoreErrors.length} file(s):\n${errorSummary}`);
+      }
+    };
+  src/core/state.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { StateFile, StateFileSchema } from '../types';
+
+    import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX,
+    STATE_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+
+    import { fileExists, safeRename } from './executor';
+
+
+    const stateDirectoryCache = new Map<string, boolean>();
+
+
+    const getStateDirectory = (cwd: string) => path.resolve(cwd,
+    STATE_DIRECTORY_NAME);
+
+
+    export const getStateFilePath = (cwd: string, uuid: string, isPending:
+    boolean): string => {
+      const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` : `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      return path.join(getStateDirectory(cwd), fileName);
+    };
+
+
+    export const getUndoneStateFilePath = (cwd: string, uuid: string): string =>
+    {
+      const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      return path.join(getStateDirectory(cwd), UNDONE_DIRECTORY_NAME, fileName);
+    };
+
+
+    const getUuidFromFileName = (fileName: string): string => {
+      return fileName.replace(COMMITTED_STATE_FILE_SUFFIX, '');
+    };
+
+
+    const isUUID = (str: string): boolean => {
+      return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+    };
+
+
+    // Helper to get all committed transaction file names.
+
+    const getCommittedTransactionFiles = async (cwd: string): Promise<{
+    stateDir: string; files: string[] } | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null;
+        }
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));
+        return { stateDir, files: transactionFiles };
+    };
+
+
+    const sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt:
+    string | Date }) => {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    };
+
+
+    // Ensure state directory exists with caching for performance
+
+    const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      const dirPath = getStateDirectory(cwd);
+      if (!stateDirectoryCache.has(dirPath)) {
+        await fs.mkdir(dirPath, { recursive: true });
+        stateDirectoryCache.set(dirPath, true);
+      }
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      const undonePath = getUndoneStateFilePath(cwd, uuid);
+      // Check if a transaction has been committed or undone.
+      // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+      // because we don't check for `.pending.yml` files.
+      return (await fileExists(committedPath)) || (await fileExists(undonePath));
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const validatedState = StateFileSchema.parse(state);
+      const yamlString = yaml.dump(validatedState);
+      const filePath = getStateFilePath(cwd, state.uuid, true);
+      
+      // Ensure directory exists (cached)
+      await ensureStateDirectory(cwd);
+      
+      // Write file
+      await fs.writeFile(filePath, yamlString, 'utf-8');
+    };
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      await safeRename(pendingPath, committedPath);
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      try {
+        await fs.unlink(pendingPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // Already gone, that's fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      try {
+        const fileContent = await fs.readFile(committedPath, 'utf-8');
+        const yamlContent = yaml.load(fileContent);
+        const parsed = StateFileSchema.safeParse(yamlContent);
+        if (parsed.success) {
+          return parsed.data;
+        }
+        logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);
+        return null;
+      } catch (error) {
+        // Can be file not found or YAML parsing error.
+        // In any case, we can't get the state file.
+        return null;
+      }
+    };
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd()):
+    Promise<StateFile[] | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo) {
+            return null;
+        }
+        const { files: transactionFiles } = transactionFileInfo;
+        
+        const promises = transactionFiles.map(async (file) => {
+            const stateFile = await readStateFile(cwd, getUuidFromFileName(file));
+            if (!stateFile) {
+                logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+            }
+            return stateFile;
+        });
+
+        const results = await Promise.all(promises);
+        const validResults = results.filter((sf): sf is StateFile => !!sf);
+
+        // Sort transactions by date, most recent first
+        validResults.sort(sortByDateDesc);
+
+        return validResults;
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd()):
+    Promise<StateFile | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo || transactionFileInfo.files.length === 0) {
+            return null;
+        }
+        const { stateDir, files: transactionFiles } = transactionFileInfo;
+        
+        // Read creation date from each file without parsing the whole thing.
+        // This is much faster than reading and parsing the full YAML for every file.
+        const filesWithDates = await Promise.all(
+            transactionFiles.map(async (file) => {
+                const filePath = path.join(stateDir, file);
+                let createdAt: Date | null = null;
+                try {
+                    // Read only the first 512 bytes to find `createdAt`. This is an optimization.
+                    const fileHandle = await fs.open(filePath, 'r');
+                    const buffer = Buffer.alloc(512);
+                    await fileHandle.read(buffer, 0, 512, 0);
+                    await fileHandle.close();
+                    const content = buffer.toString('utf-8');
+                    // Extract date from a line like 'createdAt: 2023-01-01T00:00:00.000Z'
+                    const match = content.match(/^createdAt:\s*['"]?(.+?)['"]?$/m);
+                    if (match && match[1]) {
+                        createdAt = new Date(match[1]);
+                    }
+                } catch (error) {
+                    if (!isEnoentError(error)) {
+                      logger.debug(`Could not read partial date from ${file}: ${getErrorMessage(error)}`);
+                    }
+                }
+                return { file, createdAt };
+            })
+        );
+
+        const validFiles = filesWithDates.filter(f => f.createdAt instanceof Date) as { file: string; createdAt: Date }[];
+
+        if (validFiles.length === 0) {
+            // Fallback for safety, though it should be rare.
+            const transactions = await readAllStateFiles(cwd);
+            return transactions?.[0] ?? null;
+        }
+
+        validFiles.sort((a, b) => sortByDateDesc({ createdAt: a.createdAt }, { createdAt: b.createdAt }));
+
+        const latestFile = validFiles[0];
+        if (!latestFile) {
+            return null;
+        }
+
+        // Now read the full content of only the latest file
+        return readStateFile(cwd, getUuidFromFileName(latestFile.file));
+    };
+
+
+    export const findStateFileByIdentifier = async (cwd: string, identifier:
+    string): Promise<StateFile | null> => {
+        if (isUUID(identifier)) {
+            return readStateFile(cwd, identifier);
+        }
+        
+        if (/^-?\d+$/.test(identifier)) {
+            const index = Math.abs(parseInt(identifier, 10));
+            if (isNaN(index) || index <= 0) {
+                return null;
+            }
+            // Optimization: use the more efficient method for the most common case.
+            if (index === 1) {
+                return findLatestStateFile(cwd);
+            }
+            const allTransactions = await readAllStateFiles(cwd);
+            if (!allTransactions || allTransactions.length < index) {
+                return null;
+            }
+            return allTransactions[index - 1] ?? null;
+        }
+        return null; // Invalid identifier format
+    };
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath } from './core/config';
+
+    export {
+        applyOperations,
+        createSnapshot,
+        deleteFile,
+        readFileContent,
+        restoreSnapshot,
+        writeFileContent,
+        fileExists,
+        renameFile
+    } from './core/executor';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        findStateFileByIdentifier,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState,
+        getStateFilePath,
+        getUndoneStateFilePath
+    } from './core/state';
+
+    export { processPatch } from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+
+    export { formatTransactionDetails } from './utils/formatters';
+
+    export {
+        createNotifier,
+        notifyPatchDetected,
+        notifyApprovalRequired,
+        requestApprovalWithNotification,
+        notifySuccess,
+        notifyFailure,
+    } from './utils/notifier';
+
+    export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+approved: true

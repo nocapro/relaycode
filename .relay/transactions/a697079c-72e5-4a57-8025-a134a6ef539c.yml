@@ -1,0 +1,1002 @@
+uuid: a697079c-72e5-4a57-8025-a134a6ef539c
+projectId: relaycode
+createdAt: '2025-09-04T01:41:54.650Z'
+linesAdded: 11
+linesRemoved: 5
+gitCommitMsg: 'fix(tests): resolve typescript errors in e2e tests'
+promptSummary: Fix TypeScript errors in test files.
+reasoning:
+  - >-
+    ok, i'll fix those typescript errors. looks like some unused imports and
+    type-narrowing issues in your tests. easy peasy.
+  - >-
+    First, I'll remove the unused `STATE_DIRECTORY_NAME` import from
+    `test/e2e/revert.test.ts`.
+  - >-
+    Next, I'll tackle `test/e2e/transaction.test.ts`. I'll remove the unused
+    imports for `STATE_DIRECTORY_NAME` and `StateFile`. Then, I'll add type
+    guards to safely access properties on the `FileOperation` union type, which
+    will resolve the `Object is possibly 'undefined'` and property access
+    errors.
+  - >-
+    That should clear up all the TypeScript errors. Lmk if you need anything
+    else.
+operations:
+  - type: write
+    path: test/e2e/revert.test.ts
+    content: |-
+      --- test/e2e/revert.test.ts
+      +++ test/e2e/revert.test.ts
+      @@ -8,7 +8,6 @@
+           runProcessPatch,
+           createTestConfig,
+       } from '../test.util';
+       import { revertCommand } from '../../src/commands/revert';
+      -import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+       import { logger } from '../../src/utils/logger'; // Mocks can't be ESM imports
+       import { findLatestStateFile, readAllStateFiles, readStateFile } from '../../src/core/state';
+    patchStrategy: new-unified
+  - type: write
+    path: test/e2e/transaction.test.ts
+    content: |-
+      --- test/e2e/transaction.test.ts
+      +++ test/e2e/transaction.test.ts
+      @@ -3,9 +3,7 @@
+       import path from 'path';
+       import { v4 as uuidv4 } from 'uuid';
+       import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch } from '../test.util';
+      -import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+       import { readStateFile } from '../../src/core/state';
+      -import type { StateFile } from 'relaycode-core';
+       
+       describe('e2e/transaction', () => {
+         let context: E2ETestContext;
+      @@ -38,7 +36,11 @@
+           expect(stateData.uuid).toBe(uuid);
+           expect(stateData.approved).toBe(true);
+           expect(stateData.operations).toHaveLength(1);
+      -    expect(stateData.operations[0].path).toBe(testFile);
+      +    const op = stateData.operations[0]!;
+      +    expect(op.type).toBe('write');
+      +    if (op.type === 'write') {
+      +      expect(op.path).toBe(testFile);
+      +    }
+           expect(stateData.snapshot[testFile]).toBe(originalContent);
+           expect(stateData.reasoning).toBeDefined();
+         });
+      @@ -282,8 +284,12 @@
+           expect(stateData).not.toBeNull();
+           if (!stateData) return;
+           // The final committed reasoning should be from the second run.
+      -    expect(stateData.operations[0].content).toContain('final content');
+      +    expect(stateData.operations.length).toBeGreaterThan(0);
+      +    const op = stateData.operations[0]!;
+      +    expect(op.type).toBe('write');
+      +    if (op.type === 'write') {
+      +      expect(op.content).toContain('final content');
+      +    }
+         });
+       
+         it('should run pre and post commands in the correct order', async () => {
+    patchStrategy: new-unified
+snapshot:
+  test/e2e/revert.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import {
+        setupE2ETest,
+        E2ETestContext,
+        createTestFile,
+        runProcessPatch,
+        createTestConfig,
+    } from '../test.util';
+
+    import { revertCommand } from '../../src/commands/revert';
+
+    import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+
+    import { logger } from '../../src/utils/logger'; // Mocks can't be ESM
+    imports
+
+    import { findLatestStateFile, readAllStateFiles, readStateFile } from
+    '../../src/core/state';
+
+
+    describe('e2e/revert', () => {
+        let context: E2ETestContext;
+
+        beforeEach(async () => {
+            context = await setupE2ETest();
+            // We need an initialized project for revert to work
+            await createTestConfig(context.testDir.path);
+        });
+
+        afterEach(async () => {
+            if (context) await context.cleanup();
+        });
+
+        it('should successfully revert a simple file modification', async () => {
+            const testFile = 'src/index.ts';
+            const originalContent = 'console.log("v1");';
+            const modifiedContent = 'console.log("v2");';
+            await createTestFile(context.testDir.path, testFile, originalContent);
+
+            // 1. Apply a patch to create a transaction (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context,
+                {},
+                [{ type: 'edit', path: testFile, content: modifiedContent }]
+            );
+
+            // Verify file was modified
+            const contentAfterPatch = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(contentAfterPatch).toBe(modifiedContent);
+
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify changes
+            const contentAfterRevert = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(contentAfterRevert).toBe(originalContent);
+
+            // 4. Verify that a new transaction (T2) was created for the revert
+            const t2 = await findLatestStateFile(context.testDir.path);
+            expect(t2).not.toBeNull();
+            expect(t2!.uuid).not.toBe(t1_uuid);
+            expect(t2!.reasoning.join(' ')).toContain(`Reverting transaction ${t1_uuid}`);
+
+            // 5. Verify T1 and T2 transactions exist in DB
+            const t1_state = await readStateFile(context.testDir.path, t1_uuid);
+            const t2_state = await readStateFile(context.testDir.path, t2!.uuid);
+            expect(t1_state).not.toBeNull();
+            expect(t2_state).not.toBeNull();
+        });
+
+        it('should correctly revert a complex transaction (edit, delete, create)', async () => {
+            const fileToModify = 'src/modify.ts';
+            const originalModifyContent = 'export const a = 1;';
+            await createTestFile(context.testDir.path, fileToModify, originalModifyContent);
+            
+            const fileToDelete = 'src/delete.ts';
+            const originalDeleteContent = 'export const b = 2;';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+            
+            const newFilePath = 'src/components/new.ts';
+            const newFileContent = 'export const c = 3;';
+        
+            // 1. Apply a complex patch (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [
+                    { type: 'edit', path: fileToModify, content: 'export const a = 100;' },
+                    { type: 'delete', path: fileToDelete },
+                    { type: 'new', path: newFilePath, content: newFileContent }
+                ]
+            );
+            
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify rollback
+            const restoredModifyContent = await fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+            expect(restoredModifyContent).toBe(originalModifyContent);
+            
+            const restoredDeleteFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(restoredDeleteFileExists).toBe(true);
+            const restoredDeleteContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+            expect(restoredDeleteContent).toBe(originalDeleteContent);
+            
+            const newFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExistsAfterRevert).toBe(false);
+
+            // 4. Verify a new transaction (T2) was created
+            const t2 = await findLatestStateFile(context.testDir.path);
+            expect(t2).not.toBeNull();
+            expect(t2!.uuid).not.toBe(t1_uuid);
+        });
+
+        it('should correctly revert a transaction with file creation and modification', async () => {
+            const newFilePath = 'src/components/new-file.ts';
+            const initialContent = 'export const a = 1;';
+            const modifiedContent = 'export const a = 2;';
+
+            // 1. Apply a patch with new file and modification (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [
+                    { type: 'new', path: newFilePath, content: initialContent },
+                    { type: 'edit', path: newFilePath, content: modifiedContent }
+                ]
+            );
+
+            // Verify file was created with modified content
+            const contentAfterPatch = await fs.readFile(path.join(context.testDir.path, newFilePath), 'utf-8');
+            expect(contentAfterPatch).toBe(modifiedContent);
+            
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify rollback (file should be deleted)
+            const newFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExistsAfterRevert).toBe(false);
+        });
+
+        it('should correctly revert a transaction with file modification and rename', async () => {
+            const originalFilePath = 'src/original.ts';
+            const renamedFilePath = 'src/renamed.ts';
+            const originalContent = 'export const a = "v1";';
+            const modifiedContent = 'export const a = "v2";';
+
+            // Setup: create the original file
+            await createTestFile(context.testDir.path, originalFilePath, originalContent);
+
+            // 1. Apply a patch with modification and rename (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [
+                    { type: 'edit', path: originalFilePath, content: modifiedContent },
+                    { type: 'rename', from: originalFilePath, to: renamedFilePath }
+                ]
+            );
+
+            // Verify file was renamed and content is modified
+            const renamedFileExists = await fs.access(path.join(context.testDir.path, renamedFilePath)).then(() => true).catch(() => false);
+            expect(renamedFileExists).toBe(true);
+            const renamedContent = await fs.readFile(path.join(context.testDir.path, renamedFilePath), 'utf-8');
+            expect(renamedContent).toBe(modifiedContent);
+            const originalFileExists = await fs.access(path.join(context.testDir.path, originalFilePath)).then(() => true).catch(() => false);
+            expect(originalFileExists).toBe(false);
+            
+            // 2. Revert T1
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+
+            // 3. Verify rollback
+            const originalFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, originalFilePath)).then(() => true).catch(() => false);
+            expect(originalFileExistsAfterRevert).toBe(true);
+            const originalContentAfterRevert = await fs.readFile(path.join(context.testDir.path, originalFilePath), 'utf-8');
+            expect(originalContentAfterRevert).toBe(originalContent);
+
+            const renamedFileExistsAfterRevert = await fs.access(path.join(context.testDir.path, renamedFilePath)).then(() => true).catch(() => false);
+            expect(renamedFileExistsAfterRevert).toBe(false);
+        });
+
+        it('should log an error and do nothing if UUID does not exist', async () => {
+            let errorLog = '';
+            (logger as any).error = (msg: string) => { errorLog = msg; };
+
+            const fakeUuid = '00000000-0000-0000-0000-000000000000';
+            await revertCommand(fakeUuid, {}, context.testDir.path);
+            
+            expect(errorLog).toContain(`Could not find transaction with UUID '${fakeUuid}'`);
+        });
+
+        it('should be possible to revert a revert', async () => {
+            const testFile = 'src/index.ts';
+            const v1 = 'v1';
+            const v2 = 'v2';
+            await createTestFile(context.testDir.path, testFile, v1);
+
+            // 1. Apply patch to go from v1 -> v2 (T1)
+            const { uuid: t1_uuid } = await runProcessPatch(
+                context, {},
+                [{ type: 'edit', path: testFile, content: v2 }]
+            );
+            let content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(content).toBe(v2);
+
+            // 2. Revert T1 to go from v2 -> v1 (T2)
+            await revertCommand(t1_uuid, {}, context.testDir.path, async () => true);
+            content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(content).toBe(v1);
+
+            // 3. Get T2's UUID and revert it to go from v1 -> v2 (T3)
+            const t2 = await findLatestStateFile(context.testDir.path);
+            expect(t2).not.toBeNull();
+            await revertCommand(t2!.uuid, {}, context.testDir.path, async () => true);
+            content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(content).toBe(v2);
+
+            // 4. Check that we have 3 state files
+            const allStates = await readAllStateFiles(context.testDir.path);
+            expect(allStates).not.toBeNull();
+            expect(allStates!.length).toBe(3);
+        });
+
+        describe('revert by index/default', () => {
+            const testFile = 'src/index.ts';
+            const v1 = 'v1';
+            const v2 = 'v2';
+            const v3 = 'v3';
+
+            beforeEach(async () => {
+                // Create a history of transactions
+                await createTestFile(context.testDir.path, testFile, v1);
+                // T1: v1 -> v2
+                await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v2 }]);
+                // T2: v2 -> v3
+                await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v3 }]);
+            });
+
+            it('should revert the latest transaction when no identifier is provided', async () => {
+                // Revert T2 (latest)
+                await revertCommand(undefined, {}, context.testDir.path, async () => true);
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v2);
+            });
+
+            it('should revert the latest transaction when identifier is "1"', async () => {
+                // Revert T2 (latest)
+                await revertCommand('1', {}, context.testDir.path, async () => true);
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v2);
+            });
+
+            it('should revert the 2nd latest transaction when identifier is "2"', async () => {
+                // Revert T1 (2nd latest)
+                await revertCommand('2', {}, context.testDir.path, async () => true);
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v1);
+            });
+
+            it('should log an error for an invalid index', async () => {
+                let errorLog = '';
+                (logger as any).error = (msg: string) => { errorLog = msg; };
+                await revertCommand('99', {}, context.testDir.path, async () => true);
+                expect(errorLog).toContain('Could not find the 99-th latest transaction.');
+            });
+        });
+
+        describe('revert with filtering', () => {
+            const testFile = 'src/index.ts';
+            const v1 = 'v1-original';
+            const v2 = 'v2-first-change';
+            const v3 = 'v3-second-change';
+            let t1_uuid: string, t2_uuid: string, t3_uuid_revert_t2: string;
+
+            beforeEach(async () => {
+                // Setup a history: T1 (v1->v2), T2 (v2->v3), T3 (revert T2, v3->v2)
+                await createTestFile(context.testDir.path, testFile, v1);
+
+                // T1: v1 -> v2
+                const { uuid: t1 } = await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v2 }]);
+                t1_uuid = t1;
+
+                // T2: v2 -> v3
+                const { uuid: t2 } = await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: v3 }]);
+                t2_uuid = t2;
+
+                // T3: Revert T2, bringing content from v3 -> v2
+                await revertCommand(t2_uuid, {}, context.testDir.path, async () => true);
+                const t3_state = await findLatestStateFile(context.testDir.path);
+                t3_uuid_revert_t2 = t3_state!.uuid;
+            });
+
+            it('should skip reverting a "revert" transaction and a reverted transaction by default', async () => {
+                // Attempt to revert the latest transaction. 
+                // The chronological order is T3 (revert), T2 (reverted), T1.
+                // T3 and T2 should be skipped, so T1 should be reverted.
+                await revertCommand(undefined, {}, context.testDir.path, async () => true);
+                
+                // State after revert should be v1 (reverted T1)
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v1);
+
+                const latest = await findLatestStateFile(context.testDir.path);
+                expect(latest?.reasoning.join(' ')).toContain(`Reverting transaction ${t1_uuid}`);
+            });
+
+            it('should revert the latest "revert" transaction when --include-reverts is used', async () => {
+                // Revert latest, including reverts. T3 should be reverted.
+                await revertCommand('1', { includeReverts: true }, context.testDir.path, async () => true);
+
+                // State after should be v3 (reverted the revert of T2)
+                const content = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(content).toBe(v3);
+
+                const latest = await findLatestStateFile(context.testDir.path);
+                expect(latest?.reasoning.join(' ')).toContain(`Reverting transaction ${t3_uuid_revert_t2}`);
+            });
+
+            it('should fail to find the 2nd transaction when filtering is on', async () => {
+                // With default filtering, the only revertable transaction is T1.
+                // So asking for the 2nd should fail.
+                let errorLog = '';
+                (logger as any).error = (msg: string) => { errorLog += msg; };
+                (logger as any).info = (msg: string) => { errorLog += msg; }; // Also capture info for the message
+                await revertCommand('2', {}, context.testDir.path, async () => true);
+                
+                expect(errorLog).toContain('Could not find the 2-th latest transaction.');
+                expect(errorLog).toContain('revert transaction');
+            });
+
+            it('should correctly identify the 2nd transaction when including reverts', async () => {
+                // When including reverts, the order is T3, T2, T1. The 2nd is T2.
+                // Reverting T2 will apply its snapshot, which contains v2. The file is already v2.
+                await revertCommand('2', { includeReverts: true }, context.testDir.path, async () => true);
+                const contentAfterRevert = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+                expect(contentAfterRevert).toBe(v2);
+
+                const allStates = await readAllStateFiles(context.testDir.path);
+                expect(allStates?.length).toBe(4); // T1, T2, T3, and the new revert of T2
+                const latest = await findLatestStateFile(context.testDir.path);
+                expect(latest?.reasoning.join(' ')).toContain(`Reverting transaction ${t2_uuid}`);
+            });
+        });
+    });
+  test/e2e/transaction.test.ts: >
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+    from '../test.util';
+
+    import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+
+    import { readStateFile } from '../../src/core/state';
+
+    import type { StateFile } from 'relaycode-core';
+
+
+    describe('e2e/transaction', () => {
+      let context: E2ETestContext;
+      const testFile = 'src/index.ts';
+      const originalContent = 'console.log("original");';
+
+      beforeEach(async () => {
+        context = await setupE2ETest({ withTsconfig: true });
+        await createTestFile(context.testDir.path, testFile, originalContent);
+      });
+
+      afterEach(async () => {
+        if (context) await context.cleanup();
+      });
+
+      it('should apply changes, commit, and store correct state in the database', async () => {
+        const newContent = 'console.log("new content");';
+        const { uuid } = await runProcessPatch(
+          context,
+          { linter: '', approvalMode: 'auto' },
+          [{ type: 'edit', path: testFile, content: newContent }]
+        );
+        // Add a small delay to ensure file operations have completed
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Check file content
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(newContent);
+
+        const stateData = await readStateFile(context.testDir.path, uuid);
+
+        expect(stateData).not.toBeNull();
+        if (!stateData) return; // type guard
+
+        expect(stateData.uuid).toBe(uuid);
+        expect(stateData.approved).toBe(true);
+        expect(stateData.operations).toHaveLength(1);
+        expect(stateData.operations[0].path).toBe(testFile);
+        expect(stateData.snapshot[testFile]).toBe(originalContent);
+        expect(stateData.reasoning).toBeDefined();
+      });
+
+      it('should rollback changes when manually disapproved', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { approvalMode: 'manual' },
+          [{ type: 'edit', path: testFile, content: 'console.log("I will be rolled back");' }],
+          { prompter: async () => false }
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should fallback to shell execution for non-tsc linters and require approval on failure', async () => {
+        await runProcessPatch(
+          context,
+          // 'false' is a command that always exits with 1. This tests the shell fallback.
+          { approvalMode: 'auto', approvalOnErrorCount: 0, linter: 'false' },
+          [{ type: 'edit', path: testFile, content: 'any content' }],
+          { prompter: async () => false } // Disapprove manually
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent); // Should be rolled back
+      });
+
+      it('should require manual approval if linter errors exceed approvalOnErrorCount', async () => {
+        await runProcessPatch(
+          context,
+          { approvalMode: 'auto', approvalOnErrorCount: 0, linter: 'bun tsc -b --noEmit' },
+          [{ type: 'edit', path: testFile, content: 'const x: string = 123;' }],
+          { prompter: async () => false }
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+      });
+
+      it('should skip linter if command is empty and auto-approve', async () => {
+        const badContent = 'const x: string = 123;'; // Would fail linter, but it's skipped
+
+        await runProcessPatch(
+          context,
+          { linter: '' },
+          [{ type: 'edit', path: testFile, content: badContent }]
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(badContent);
+      });
+
+      it('should ignore patch with already processed UUID', async () => {
+        const uuid = uuidv4();
+
+        // 1. Process and commit a patch
+        await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: "first change" }], { responseOverrides: { uuid } });
+
+        // 2. Try to process another patch with the same UUID - this will create a new response with the same UUID.
+        // The `processPatch` logic should see the existing state file and ignore it.
+        await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: "second change" }], { responseOverrides: { uuid } });
+
+        // Content should be from the first change, not the second
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe("first change");
+      });
+
+      it('should create nested directories for new files', async () => {
+        const newFilePath = 'src/a/b/c/new-file.ts';
+        const newFileContent = 'hello world';
+
+        await runProcessPatch(
+          context,
+          {},
+          [{ type: 'new', path: newFilePath, content: newFileContent }]
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, newFilePath), 'utf-8');
+        expect(finalContent).toBe(newFileContent);
+      });
+
+      it('should rollback new file and its new empty parent directory on rejection', async () => {
+        const newFilePath = 'src/new/dir/file.ts';
+
+        await runProcessPatch(context, { approvalMode: 'manual' },
+          [{ type: 'new', path: newFilePath, content: 'content' }], { prompter: async () => false });
+
+        const fileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+        expect(fileExists).toBe(false);
+
+        const dirExists = await fs.access(path.join(context.testDir.path, 'src/new/dir')).then(() => true).catch(() => false);
+        expect(dirExists).toBe(false);
+
+        const midDirExists = await fs.access(path.join(context.testDir.path, 'src/new')).then(() => true).catch(() => false);
+        expect(midDirExists).toBe(false);
+
+        // src directory should still exist as it contained a file before
+        const srcDirExists = await fs.access(path.join(context.testDir.path, 'src')).then(() => true).catch(() => false);
+        expect(srcDirExists).toBe(true);
+      });
+
+      it('should not delete parent directory on rollback if it was not empty beforehand', async () => {
+        const existingFilePath = 'src/shared/existing.ts';
+        const newFilePath = 'src/shared/new.ts';
+
+        await createTestFile(context.testDir.path, existingFilePath, 'const existing = true;');
+
+        await runProcessPatch(context, { approvalMode: 'manual' },
+          [{ type: 'new', path: newFilePath, content: 'const brandNew = true;' }],
+          { prompter: async () => false });
+
+        // New file should be gone
+        const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+        expect(newFileExists).toBe(false);
+
+        // Existing file and its directory should remain
+        const existingFileExists = await fs.access(path.join(context.testDir.path, existingFilePath)).then(() => true).catch(() => false);
+        expect(existingFileExists).toBe(true);
+
+        const sharedDirExists = await fs.access(path.join(context.testDir.path, 'src/shared')).then(() => true).catch(() => false);
+        expect(sharedDirExists).toBe(true);
+      });
+
+      it('should abort transaction if preCommand fails', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { preCommand: 'false' },
+          [{ type: 'edit', path: testFile, content: 'new content' }]
+        );
+
+        // File should not have been changed
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        // No state file should have been created
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should automatically roll back if postCommand fails', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { postCommand: 'false' },
+          [{ type: 'edit', path: testFile, content: 'new content' }]
+        );
+
+        // File should have been rolled back
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        // No state file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should ignore patch with non-matching projectId', async () => {
+        const { uuid } = await runProcessPatch(
+          context,
+          { projectId: 'correct-project' },
+          [{ type: 'edit', path: testFile, content: 'should not be applied' }],
+          { responseOverrides: { projectId: 'wrong-project' } }
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        // No state file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should correctly apply a file deletion operation', async () => {
+        const fileToDelete = 'src/delete-me.ts';
+        const originalDeleteContent = 'delete this content';
+        await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+
+        const { uuid } = await runProcessPatch(
+          context,
+          {},
+          [{ type: 'delete', path: fileToDelete }]
+        );
+
+        const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+        expect(deletedFileExists).toBe(false);
+
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+      });
+
+      it('should correctly roll back a file deletion operation', async () => {
+        const fileToDelete = 'src/delete-me.ts';
+        const originalDeleteContent = 'delete this content';
+        await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+
+        const { uuid } = await runProcessPatch(
+          context, { approvalMode: 'manual' },
+          [{ type: 'delete', path: fileToDelete }], { prompter: async () => false }
+        );
+
+        const restoredFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+        expect(restoredFileExists).toBe(true);
+
+        // Content should be the same as the original
+        const restoredContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+        expect(restoredContent).toBe(originalDeleteContent);
+
+        // No state file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).toBeNull();
+      });
+
+      it('should auto-approve if linter errors are within approvalOnErrorCount', async () => {
+        const badContent = 'const x: string = 123;'; // 1 TS error
+
+        const { uuid } = await runProcessPatch(
+          context,
+          { approvalMode: 'auto', approvalOnErrorCount: 1, linter: 'bun tsc -b --noEmit' },
+          [{ type: 'edit', path: testFile, content: badContent }]
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(badContent);
+
+        // State file should have been committed
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+      });
+
+      it('should overwrite an orphaned pending transaction and allow reprocessing', async () => {
+        const uuid = uuidv4();
+        const newContent = 'console.log("final content");';
+
+        // Create an orphaned pending transaction by running a patch and not approving it.
+        // We'll use a trick: have the prompter throw an error to simulate a crash after the pending state is written.
+        try {
+          await runProcessPatch(
+            context,
+            { approvalMode: 'manual' },
+            [{ type: 'edit', path: testFile, content: "this won't be applied" }],
+            { responseOverrides: { uuid }, prompter: async () => { throw new Error('Simulated crash'); } }
+          );
+        } catch (e: any) {
+          expect(e.message).toBe('Simulated crash');
+        }
+
+        await runProcessPatch(
+          context,
+          {},
+          [{ type: 'edit', path: testFile, content: newContent }],
+          { responseOverrides: { uuid } }
+        );
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(newContent);
+
+        // A committed state file should exist
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+        if (!stateData) return;
+        // The final committed reasoning should be from the second run.
+        expect(stateData.operations[0].content).toContain('final content');
+      });
+
+      it('should run pre and post commands in the correct order', async () => {
+        const preCommandFile = path.join(context.testDir.path, 'pre.txt');
+        const postCommandFile = path.join(context.testDir.path, 'post.txt');
+
+        // Use a synchronous file write to avoid potential race conditions or async flushing issues
+        // with `node -e` in a shelled-out process.
+        const preCommand = `node -e "require('fs').writeFileSync('${preCommandFile.replace(/\\/g, '/')}', '')"`;
+        const postCommand = `node -e "require('fs').writeFileSync('${postCommandFile.replace(/\\/g, '/')}', '')"`;
+
+        await runProcessPatch(
+          context,
+          {
+            preCommand,
+            postCommand,
+          },
+          [{ type: 'edit', path: testFile, content: 'new content' }]
+        );
+
+        const preExists = await fs.access(preCommandFile).then(() => true).catch(() => false);
+        expect(preExists).toBe(true);
+
+        const postExists = await fs.access(postCommandFile).then(() => true).catch(() => false);
+        expect(postExists).toBe(true);
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe('new content');
+      });
+
+      it('should create a pending record during transaction and mark as undone on rollback', async () => {
+        const uuid = uuidv4();
+
+        // We can't easily check the DB *during* the transaction.
+        // Instead, we will check that no committed record exists after rollback.
+        // The state transition is pending -> undone.
+        // We don't have a way to check for 'undone' records with the current state API,
+        // but we can check that it's not 'committed'.
+
+        // Check if the pending file exists during the transaction
+        // This part is no longer testable in the same way with an in-process DB.
+        // let pendingFileExistedDuringRun = false;
+
+        const prompter = async (): Promise<boolean> => {
+          // pendingFileExistedDuringRun = (await getDb(context.testDir.path).query().from('transactions').where({ uuid, status: 'pending' }).first()) != null;
+          return false; // Disapprove to trigger rollback
+        };
+
+        await runProcessPatch(
+          context,
+          { approvalMode: 'manual' },
+          [{ type: 'edit', path: testFile, content: 'I will be rolled back' }],
+          { prompter, responseOverrides: { uuid } }
+        );
+
+        // No committed file should exist
+        const committedState = await readStateFile(context.testDir.path, uuid);
+        expect(committedState).toBeNull();
+      });
+
+      it('should fail transaction gracefully if a file is not writable and rollback all changes', async () => {
+        const unwritableFile = 'src/unwritable.ts';
+        const writableFile = 'src/writable.ts';
+        const originalUnwritableContent = 'original unwritable';
+        const originalWritableContent = 'original writable';
+
+        await createTestFile(context.testDir.path, unwritableFile, originalUnwritableContent);
+        await createTestFile(context.testDir.path, writableFile, originalWritableContent);
+
+        const unwritableFilePath = path.join(context.testDir.path, unwritableFile);
+
+        try {
+          await fs.chmod(unwritableFilePath, 0o444); // Make read-only
+
+          const { uuid } = await runProcessPatch(
+            context, {},
+            [
+              { type: 'edit', path: writableFile, content: 'new writable content' },
+              { type: 'edit', path: unwritableFile, content: 'new unwritable content' }
+            ]
+          );
+
+          // Check file states: both should be rolled back to original content.
+          const finalWritable = await fs.readFile(path.join(context.testDir.path, writableFile), 'utf-8');
+          expect(finalWritable).toBe(originalWritableContent);
+
+          const finalUnwritable = await fs.readFile(path.join(context.testDir.path, unwritableFile), 'utf-8');
+          expect(finalUnwritable).toBe(originalUnwritableContent);
+
+          // No state file should have been committed
+          const stateData = await readStateFile(context.testDir.path, uuid);
+          expect(stateData).toBeNull();
+        } finally {
+          // Make the file writable again to allow cleanup
+          try {
+            await fs.chmod(unwritableFilePath, 0o644);
+          } catch (err) {
+            console.error('Failed to restore file permissions:', err);
+          }
+        }
+      });
+
+      it('should rollback gracefully if creating a file in a non-writable directory fails', async () => {
+        const readonlyDir = 'src/readonly-dir';
+        const newFilePath = path.join(readonlyDir, 'new-file.ts');
+        const readonlyDirPath = path.join(context.testDir.path, readonlyDir);
+
+        await fs.mkdir(readonlyDirPath, { recursive: true });
+        await fs.chmod(readonlyDirPath, 0o555); // Read and execute only
+
+        try {
+          const { uuid } = await runProcessPatch(
+            context,
+            {},
+            [{ type: 'new', path: newFilePath, content: 'this should not be written' }]
+          );
+
+          // Check that the new file was not created
+          const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+          expect(newFileExists).toBe(false);
+
+          // No state file should have been committed
+          const stateData = await readStateFile(context.testDir.path, uuid);
+          expect(stateData).toBeNull();
+        } finally {
+          // Restore permissions for cleanup
+          try {
+            // The directory might have been removed on rollback, so check if it exists first.
+            if (await fs.access(readonlyDirPath).then(() => true).catch(() => false)) {
+              await fs.chmod(readonlyDirPath, 0o755);
+            }
+          } catch (err) {
+            console.error('Failed to restore directory permissions:', err);
+          }
+        }
+      });
+
+      it('should correctly rollback a complex transaction (modify, delete, create)', async () => {
+        // Setup initial files
+        const fileToModify = 'src/modify.ts';
+        const originalModifyContent = 'export const a = 1;';
+        await createTestFile(context.testDir.path, fileToModify, originalModifyContent);
+
+        const fileToDelete = 'src/delete.ts';
+        const originalDeleteContent = 'export const b = 2;';
+        await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+
+        const newFilePath = 'src/new/component.ts';
+        const newFileContent = 'export const c = 3;';
+
+        // Disapprove the transaction
+        await runProcessPatch(
+          context,
+          { approvalMode: 'manual' },
+          [
+            { type: 'edit', path: fileToModify, content: 'export const a = 100;' },
+            { type: 'delete', path: fileToDelete },
+            { type: 'new', path: newFilePath, content: newFileContent }
+          ], { prompter: async () => false }
+        );
+
+        // Verify rollback
+        const modifiedFileContent = await fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+        expect(modifiedFileContent).toBe(originalModifyContent);
+
+        const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+        expect(deletedFileExists).toBe(true);
+
+        const deletedFileContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+        expect(deletedFileContent).toBe(originalDeleteContent);
+
+        const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+        expect(newFileExists).toBe(false);
+      });
+
+      it('should correctly apply multiple sequential operations on the same file, including a rename', async () => {
+        const originalFilePath = 'src/service.ts';
+        const renamedFilePath = 'src/services/main-service.ts';
+        const originalServiceContent = `class Service {
+        name = "MyService";
+
+        execute() {
+            console.log("Executing service");
+        }
+    }`;
+        await createTestFile(context.testDir.path, originalFilePath, originalServiceContent);
+
+        // First, a standard diff to rename a property and add a new one.
+        const unifiedDiff = `--- a/${originalFilePath}
+    +++ b/${originalFilePath}
+
+    @@ -1,5 +1,6 @@
+     class Service {
+    -     name = "MyService";
+
+    +    name = "MyAwesomeService";
+
+    +    version = "1.0";
+
+         execute() {
+             console.log("Executing service");
+        }
+    }`;
+
+        // Then, a search-replace to update a method on the *result* of the first patch.
+        const searchReplaceDiff = `
+    <<<<<<< SEARCH
+            console.log("Executing service");
+    =======
+            console.log(\`Executing service \${this.name} v\${this.version}\`);
+    >>>>>>> REPLACE
+
+    `;
+
+        // And finally, rename the file.
+        const { uuid } = await runProcessPatch(
+          context,
+          {},
+          [
+            { type: 'edit', path: originalFilePath, content: unifiedDiff, strategy: 'standard-diff' },
+            { type: 'edit', path: originalFilePath, content: searchReplaceDiff, strategy: 'search-replace' },
+            { type: 'rename', from: originalFilePath, to: renamedFilePath },
+          ]
+        );
+
+        // 1. Verify file system state
+        const originalFileExists = await fs.access(path.join(context.testDir.path, originalFilePath)).then(() => true).catch(() => false);
+        expect(originalFileExists).toBe(false);
+
+        const renamedFileExists = await fs.access(path.join(context.testDir.path, renamedFilePath)).then(() => true).catch(() => false);
+        expect(renamedFileExists).toBe(true);
+
+        // 2. Verify final content
+        const finalContent = await fs.readFile(path.join(context.testDir.path, renamedFilePath), 'utf-8');
+        const expectedContent = `class Service {
+        name = "MyAwesomeService";
+        version = "1.0";
+
+        execute() {
+            console.log(\`Executing service \${this.name} v\${this.version}\`);
+        }
+    }`;
+        expect(finalContent.replace(/\s/g, '')).toBe(expectedContent.replace(/\s/g, ''));
+
+        // 3. Verify snapshot in state file for rollback purposes
+        const stateData = await readStateFile(context.testDir.path, uuid);
+        expect(stateData).not.toBeNull();
+        expect(stateData?.snapshot[originalFilePath]).toBe(originalServiceContent);
+        expect(stateData?.snapshot[renamedFilePath]).toBe(null); // It didn't exist at snapshot time
+      });
+    });
+approved: true

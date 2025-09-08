@@ -1,0 +1,2561 @@
+uuid: b0d7b29a-24a7-478d-9b16-92857418a0ac
+projectId: relaycode
+createdAt: '2025-09-03T03:03:01.939Z'
+linesAdded: 41
+linesRemoved: 487
+gitCommitMsg: 'refactor(cli): integrate relaycode-core and remove duplicated logic'
+promptSummary: Refactor relaycode to use relaycode-core (phase 2).
+reasoning:
+  - >-
+    ok, phase 2. time to integrate `relaycode-core` into the main `relaycode`
+    application. this means ripping out the duplicated logic from `relaycode`
+    and making it depend on the core package.
+  - >-
+    first, i'll update `relaycode`'s `package.json` to remove the old
+    `diff-apply` and add our new `relaycode-core` package.
+  - >-
+    next, i'm deleting the duplicated type definitions and parser logic from the
+    `relaycode` source. `relaycode-core` is the single source of truth now.
+  - >-
+    with the old files gone, i need to update all imports to point to
+    `relaycode-core`. this will touch a bunch of files.
+  - >-
+    now for the main event: refactoring `transaction.ts`. i'm replacing its
+    local implementation of `applyOperations` and `calculateLineChanges` with
+    the ones from `relaycode-core`. the new `applyOperations` will be a wrapper
+    that calls the pure function from core and then commits the results to the
+    filesystem.
+  - >-
+    finally, i'll update the main `index.ts` to re-export from `relaycode-core`
+    so library consumers get the new types and functions.
+  - >-
+    that completes phase 2. `relaycode` is now leaner and relies on
+    `relaycode-core` for its core logic.
+operations:
+  - type: write
+    path: package.json
+    content: |-
+      <<<<<<< SEARCH
+          "diff-apply": "^1.0.6",
+      =======
+          "relaycode-core": "0.1.0",
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: delete
+    path: src/types.ts
+  - type: delete
+    path: src/core/parser.ts
+  - type: write
+    path: src/commands/apply.ts
+    content: |-
+      --- src/commands/apply.ts
+      +++ src/commands/apply.ts
+      @@ -1,6 +1,6 @@
+       import { promises as fs } from 'fs';
+       import path from 'path';
+       import { loadConfigOrExit } from '../core/config';
+      -import { parseLLMResponse } from '../core/parser';
+      +import { parseLLMResponse } from 'relaycode-core';
+       import { processPatch } from '../core/transaction';
+       import { logger } from '../utils/logger';
+       import chalk from 'chalk';
+    patchStrategy: new-unified
+  - type: write
+    path: src/commands/watch.ts
+    content: |-
+      --- src/commands/watch.ts
+      +++ src/commands/watch.ts
+      @@ -1,6 +1,6 @@
+       import { findConfig, loadConfigOrExit, findConfigPath } from '../core/config';
+       import { createClipboardWatcher } from '../core/clipboard';
+      -import { parseLLMResponse } from '../core/parser';
+      +import { parseLLMResponse } from 'relaycode-core';
+       import { processPatch } from '../core/transaction';
+       import { logger } from '../utils/logger';
+      -import { Config } from '../types';
+      +import { Config } from 'relaycode-core';
+       import fs from 'fs';
+       import path from 'path';
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/config.ts
+    content: |-
+      --- src/core/config.ts
+      +++ src/core/config.ts
+      @@ -1,6 +1,6 @@
+       import { z } from 'zod';
+       import path from 'path';
+       import { promises as fs } from 'fs';
+      -import { Config, ConfigSchema } from '../types';
+      +import { Config, ConfigSchema } from 'relaycode-core';
+       import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON } from '../utils/constants';
+       import { logger, isEnoentError } from '../utils/logger';
+       import chalk from 'chalk';
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/db.ts
+    content: >-
+      --- src/core/db.ts
+
+      +++ src/core/db.ts
+
+      @@ -1,5 +1,5 @@
+       import { konro } from 'konro';
+      -import type { FileOperation, FileSnapshot, StateFile } from '../types';
+
+      +import type { FileOperation, FileSnapshot, StateFile } from
+      'relaycode-core';
+       import path from 'path';
+       import { getStateDirectory } from './config';
+       import type { OnDemandDbContext } from 'konro';
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/state.ts
+    content: |-
+      --- src/core/state.ts
+      +++ src/core/state.ts
+      @@ -1,4 +1,4 @@
+      -import { StateFile } from '../types';
+      +import { StateFile } from 'relaycode-core';
+       import { logger } from '../utils/logger';
+       import { getDb, toStateFile, fromStateFile } from './db';
+       import { promises as fs } from 'fs';
+    patchStrategy: new-unified
+  - type: write
+    path: src/utils/formatters.ts
+    content: |-
+      --- src/utils/formatters.ts
+      +++ src/utils/formatters.ts
+      @@ -1,5 +1,5 @@
+       import chalk from 'chalk';
+      -import { FileOperation, StateFile } from '../types';
+      +import { FileOperation, StateFile } from 'relaycode-core';
+       
+       const opToString = (op: FileOperation): string => {
+           switch (op.type) {
+    patchStrategy: new-unified
+  - type: write
+    path: src/utils/logger.ts
+    content: |-
+      --- src/utils/logger.ts
+      +++ src/utils/logger.ts
+      @@ -1,5 +1,5 @@
+       import chalk from 'chalk';
+      -import { LogLevelName } from '../types';
+      +import { LogLevelName } from 'relaycode-core';
+       
+       const LogLevels = {
+         silent: 0,
+    patchStrategy: new-unified
+  - type: write
+    path: src/commands/revert.ts
+    content: |-
+      --- src/commands/revert.ts
+      +++ src/commands/revert.ts
+      @@ -2,7 +2,7 @@
+       import { findStateFileByIdentifier, readAllStateFiles } from '../core/state';
+       import { processPatch } from '../core/transaction';
+       import { logger } from '../utils/logger';
+      -import { FileOperation, ParsedLLMResponse } from '../types';
+      +import { FileOperation, ParsedLLMResponse } from 'relaycode-core';
+       import { v4 as uuidv4 } from 'uuid';
+       import { createConfirmationHandler, Prompter } from '../utils/prompt';
+       import { formatTransactionDetails } from '../utils/formatters';
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -1,13 +1,13 @@
+
+      -import { Config, ParsedLLMResponse, StateFile, FileSnapshot,
+      FileOperation } from '../types';
+
+      +import { Config, ParsedLLMResponse, StateFile, FileSnapshot,
+      FileOperation } from 'relaycode-core';
+       import { logger, getErrorMessage } from '../utils/logger';
+       import { getErrorCount, executeShellCommand } from '../utils/shell';
+      -import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+      unifiedDiffService } from 'diff-apply';
+       import { deleteFile, readFileContent, removeEmptyParentDirectories, renameFile, writeFileContent } from '../utils/fs';
+       import path from 'path';
+       import chalk from 'chalk';
+      +import { applyOperations as applyOperationsCore, calculateLineChanges as
+      calculateLineChangesCore } from 'relaycode-core';
+       
+       import { hasBeenProcessed, writePendingState, commitState, deletePendingState, updatePendingState } from './state';
+      -import { getConfirmation } from '../utils/prompt'
+
+      +import { getConfirmation } from '../utils/prompt';
+       import { requestApprovalWithNotification, notifyFailure, notifySuccess, notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';
+       
+       type Prompter = (question: string) => Promise<boolean>;
+      @@ -19,20 +19,6 @@
+           yes?: boolean;
+       };
+       
+      -const patchStrategies = {
+
+      -  'new-unified': (p: { originalContent: string; diffContent: string; })
+      => {
+
+      -    const service =
+      newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+
+      -    return service.applyDiff(p);
+
+      -  },
+
+      -  'multi-search-replace': (p: { originalContent: string; diffContent:
+      string; }) => {
+
+      -    return
+      multiSearchReplaceService.multiSearchReplaceService.applyDiff(p);
+
+      -  },
+
+      -  'unified': (p: { originalContent: string; diffContent: string; }) => {
+
+      -    return
+      unifiedDiffService.unifiedDiffService.applyDiff(p.originalContent,
+      p.diffContent);
+
+      -  },
+
+      -};
+
+      -
+       export const createSnapshot = async (filePaths: string[], cwd: string = process.cwd()): Promise<FileSnapshot> => {
+         const snapshot: FileSnapshot = {};
+         await Promise.all(
+      @@ -43,76 +29,32 @@
+         return snapshot;
+       };
+       
+      -export const applyOperations = async (operations: FileOperation[], cwd:
+      string = process.cwd()): Promise<Map<string, string>> => {
+
+      -  const fileStates = new Map<string, string | null>();
+
+      -  const newContents = new Map<string, string>();
+
+      +export const applyOperations = async (
+
+      +  operations: FileOperation[],
+
+      +  originalFiles: Map<string, string | null>,
+
+      +  cwd: string = process.cwd()
+
+      +): Promise<Map<string, string | null>> => {
+
+      +  const result = await applyOperationsCore(operations, originalFiles);
+
+      +  if (!result.success) {
+
+      +    throw new Error(result.error);
+
+      +  }
+       
+      -  const getFileContent = async (filePath: string): Promise<string | null>
+      => {
+
+      -    if (fileStates.has(filePath)) {
+
+      -      return fileStates.get(filePath) ?? null;
+
+      +  // Write results to filesystem
+
+      +  // Must handle deletes and renames carefully. The operations list
+      dictates the order.
+
+      +  for (const op of operations) {
+
+      +    if (op.type === 'delete') {
+
+      +      await deleteFile(op.path, cwd);
+
+      +    } else if (op.type === 'rename') {
+
+      +      await renameFile(op.from, op.to, cwd);
+
+      +    } else if (op.type === 'write') {
+
+      +      const newContent = result.newFileStates.get(op.path);
+
+      +      if (typeof newContent === 'string') {
+
+      +        await writeFileContent(op.path, newContent, cwd);
+
+      +      }
+           }
+      -    const content = await readFileContent(filePath, cwd);
+
+      -    fileStates.set(filePath, content);
+
+      -    return content;
+
+      -  };
+
+      -
+
+      -  // Operations must be applied sequentially to ensure that if one fails,
+
+      -  // we can roll back from a known state.
+
+      -  for (const op of operations) {
+
+      -    if (op.type === 'delete') {
+
+      -      await deleteFile(op.path, cwd);
+
+      -      fileStates.set(op.path, null);
+
+      -      continue;
+
+      -    }
+
+      -    if (op.type === 'rename') {
+
+      -      const content = await getFileContent(op.from);
+
+      -      await renameFile(op.from, op.to, cwd);
+
+      -      fileStates.set(op.from, null);
+
+      -      if (content !== null) {
+
+      -        fileStates.set(op.to, content);
+
+      -      }
+
+      -      // Propagate the change to newContents map if the source file was
+      modified in this transaction
+
+      -      if (newContents.has(op.from)) {
+
+      -        newContents.set(op.to, newContents.get(op.from)!);
+
+      -        newContents.delete(op.from);
+
+      -      }
+
+      -      continue;
+
+      -    }
+
+      -    
+
+      -    let finalContent: string;
+
+      -    const currentContent = await getFileContent(op.path);
+
+      -
+
+      -    if (op.patchStrategy === 'replace') {
+
+      -      finalContent = op.content;
+
+      -    } else {
+
+      -      if (currentContent === null && op.patchStrategy ===
+      'multi-search-replace') {
+
+      -        throw new Error(`Cannot use 'multi-search-replace' on a new file:
+      ${op.path}`);
+
+      -      }
+
+      -
+
+      -      try {
+
+      -        const diffParams = {
+
+      -          originalContent: currentContent ?? '',
+
+      -          diffContent: op.content,
+
+      -        };
+
+      -        
+
+      -        const patcher = patchStrategies[op.patchStrategy as keyof typeof
+      patchStrategies];
+
+      -        if (!patcher) {
+
+      -          throw new Error(`Unknown patch strategy:
+      '${op.patchStrategy}'`);
+
+      -        }
+
+      -        
+
+      -        const result = await patcher(diffParams);
+
+      -        if (result.success) {
+
+      -          finalContent = result.content;
+
+      -        } else {
+
+      -          throw new Error(`Patch failed for ${op.path}:
+      ${result.error}`);
+
+      -        }
+
+      -      } catch (e) {
+
+      -        throw new Error(`Error applying patch for ${op.path} with
+      strategy '${op.patchStrategy}': ${getErrorMessage(e)}`);
+
+      -      }
+
+      -    }
+
+      -    
+
+      -    await writeFileContent(op.path, finalContent, cwd);
+
+      -    fileStates.set(op.path, finalContent);
+
+      -    newContents.set(op.path, finalContent);
+         }
+      -  return newContents;
+
+      +  return result.newFileStates;
+       };
+       
+       export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string = process.cwd()): Promise<void> => {
+      @@ -155,51 +87,14 @@
+         }
+       };
+       
+      -// Space-optimized LCS length calculation to determine line changes
+      accurately.
+
+      -const calculateLcsLength = (a: string[], b: string[]): number => {
+
+      -    let s1 = a;
+
+      -    let s2 = b;
+
+      -    // s2 should be the shorter string to optimize space for the DP
+      table.
+
+      -    if (s1.length < s2.length) {
+
+      -        [s1, s2] = [s2, s1];
+
+      -    }
+
+      -    const m = s1.length;
+
+      -    const n = s2.length;
+
+      -    
+
+      -    const dp = Array(n + 1).fill(0);
+
+      -
+
+      -    for (let i = 1; i <= m; i++) {
+
+      -        let prev = 0; // stores dp[i-1][j-1]
+
+      -        for (let j = 1; j <= n; j++) {
+
+      -            const temp = dp[j]; // stores dp[i-1][j]
+
+      -            if (s1[i - 1] === s2[j - 1]) {
+
+      -                dp[j] = prev + 1;
+
+      -            } else {
+
+      -                dp[j] = Math.max(dp[j], dp[j - 1]);
+
+      -            }
+
+      -            prev = temp;
+
+      -        }
+
+      -    }
+
+      -    return dp[n];
+
+      -};
+
+      -
+       const calculateLineChanges = (
+           op: FileOperation,
+      -    snapshot: FileSnapshot,
+
+      -    newContents: Map<string, string>
+
+      +    originalFiles: Map<string, string | null>,
+
+      +    newFiles: Map<string, string | null>
+       ): { added: number; removed: number } => {
+      -    if (op.type === 'rename') {
+
+      -        return { added: 0, removed: 0 };
+
+      -    }
+
+      -    const oldContent = snapshot[op.path] ?? null;
+
+      -
+
+      -    if (op.type === 'delete') {
+
+      -        const oldLines = oldContent ? oldContent.split('\n') : [];
+
+      -        return { added: 0, removed: oldLines.length };
+
+      -    }
+
+      -    
+
+      -    const newContent = newContents.get(op.path) ?? null;
+
+      -
+
+      -    if (oldContent === newContent) return { added: 0, removed: 0 };
+
+      -
+
+      -    const oldLines = oldContent?.split('\n') ?? [];
+
+      -    const newLines = newContent?.split('\n') ?? [];
+
+      -
+
+      -    if (oldContent === null || oldContent === '') return { added:
+      newLines.length, removed: 0 };
+
+      -    if (newContent === null || newContent === '') return { added: 0,
+      removed: oldLines.length };
+
+      -    
+
+      -    // Use LCS to get a more accurate line diff count.
+
+      -    const lcsLength = calculateLcsLength(oldLines, newLines);
+
+      -    return {
+
+      -        added: newLines.length - lcsLength,
+
+      -        removed: oldLines.length - lcsLength,
+
+      -    };
+
+      +    // Simply delegate to the core function.
+
+      +    // The core function's signature is slightly different, but it serves
+      the same purpose.
+
+      +    return calculateLineChangesCore(op, originalFiles, newFiles);
+       };
+       
+       const logCompletionSummary = (
+      @@ -348,12 +243,16 @@
+               await writePendingState(cwd, stateFile);
+               logger.success('  - Staged changes to .pending.yml file.');
+       
+      +        const originalFiles = new Map<string, string | null>();
+
+      +        affectedFilePaths.forEach(p => originalFiles.set(p, snapshot[p]
+      ?? null));
+
+      +
+               // Apply changes
+               logger.log('  - Applying file operations...');
+      -        const newContents = await applyOperations(operations, cwd);
+
+      +        const newFileStates = await applyOperations(operations,
+      originalFiles, cwd);
+               logger.success('  - File operations complete.');
+       
+               const opStats = operations.map(op => {
+      -            const stats = calculateLineChanges(op, snapshot,
+      newContents);
+
+      +            const stats = calculateLineChanges(op, originalFiles,
+      newFileStates);
+                   if (op.type === 'write') {
+                       logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                   } else if (op.type === 'delete') {
+    patchStrategy: new-unified
+  - type: write
+    path: src/index.ts
+    content: |-
+      --- src/index.ts
+      +++ src/index.ts
+      @@ -16,7 +16,7 @@
+       export { gitCommitCommand } from './commands/git-commit';
+       
+       // Types
+      -export * from './types';
+      +export * from 'relaycode-core';
+       
+       // Utils
+       export { executeShellCommand, getErrorCount } from './utils/shell';
+    patchStrategy: new-unified
+snapshot:
+  package.json: |
+    {
+      "name": "relaycode",
+      "version": "1.0.38",
+      "description": "A developer assistant that automates applying code changes from LLMs.",
+      "type": "module",
+      "main": "./dist/index.js",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "bin": {
+        "relay": "./dist/cli.js"
+      },
+      "files": [
+        "dist",
+        "fallbacks"
+      ],
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+      },
+      "scripts": {
+        "clean": "rm -rf dist",
+        "build": "bun run clean && bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target node",
+        "test": "bun test",
+        "dev": "bun run src/cli.ts",
+        "prepublishOnly": "bun run build",
+        "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+        "commit": "bun run src/cli.ts git commit -y && git push"
+      },
+      "dependencies": {
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "diff-apply": "^1.0.6",
+        "esbuild": "0.25.6",
+        "js-yaml": "^4.1.0",
+        "konro": "^0.1.15",
+        "toasted-notifier": "^10.1.0",
+        "typescript": "^5.8.3",
+        "uuid": "^11.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/uuid": "^10.0.0"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "automation",
+        "codegen",
+        "developer-tool",
+        "cli"
+      ],
+      "author": "Relay Code",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/relaycoder/relaycode.git"
+      },
+      "homepage": "https://relay.code"
+    }
+  src/types.ts: >-
+    import { z } from 'zod';
+
+
+    export const LogLevelNameSchema = z.enum(['silent', 'error', 'warn', 'info',
+    'debug']).default('info');
+
+    export type LogLevelName = z.infer<typeof LogLevelNameSchema>;
+
+
+    // Schema for relaycode.config.json
+
+    const CoreConfigSchema = z.object({
+      logLevel: LogLevelNameSchema,
+      enableNotifications: z.boolean().default(true),
+      watchConfig: z.boolean().default(true),
+    });
+
+
+    const WatcherConfigSchema = z.object({
+      clipboardPollInterval: z.number().int().positive().default(2000),
+      preferredStrategy: z.enum(['auto', 'replace', 'new-unified', 'multi-search-replace']).default('auto'),
+    });
+
+
+    const PatchConfigSchema = z.object({
+      approvalMode: z.enum(['auto', 'manual']).default('auto'),
+      approvalOnErrorCount: z.number().int().min(0).default(0),
+      linter: z.string().default('bun tsc --noEmit'),
+      preCommand: z.string().default(''),
+      postCommand: z.string().default(''),
+      minFileChanges: z.number().int().min(0).default(0),
+      maxFileChanges: z.number().int().min(1).optional(),
+    });
+
+
+    const GitConfigSchema = z.object({
+      autoGitBranch: z.boolean().default(false),
+      gitBranchPrefix: z.string().default('relay/'),
+      gitBranchTemplate: z.enum(['uuid', 'gitCommitMsg']).default('gitCommitMsg'),
+    });
+
+
+    const BaseConfigSchema = z.object({
+      projectId: z.string().min(1),
+      core: CoreConfigSchema,
+      watcher: WatcherConfigSchema,
+      patch: PatchConfigSchema,
+      git: GitConfigSchema,
+    });
+
+
+    export const ConfigSchema = BaseConfigSchema.deepPartial().extend({
+      projectId: z.string().min(1),
+    }).transform(val => ({
+      projectId: val.projectId,
+      core: CoreConfigSchema.parse(val.core ?? {}),
+      watcher: WatcherConfigSchema.parse(val.watcher ?? {}),
+      patch: PatchConfigSchema.parse(val.patch ?? {}),
+      git: GitConfigSchema.parse(val.git ?? {}),
+    }));
+
+    export type Config = z.infer<typeof ConfigSchema>;
+
+
+    export type RelayCodeConfigInput = z.input<typeof ConfigSchema>;
+
+    export const defineConfig = (config: RelayCodeConfigInput):
+    RelayCodeConfigInput => config;
+
+
+    export const PatchStrategySchema = z.enum([
+      'replace',
+      'new-unified',
+      'multi-search-replace',
+      'unified',
+    ]).default('replace');
+
+    export type PatchStrategy = z.infer<typeof PatchStrategySchema>;
+
+
+    // Schema for operations parsed from code blocks
+
+    export const FileOperationSchema = z.union([
+      z.object({
+        type: z.literal('write'),
+        path: z.string(),
+        content: z.string(),
+        patchStrategy: PatchStrategySchema,
+      }),
+      z.object({
+        type: z.literal('delete'),
+        path: z.string(),
+      }),
+      z.object({
+        type: z.literal('rename'),
+        from: z.string(),
+        to: z.string(),
+      }),
+    ]);
+
+    export type FileOperation = z.infer<typeof FileOperationSchema>;
+
+
+    // Schema for the control YAML block at the end of the LLM response
+
+    export const ControlYamlSchema = z.object({
+      projectId: z.string(),
+      uuid: z.string().uuid(),
+      changeSummary: z.array(z.record(z.string(), z.string())).optional(), // Not strictly used, but good to parse
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+    });
+
+    export type ControlYaml = z.infer<typeof ControlYamlSchema>;
+
+
+    // The fully parsed response from the clipboard
+
+    export const ParsedLLMResponseSchema = z.object({
+      control: ControlYamlSchema,
+      operations: z.array(FileOperationSchema),
+      reasoning: z.array(z.string()),
+    });
+
+    export type ParsedLLMResponse = z.infer<typeof ParsedLLMResponseSchema>;
+
+
+    // Schema for the snapshot of original files
+
+    export const FileSnapshotSchema = z.record(z.string(),
+    z.string().nullable()); // path -> content | null (if file didn't exist)
+
+    export type FileSnapshot = z.infer<typeof FileSnapshotSchema>;
+
+
+    // Schema for the state file (.relaycode/{uuid}.yml or .pending.yml)
+
+    export const StateFileSchema = z.object({
+      uuid: z.string().uuid(),
+      projectId: z.string(),
+      createdAt: z.string().datetime(),
+      linesAdded: z.number().int().optional(),
+      linesRemoved: z.number().int().optional(),
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+      reasoning: z.array(z.string()),
+      operations: z.array(FileOperationSchema),
+      snapshot: FileSnapshotSchema,
+      approved: z.boolean(),
+    });
+
+    export type StateFile = z.infer<typeof StateFileSchema>;
+
+
+    // Shell command execution result
+
+    export const ShellCommandResultSchema = z.object({
+        stdout: z.string(),
+        stderr: z.string(),
+        exitCode: z.number().nullable(),
+    });
+
+    export type ShellCommandResult = z.infer<typeof ShellCommandResultSchema>;
+  src/core/parser.ts: >-
+    import yaml from 'js-yaml';
+
+    import { z } from 'zod';
+
+    import {
+        ControlYamlSchema,
+        FileOperation,
+        ParsedLLMResponse,
+        ParsedLLMResponseSchema,
+        PatchStrategy,
+        PatchStrategySchema,
+    } from '../types';
+
+    import {
+        CODE_BLOCK_START_MARKER,
+        CODE_BLOCK_END_MARKER,
+        DELETE_FILE_MARKER,
+        RENAME_FILE_OPERATION
+    } from '../utils/constants';
+
+    import { getErrorMessage, logger } from '../utils/logger';
+
+
+    const CODE_BLOCK_REGEX =
+    /```(?:\w+)?(?:\s*\/\/\s*(.*?)|\s+(.*?))?[\r\n]([\s\S]*?)[\r\n]```/g;
+
+
+    type ParsedHeader = {
+        filePath: string;
+        patchStrategy: PatchStrategy | null;
+    };
+
+
+    const extractCodeBetweenMarkers = (content: string): string => {
+        const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);
+        const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);    
+        
+        let relevantContent = content;
+        if (startMarkerIndex !== -1 && endMarkerIndex !== -1 && endMarkerIndex > startMarkerIndex) {
+            relevantContent = content.substring(startMarkerIndex + CODE_BLOCK_START_MARKER.length, endMarkerIndex);
+        }
+        
+        return relevantContent.trim().replace(/\r\n/g, '\n');
+    };
+
+
+    const parseCodeBlockHeader = (headerLine: string): ParsedHeader | null => {
+        const quotedMatch = headerLine.match(/^"(.+?)"(?:\s+(.*))?$/);
+        if (quotedMatch) {
+            const filePath = quotedMatch[1]!;
+            const strategyStr = (quotedMatch[2] || '').trim();
+            if (strategyStr) {
+                const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+                if (!parsedStrategy.success) {
+                    logger.debug(`Invalid patch strategy for quoted path: ${strategyStr}`);
+                    return null;
+                }
+                return { filePath, patchStrategy: parsedStrategy.data };
+            }
+            return { filePath, patchStrategy: null };
+        }
+
+        const parts = headerLine.split(/\s+/);
+        if (parts.length === 1 && parts[0]) {
+            return { filePath: parts[0], patchStrategy: null };
+        }
+        if (parts.length === 2 && parts[0] && parts[1]) {
+            const parsedStrategy = PatchStrategySchema.safeParse(parts[1]);
+            if (parsedStrategy.success) {
+                return { filePath: parts[0], patchStrategy: parsedStrategy.data };
+            } else {
+                logger.debug(`Treating entire header as file path since second word is not a valid strategy: "${headerLine}"`);
+                return { filePath: headerLine, patchStrategy: null };
+            }
+        }
+
+        if (parts.length > 2) {
+            logger.debug(`Skipping unquoted header with more than 2 words: "${headerLine}"`);
+            return null;
+        }
+
+        return null; // For empty or invalid header
+    };
+
+
+    const inferPatchStrategy = (content: string, providedStrategy: PatchStrategy
+    | null): PatchStrategy => {
+        if (providedStrategy) return providedStrategy;
+        if (/^<<<<<<< SEARCH\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) return 'multi-search-replace';
+        if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) return 'new-unified';
+        return 'replace';
+    };
+
+
+    const extractAndParseYaml = (rawText: string) => {
+        // Strategy 1: Find all fenced YAML blocks and try to parse the last one.
+        const yamlBlockMatches = [...rawText.matchAll(/```\s*(?:yaml|yml)[\r\n]([\s\S]+?)```/gi)];
+
+        if (yamlBlockMatches.length > 0) {
+            const lastMatch = yamlBlockMatches[yamlBlockMatches.length - 1]!;
+            try {
+                const yamlContent: unknown = yaml.load(lastMatch[1]!);
+                const control = ControlYamlSchema.parse(yamlContent);
+                // Success! This is our control block.
+                const textWithoutYaml = rawText.substring(0, lastMatch.index) + rawText.substring(lastMatch.index! + lastMatch[0].length);
+                return { control, textWithoutYaml: textWithoutYaml.trim() };
+            } catch (e) {
+                // The last block was not a valid control block.
+                // We will now fall through to the non-fenced strategy, assuming the fenced block was just an example.
+                logger.debug(`Last fenced YAML block was not a valid control block, trying non-fenced. Error: ${getErrorMessage(e)}`);
+            }
+        }
+
+        // Strategy 2: Look for a non-fenced block at the end.
+        const lines = rawText.trim().split('\n');
+        let yamlStartIndex = -1;
+        // Heuristic: project ID is required, so we look for that.
+        const searchLimit = Math.max(0, lines.length - 20);
+        for (let i = lines.length - 1; i >= searchLimit; i--) {
+            if (lines[i]?.trim().match(/^projectId:/)) {
+                yamlStartIndex = i;
+                break;
+            }
+        }
+
+        if (yamlStartIndex !== -1) {
+            const yamlText = lines.slice(yamlStartIndex).join('\n');
+            try {
+                const yamlContent: unknown = yaml.load(yamlText);
+                const control = ControlYamlSchema.parse(yamlContent);
+                // Success!
+                const textWithoutYaml = lines.slice(0, yamlStartIndex).join('\n');
+                return { control, textWithoutYaml: textWithoutYaml.trim() };
+            } catch (e) {
+                logger.debug(`Non-fenced YAML block at the end was not a valid control block. Error: ${getErrorMessage(e)}`);
+            }
+        }
+        
+        // If both strategies fail, there's no valid control block.
+        return { control: null, textWithoutYaml: rawText };
+    };
+
+
+    const parseCodeBlock = (match: RegExpExecArray): { operation: FileOperation,
+    fullMatch: string } | null => {
+        const [fullMatch, commentHeaderLine, spaceHeaderLine, rawContent] = match;
+        const headerLine = (commentHeaderLine || spaceHeaderLine || '').trim();
+        const content = (rawContent || '').trim();
+
+        if (!headerLine) return null;
+
+        if (headerLine === RENAME_FILE_OPERATION) {
+            try {
+                const { from, to } = z.object({ from: z.string().min(1), to: z.string().min(1) }).parse(JSON.parse(content));
+                return { operation: { type: 'rename', from, to }, fullMatch };
+            } catch (e) {
+                logger.debug(`Invalid rename operation content: ${getErrorMessage(e)}`);
+                return null;
+            }
+        }
+
+        const parsedHeader = parseCodeBlockHeader(headerLine);
+        if (!parsedHeader) {
+            logger.debug(`Could not parse header: ${headerLine}`);
+            return null;
+        }
+
+        const { filePath } = parsedHeader;
+
+        if (content === DELETE_FILE_MARKER) {
+            return { operation: { type: 'delete', path: filePath }, fullMatch };
+        }
+
+        const patchStrategy = inferPatchStrategy(content, parsedHeader.patchStrategy);
+        const cleanContent = extractCodeBetweenMarkers(content);
+
+        return {
+            operation: { type: 'write', path: filePath, content: cleanContent, patchStrategy }, 
+            fullMatch
+        };
+    };
+
+
+    export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null
+    => {
+        logger.debug('Parsing LLM response...');
+        const { control, textWithoutYaml } = extractAndParseYaml(rawText);
+
+        if (!control) {
+            logger.debug('Could not parse control YAML from response.');
+            return null;
+        }
+
+        const operations: FileOperation[] = [];
+        const matchedBlocks: string[] = [];
+        let match;
+
+        while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+            const result = parseCodeBlock(match);
+            if (result) {
+                operations.push(result.operation);
+                matchedBlocks.push(result.fullMatch);
+            }
+        }
+
+        if (operations.length === 0) {
+            logger.debug('No valid operations found in response.');
+            return null;
+        }
+
+        let reasoningText = textWithoutYaml;
+        for (const block of matchedBlocks) {
+            reasoningText = reasoningText.replace(block, '');
+        }
+        const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+
+        try {
+            const parsedResponse = ParsedLLMResponseSchema.parse({ control, operations, reasoning });
+            logger.debug('Successfully parsed LLM response.');
+            return parsedResponse;
+        } catch (e) {
+            logger.debug(`Final validation failed: ${getErrorMessage(e)}`);
+            return null;
+        }
+    };
+  src/commands/apply.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { loadConfigOrExit } from '../core/config';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import chalk from 'chalk';
+
+
+    export const applyCommand = async (filePath: string, options: { yes?:
+    boolean } = {}, cwd: string = process.cwd()): Promise<void> => {
+        const config = await loadConfigOrExit(cwd);
+        logger.setLevel(config.core.logLevel);
+
+        let content: string;
+        const absoluteFilePath = path.resolve(cwd, filePath);
+        try {
+            content = await fs.readFile(absoluteFilePath, 'utf-8');
+            logger.info(`Reading patch from file: ${chalk.cyan(absoluteFilePath)}`);
+        } catch (error) {
+            logger.error(`Failed to read patch file at '${chalk.cyan(absoluteFilePath)}'. Aborting.`);
+            return;
+        }
+
+        logger.info('Attempting to parse patch file...');
+        const parsedResponse = parseLLMResponse(content);
+
+        if (!parsedResponse) {
+            logger.error('The content of the file is not a valid relaycode patch. Aborting.');
+            return;
+        }
+
+        logger.success('Valid patch format detected. Processing...');
+        await processPatch(config, parsedResponse, { cwd, yes: options.yes });
+        logger.info(chalk.gray('--------------------------------------------------'));
+    };
+  src/commands/watch.ts: >-
+    import { findConfig, loadConfigOrExit, findConfigPath } from
+    '../core/config';
+
+    import { createClipboardWatcher } from '../core/clipboard';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { Config } from '../types';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+
+    const getSystemPrompt = (
+        projectId: string,
+        preferredStrategy: Config['watcher']['preferredStrategy'],
+        patchConfig: Config['patch'],
+    ): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+        const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+        const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+    \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+    the \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+    ...
+
+    \`\`\``;
+
+        const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+        const syntaxNewUnified = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath new-unified
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+        const syntaxMultiSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath multi-search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`multi-search-replace\` patch strategy for all
+    modifications.`;
+
+        const sectionNewUnified = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+        const sectionMultiSearchReplace = `---
+
+    ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+        const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+        const finalSteps_rules = [];
+        if (patchConfig.minFileChanges > 0) {
+            finalSteps_rules.push(`You must modify at least ${patchConfig.minFileChanges} file(s) in this transaction.`);
+        }
+        if (patchConfig.maxFileChanges) {
+            finalSteps_rules.push(`You must not modify more than ${patchConfig.maxFileChanges} file(s) in this transaction.`);
+        }
+
+        const finalSteps_list = [
+            'Add your step-by-step reasoning in plain text before each code block.',
+        ];
+        if (finalSteps_rules.length > 0) {
+            finalSteps_list.push(`Adhere to file limits: ${finalSteps_rules.join(' ')}`);
+        }
+        finalSteps_list.push('ALWAYS add the following YAML block at the very end of your response. Use the exact projectId shown here. Generate a new random uuid for each response.');
+
+        const finalSteps_list_string = finalSteps_list.map((item, index) => `${index + 1}.  ${item}`).join('\n');
+
+        const finalSteps = `---
+
+    ### Final Steps
+
+
+    ${finalSteps_list_string}
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary:
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: "A brief summary of my request."
+        gitCommitMsg: "feat: A concise, imperative git commit message."
+        \`\`\`
+    `;
+        
+        const footer = `---------------------------------------------------------------------------`;
+
+        const strategyInfo = {
+            auto: { syntax: syntaxAuto, details: `${sectionNewUnified}\n${sectionMultiSearchReplace}` },
+            replace: { syntax: syntaxReplace, details: '' },
+            'new-unified': { syntax: syntaxNewUnified, details: sectionNewUnified },
+            'multi-search-replace': { syntax: syntaxMultiSearchReplace, details: sectionMultiSearchReplace },
+        };
+
+        const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
+        const syntax = preferred.syntax;
+        const strategyDetails = preferred.details;
+
+        return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    };
+
+
+    export const watchCommand = async (options: { yes?: boolean } = {}, cwd:
+    string = process.cwd()): Promise<{ stop: () => void }> => {
+      let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+      let configWatcher: fs.FSWatcher | null = null;
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.core.logLevel);
+        logger.debug(`Log level set to: ${config.core.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.watcher.preferredStrategy, config.patch));
+
+        clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+          logger.info('New clipboard content detected. Attempting to parse...');
+          const parsedResponse = parseLLMResponse(content);
+
+          if (!parsedResponse) {
+            logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+            return;
+          }
+
+          // Check project ID before notifying and processing.
+          if (parsedResponse.control.projectId !== config.projectId) {
+            logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+            return;
+          }
+
+          await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+          logger.info('--------------------------------------------------');
+          logger.info('Watching for next patch...');
+        });
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`Configuration file is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      const configPath = await findConfigPath(cwd);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      if (initialConfig.core.watchConfig && configPath) {
+        logger.info(`Configuration file watching is enabled for ${path.basename(configPath)}.`);
+        configWatcher = fs.watch(configPath, handleConfigChange);
+      } else {
+        logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');
+      }
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+  src/core/config.ts: "import { z } from 'zod';\r\nimport path from 'path';\r\nimport { promises as fs } from 'fs';\r\nimport { Config, ConfigSchema } from '../types';\r\nimport { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, CONFIG_FILE_NAME_JSON } from '../utils/constants';\r\nimport { logger, isEnoentError } from '../utils/logger';\r\nimport chalk from 'chalk';\r\n\r\nexport const findConfigPath = async (cwd: string = process.cwd()): Promise<string | null> => {\r\n  for (const fileName of CONFIG_FILE_NAMES) {\r\n    const configPath = path.join(cwd, fileName);\r\n    try {\r\n      await fs.access(configPath);\r\n      return configPath;\r\n    } catch (error) {\r\n      if (!isEnoentError(error)) {\r\n        // ignore other errors for now to keep searching\r\n      }\r\n    }\r\n  }\r\n  return null;\r\n};\r\n\r\nexport const findConfig = async (cwd: string = process.cwd()): Promise<Config | null> => {\r\n  const configPath = await findConfigPath(cwd);\r\n  if (!configPath) {\r\n    return null;\r\n  }\r\n  try {\r\n    const fileContent = await fs.readFile(configPath, 'utf-8');\r\n    const configJson = JSON.parse(fileContent);\r\n    return ConfigSchema.parse(configJson);\r\n  } catch (error) {\r\n    if (isEnoentError(error)) {\r\n      return null;\r\n    }\r\n    if (error instanceof z.ZodError) {\r\n      throw new Error(`Invalid configuration in ${path.basename(configPath)}: ${error.message}`);\r\n    }\r\n    throw error;\r\n  }\r\n};\r\n\r\nexport const loadConfigOrExit = async (cwd: string = process.cwd()): Promise<Config> => {\r\n  const config = await findConfig(cwd);\r\n  if (!config) {\r\n    logger.error(`Configuration file ('${chalk.cyan(CONFIG_FILE_NAME_JSON)}') not found.`);\r\n    logger.info(`Please run ${chalk.magenta(\"'relay init'\")} to create one.`);\r\n    process.exit(1);\r\n  }\r\n  return config;\r\n};\r\n\r\nconst stateDirectoryCache = new Map<string, boolean>();\r\n\r\nexport const getStateDirectory = (cwd: string) => path.resolve(cwd, STATE_DIRECTORY_NAME);\r\n\r\nexport const ensureStateDirExists = async (cwd: string = process.cwd()): Promise<void> => {\r\n  const stateDirPath = getStateDirectory(cwd);\r\n  if (!stateDirectoryCache.has(stateDirPath)) {\r\n    await fs.mkdir(stateDirPath, { recursive: true });\r\n    stateDirectoryCache.set(stateDirPath, true);\r\n  }\r\n};\r\n\r\nexport const createConfig = async (projectId: string, cwd: string = process.cwd()): Promise<Config> => {\r\n  \r\n  const defaultConfig = ConfigSchema.parse({ projectId });\r\n\r\n  const configContent = {\r\n    $schema: \"https://relay-code.dev/schema.json\",\r\n    ...defaultConfig\r\n  };\r\n\r\n  const configPath = path.join(cwd, CONFIG_FILE_NAME_JSON);\r\n  await fs.writeFile(configPath, JSON.stringify(configContent, null, 2));\r\n\r\n  return configContent;\r\n};\r\n\r\nexport const getProjectId = async (cwd: string = process.cwd()): Promise<string> => {\r\n  try {\r\n    const pkgJsonPath = path.join(cwd, 'package.json');\r\n    const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');\r\n    const pkgJson = JSON.parse(fileContent);\r\n    if (pkgJson.name && typeof pkgJson.name === 'string') {\r\n      return pkgJson.name;\r\n    }\r\n  } catch (e) {\r\n    // Ignore if package.json doesn't exist or is invalid\r\n  }\r\n  return path.basename(cwd);\r\n};\r\n"
+  src/core/db.ts: >-
+    import { konro } from 'konro';
+
+    import type { FileOperation, FileSnapshot, StateFile } from '../types';
+
+    import path from 'path';
+
+    import { getStateDirectory } from './config';
+
+    import type { OnDemandDbContext } from 'konro';
+
+
+    export const relaySchema = konro.createSchema({
+      tables: {
+        transactions: {
+          id: konro.id(),
+          uuid: konro.string({ unique: true }),
+          projectId: konro.string(),
+          createdAt: konro.string(), // store as ISO string
+          linesAdded: konro.number({ optional: true }),
+          linesRemoved: konro.number({ optional: true }),
+          gitCommitMsg: konro.string({ optional: true }),
+          promptSummary: konro.string({ optional: true }),
+          reasoning: konro.object<string[]>(),
+          operations: konro.object<FileOperation[]>(),
+          snapshot: konro.object<FileSnapshot>(),
+          approved: konro.boolean(),
+          status: konro.string(), // 'pending', 'committed', 'undone'
+        },
+      },
+      relations: () => ({}),
+    });
+
+
+    export type RelaySchema = typeof relaySchema;
+
+    // This is the type inferred by konro for a base record.
+
+    export type TransactionRecord = RelaySchema['base']['transactions'];
+
+
+    // We need to convert between TransactionRecord and StateFile because
+    StateFile is a Zod-validated type
+
+    // and TransactionRecord is konro's inferred type. They should be
+    structurally identical.
+
+    // This function also handles type casting for complex object types.
+
+    export function toStateFile(record: TransactionRecord): StateFile {
+      return record as unknown as StateFile;
+    }
+
+
+    export function fromStateFile(stateFile: StateFile): Omit<TransactionRecord,
+    'id' | 'status'> {
+      const { ...rest } = stateFile;
+      // status will be added separately
+      return rest;
+    }
+
+
+    let dbInstance: OnDemandDbContext<RelaySchema> | undefined;
+
+
+    export function getDb(cwd: string): OnDemandDbContext<RelaySchema> {
+      if (dbInstance) {
+        return dbInstance;
+      }
+
+      const dbDir = path.join(getStateDirectory(cwd), 'db');
+
+      const adapter = konro.createFileAdapter({
+        format: 'json',
+        perRecord: { dir: dbDir },
+        mode: 'on-demand',
+      });
+
+      const db = konro.createDatabase({ schema: relaySchema, adapter });
+      dbInstance = db as OnDemandDbContext<RelaySchema>; // cast because createDatabase returns a generic DbContext
+      return dbInstance;
+    }
+  src/core/state.ts: >-
+    import { StateFile } from '../types';
+
+    import { logger } from '../utils/logger';
+
+    import { getDb, toStateFile, fromStateFile } from './db';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { getStateDirectory } from './config';
+
+
+    export const isRevertTransaction = (state: StateFile): boolean => {
+        return state.reasoning.some(r => r.startsWith('Reverting transaction'));
+    }
+
+
+    export const getRevertedTransactionUuid = (state: StateFile): string | null
+    => {
+        for (const r of state.reasoning) {
+            const match = r.match(/^Reverting transaction ([\w-]+)\./);
+            if (match && match[1]) {
+                return match[1];
+            }
+        }
+        return null;
+    }
+
+
+    const isUUID = (str: string): boolean => {
+      return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+    };
+
+
+    const sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt:
+    string | Date }) => {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const db = getDb(cwd);
+      const record = await db.query().from('transactions').where({ uuid }).first();
+      // A transaction has been processed if it exists and is either committed or undone.
+      // A pending transaction has not been fully processed.
+      return !!record && (record.status === 'committed' || record.status === 'undone');
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const db = getDb(cwd);
+      const data = {
+        ...fromStateFile(state),
+        status: 'pending',
+      };
+      await db.insert('transactions', data as any);
+    };
+
+
+    export const updatePendingState = async (cwd:string, state: StateFile):
+    Promise<void> => {
+        const db = getDb(cwd);
+        const data = fromStateFile(state);
+        const updated = await db.update('transactions').set(data as any).where({ uuid: state.uuid, status: 'pending' });
+        if (updated.length === 0) {
+            logger.warn(`Could not find pending transaction with uuid ${state.uuid} to update.`);
+        }
+    }
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const db = getDb(cwd);
+      // Also update status from 'pending' to 'committed'
+      const updated = await db.update('transactions').set({ status: 'committed' }).where({ uuid, status: 'pending' });
+      if (updated.length === 0) {
+          logger.warn(`Could not find pending transaction with uuid ${uuid} to commit.`);
+      }
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const db = getDb(cwd);
+      // In case of rollback, we mark it as 'undone' instead of deleting.
+      const updated = await db.update('transactions').set({ status: 'undone' }).where({ uuid, status: 'pending' });
+      if (updated.length === 0) {
+        logger.debug(`Could not find pending transaction with uuid ${uuid} to mark as undone. It might have been committed or already undone.`);
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const db = getDb(cwd);
+      const record = await db.query().from('transactions').where({ uuid, status: 'committed' }).first();
+      return record ? toStateFile(record) : null;
+    };
+
+
+    interface ReadStateFilesOptions {
+        skipReverts?: boolean;
+    }
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd(),
+    options: ReadStateFilesOptions = {}): Promise<StateFile[] | null> => {
+        const dbDir = path.join(getStateDirectory(cwd), 'db');
+        try {
+            await fs.access(dbDir);
+        } catch {
+            return null; // DB directory does not exist, so not initialized
+        }
+
+        const db = getDb(cwd);
+        let records = await db.query().from('transactions').where({ status: 'committed' }).all();
+        
+        if (!records) return [];
+        
+        let validResults = records.map(toStateFile);
+
+        if (options.skipReverts) {
+            const revertedUuids = new Set<string>();
+            validResults.forEach(sf => {
+                if (isRevertTransaction(sf)) {
+                    const revertedUuid = getRevertedTransactionUuid(sf);
+                    if (revertedUuid) {
+                        revertedUuids.add(revertedUuid);
+                    }
+                }
+            });
+
+            validResults = validResults.filter(sf => 
+                !isRevertTransaction(sf) && !revertedUuids.has(sf.uuid)
+            );
+        }
+
+        // Sort transactions by date, most recent first
+        validResults.sort(sortByDateDesc);
+
+        return validResults;
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd(),
+    options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {
+        const allFiles = await readAllStateFiles(cwd, options);
+        return allFiles?.[0] ?? null;
+    };
+
+
+    export const findStateFileByIdentifier = async (cwd: string, identifier:
+    string, options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {
+        if (isUUID(identifier)) {
+            // When fetching by UUID, we always return it if committed, regardless of whether it's a revert or not.
+            const db = getDb(cwd);
+            const record = await db.query().from('transactions').where({ uuid: identifier, status: 'committed' }).first();
+            return record ? toStateFile(record) : null;
+        }
+        
+        if (/^-?\d+$/.test(identifier)) {
+            const index = Math.abs(parseInt(identifier, 10));
+            if (isNaN(index) || index <= 0) {
+                return null;
+            }
+
+            const transactions = await readAllStateFiles(cwd, options);
+            if (transactions && transactions.length >= index) {
+                return transactions[index - 1] ?? null;
+            }
+            return null;
+        }
+
+        return null;
+    };
+  src/utils/formatters.ts: |-
+    import chalk from 'chalk';
+    import { FileOperation, StateFile } from '../types';
+
+    const opToString = (op: FileOperation): string => {
+        switch (op.type) {
+            case 'write': return `${chalk.green('write')}:  ${chalk.cyan(op.path)}`;
+            case 'delete': return `${chalk.red('delete')}: ${chalk.cyan(op.path)}`;
+            case 'rename': return `${chalk.yellow('rename')}: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`;
+        }
+    };
+
+    export const formatTransactionDetails = (
+        tx: StateFile,
+        options: { showOperations?: boolean, showSpacing?: boolean, showReasoning?: boolean } = {}
+    ): string[] => {
+        const { showOperations, showSpacing, showReasoning = true } = options;
+        const lines: string[] = [
+            `- ${chalk.bold('UUID')}: ${chalk.gray(tx.uuid)}`,
+            `  ${chalk.bold('Date')}: ${new Date(tx.createdAt).toLocaleString()}`,
+        ];
+
+        if (tx.promptSummary) lines.push(`  ${chalk.bold('Prompt Summary')}: ${tx.promptSummary}`);
+        if (tx.gitCommitMsg) lines.push(`  ${chalk.bold('Git Commit')}: "${tx.gitCommitMsg}"`);
+
+        if (showReasoning && tx.reasoning && tx.reasoning.length > 0) {
+            lines.push(`  ${chalk.bold('Reasoning')}:`);
+            tx.reasoning.forEach(r => lines.push(`    - ${r}`));
+        }
+        if (showOperations && tx.operations && tx.operations.length > 0) {
+            lines.push(`  ${chalk.bold('Changes')}:`);
+            tx.operations.forEach(op => lines.push(`    - ${opToString(op)}`));
+        }
+        if (showSpacing) {
+            lines.push(''); // Newline for spacing
+        }
+        return lines;
+    };
+  src/utils/logger.ts: >-
+    import chalk from 'chalk';
+
+    import { LogLevelName } from '../types';
+
+
+    const LogLevels = {
+      silent: 0,
+      error: 1,
+      warn: 2,
+      info: 3,
+      debug: 4,
+    } as const;
+
+
+    let currentLogLevel: LogLevelName = 'info'; // Default level
+
+
+    const logMessage = (level: keyof typeof LogLevels, message: string,
+    colorFn?: (s: string) => string) => {
+        if (LogLevels[level] <= LogLevels[currentLogLevel]) {
+            console.log(colorFn ? colorFn(message) : message);
+        }
+    }
+
+
+    export const logger = {
+      setLevel: (level: LogLevelName) => {
+        if (level in LogLevels) {
+          currentLogLevel = level;
+        }
+      },
+      info: (message: string) => logMessage('info', message, chalk.blue),
+      success: (message: string) => logMessage('info', message, chalk.green),
+      warn: (message: string) => logMessage('warn', message, chalk.yellow),
+      error: (message: string) => logMessage('error', message, chalk.red),
+      debug: (message: string) => logMessage('debug', message, chalk.gray),
+      log: (message: string) => logMessage('info', message),
+      prompt: (message: string) => {
+        // Prompts are special and should be shown unless silent
+            if (currentLogLevel !== 'silent') {
+              console.log(chalk.cyan(message));
+            }
+          },
+        };
+        
+        export const getErrorMessage = (error: unknown): string => {
+            return error instanceof Error ? error.message : String(error);
+        };
+        
+        export const isEnoentError = (error: unknown): boolean => {
+            return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+        };
+  src/commands/revert.ts: >-
+    import { loadConfigOrExit } from '../core/config';
+
+    import { findStateFileByIdentifier, readAllStateFiles } from
+    '../core/state';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, ParsedLLMResponse } from '../types';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { createConfirmationHandler, Prompter } from '../utils/prompt';
+
+    import { formatTransactionDetails } from '../utils/formatters';
+
+    import chalk from 'chalk';
+
+
+    interface RevertOptions {
+        yes?: boolean;
+        includeReverts?: boolean;
+    }
+
+
+    export const revertCommand = async (identifier?: string, options:
+    RevertOptions = {}, cwd: string = process.cwd(), prompter?: Prompter):
+    Promise<void> => {
+        const getConfirmation = createConfirmationHandler(options, prompter);
+        const config = await loadConfigOrExit(cwd);
+
+        let targetDescription: string;
+
+        // Default to '1' to revert the latest transaction if no identifier is provided.
+        const effectiveIdentifier = identifier ?? '1';
+
+        const isIndexSearch = /^-?\d+$/.test(effectiveIdentifier);
+
+        if (isIndexSearch) {
+            const index = Math.abs(parseInt(effectiveIdentifier, 10));
+            if (isNaN(index) || index <= 0) {
+                logger.error(`Invalid index. Please provide a positive number (e.g., ${chalk.cyan('"1"')} for the latest).`);
+                return;
+            }
+            targetDescription = index === 1 ? 'the latest transaction' : `the ${chalk.cyan(index)}-th latest transaction`;
+        } else {
+            // We assume it's a UUID, findStateFileByIdentifier will validate
+            targetDescription = `transaction with UUID '${chalk.cyan(effectiveIdentifier)}'`;
+        }
+
+        logger.info(`Looking for ${targetDescription}...`);
+        const stateToRevert = await findStateFileByIdentifier(cwd, effectiveIdentifier, {
+            skipReverts: !options.includeReverts,
+        });
+
+        if (!stateToRevert) {
+            logger.error(`Could not find ${targetDescription}.`);
+            if (isIndexSearch) {
+                const allTransactions = await readAllStateFiles(cwd, { skipReverts: false }); // Show total count including reverts
+                const nonRevertTransactions = await readAllStateFiles(cwd, { skipReverts: true });
+                const revertCount = (allTransactions?.length ?? 0) - (nonRevertTransactions?.length ?? 0);
+                
+                logger.info(`Found ${chalk.cyan(allTransactions?.length ?? 0)} total transactions.`);
+                if (revertCount > 0) {
+                    logger.info(`${chalk.cyan(revertCount)} of them are revert transactions, which are skipped by default.`);
+                    logger.info(`Use the ${chalk.cyan('--include-reverts')} flag to include them in the search.`);
+                }
+            }
+            return;
+        }
+        logger.log(chalk.bold(`Transaction to be reverted:`));
+        formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation('\nAre you sure you want to revert this transaction? (y/N)');
+        if (!confirmed) {
+            logger.info('Revert operation cancelled.');
+            return;
+        }
+
+        // 3. Generate inverse operations
+        const inverse_operations = [...stateToRevert.operations]
+            .reverse()
+            .map((op): FileOperation | null => {
+                switch (op.type) {
+                    case 'rename':
+                        return { type: 'rename', from: op.to, to: op.from };
+                    case 'delete': {
+                        const deletedContent = stateToRevert.snapshot[op.path];
+                        if (deletedContent === null || typeof deletedContent === 'undefined') {
+                            logger.warn(`Cannot revert deletion of ${chalk.cyan(op.path)}, original content not found in snapshot. Skipping.`);
+                            return null;
+                        }
+                        return { type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' };
+                    }
+                    case 'write': {
+                        const originalContent = stateToRevert.snapshot[op.path];
+                        if (typeof originalContent === 'undefined') {
+                            logger.warn(`Cannot find original state for ${chalk.cyan(op.path)} in snapshot. Skipping revert for this operation.`);
+                            return null;
+                        }
+                        if (originalContent === null) {
+                            return { type: 'delete', path: op.path };
+                        } else {
+                            return { type: 'write', path: op.path, content: originalContent, patchStrategy: 'replace' };
+                        }
+                    }
+                }
+            })
+            .filter((op): op is FileOperation => op !== null);
+
+        if (inverse_operations.length === 0) {
+            logger.warn('No operations to revert for this transaction.');
+            return;
+        }
+
+        // 4. Create and process a new "revert" transaction
+        const newUuid = uuidv4();
+        const reasoning = [
+            `Reverting transaction ${stateToRevert.uuid}.`,
+            `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+        ];
+
+        const parsedResponse: ParsedLLMResponse = {
+            control: {
+                projectId: config.projectId,
+                uuid: newUuid,
+            },
+            operations: inverse_operations,
+            reasoning,
+        };
+
+        logger.info(`Creating new transaction ${chalk.gray(newUuid)} to perform the revert.`);
+        await processPatch(config, parsedResponse, { cwd, prompter, yes: options.yes });
+    };
+  src/core/transaction.ts: >
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+    unifiedDiffService } from 'diff-apply';
+
+    import { deleteFile, readFileContent, removeEmptyParentDirectories,
+    renameFile, writeFileContent } from '../utils/fs';
+
+    import path from 'path';
+
+    import chalk from 'chalk';
+
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState, updatePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt'
+
+    import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+    notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+        yes?: boolean;
+    };
+
+
+    const patchStrategies = {
+      'new-unified': (p: { originalContent: string; diffContent: string; }) => {
+        const service = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+        return service.applyDiff(p);
+      },
+      'multi-search-replace': (p: { originalContent: string; diffContent: string; }) => {
+        return multiSearchReplaceService.multiSearchReplaceService.applyDiff(p);
+      },
+      'unified': (p: { originalContent: string; diffContent: string; }) => {
+        return unifiedDiffService.unifiedDiffService.applyDiff(p.originalContent, p.diffContent);
+      },
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      await Promise.all(
+        filePaths.map(async (filePath) => {
+          snapshot[filePath] = await readFileContent(filePath, cwd);
+        })
+      );
+      return snapshot;
+    };
+
+
+    export const applyOperations = async (operations: FileOperation[], cwd:
+    string = process.cwd()): Promise<Map<string, string>> => {
+      const fileStates = new Map<string, string | null>();
+      const newContents = new Map<string, string>();
+
+      const getFileContent = async (filePath: string): Promise<string | null> => {
+        if (fileStates.has(filePath)) {
+          return fileStates.get(filePath) ?? null;
+        }
+        const content = await readFileContent(filePath, cwd);
+        fileStates.set(filePath, content);
+        return content;
+      };
+
+      // Operations must be applied sequentially to ensure that if one fails,
+      // we can roll back from a known state.
+      for (const op of operations) {
+        if (op.type === 'delete') {
+          await deleteFile(op.path, cwd);
+          fileStates.set(op.path, null);
+          continue;
+        }
+        if (op.type === 'rename') {
+          const content = await getFileContent(op.from);
+          await renameFile(op.from, op.to, cwd);
+          fileStates.set(op.from, null);
+          if (content !== null) {
+            fileStates.set(op.to, content);
+          }
+          // Propagate the change to newContents map if the source file was modified in this transaction
+          if (newContents.has(op.from)) {
+            newContents.set(op.to, newContents.get(op.from)!);
+            newContents.delete(op.from);
+          }
+          continue;
+        }
+        
+        let finalContent: string;
+        const currentContent = await getFileContent(op.path);
+
+        if (op.patchStrategy === 'replace') {
+          finalContent = op.content;
+        } else {
+          if (currentContent === null && op.patchStrategy === 'multi-search-replace') {
+            throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+          }
+
+          try {
+            const diffParams = {
+              originalContent: currentContent ?? '',
+              diffContent: op.content,
+            };
+            
+            const patcher = patchStrategies[op.patchStrategy as keyof typeof patchStrategies];
+            if (!patcher) {
+              throw new Error(`Unknown patch strategy: '${op.patchStrategy}'`);
+            }
+            
+            const result = await patcher(diffParams);
+            if (result.success) {
+              finalContent = result.content;
+            } else {
+              throw new Error(`Patch failed for ${op.path}: ${result.error}`);
+            }
+          } catch (e) {
+            throw new Error(`Error applying patch for ${op.path} with strategy '${op.patchStrategy}': ${getErrorMessage(e)}`);
+          }
+        }
+        
+        await writeFileContent(op.path, finalContent, cwd);
+        fileStates.set(op.path, finalContent);
+        newContents.set(op.path, finalContent);
+      }
+      return newContents;
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesToClean = new Set<string>();
+      const restoreErrors: { path: string, error: unknown }[] = [];
+
+      // Attempt to restore all files in parallel, collecting errors.
+      await Promise.all(entries.map(async ([filePath, content]) => {
+          const fullPath = path.resolve(cwd, filePath);
+          try {
+            if (content === null) {
+              // If the file didn't exist in the snapshot, make sure it doesn't exist after restore.
+              await deleteFile(filePath, cwd);
+              directoriesToClean.add(path.dirname(fullPath));
+            } else {
+              // Create directory structure if needed and write the original content back.
+              await writeFileContent(filePath, content, cwd);
+            }
+          } catch (error) {
+            restoreErrors.push({ path: filePath, error });
+          }
+      }));
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesToClean)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+
+      if (restoreErrors.length > 0) {
+        const errorSummary = restoreErrors
+          .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)
+          .join('\n');
+        throw new Error(`Rollback failed for ${restoreErrors.length} file(s):\n${errorSummary}`);
+      }
+    };
+
+
+    // Space-optimized LCS length calculation to determine line changes
+    accurately.
+
+    const calculateLcsLength = (a: string[], b: string[]): number => {
+        let s1 = a;
+        let s2 = b;
+        // s2 should be the shorter string to optimize space for the DP table.
+        if (s1.length < s2.length) {
+            [s1, s2] = [s2, s1];
+        }
+        const m = s1.length;
+        const n = s2.length;
+        
+        const dp = Array(n + 1).fill(0);
+
+        for (let i = 1; i <= m; i++) {
+            let prev = 0; // stores dp[i-1][j-1]
+            for (let j = 1; j <= n; j++) {
+                const temp = dp[j]; // stores dp[i-1][j]
+                if (s1[i - 1] === s2[j - 1]) {
+                    dp[j] = prev + 1;
+                } else {
+                    dp[j] = Math.max(dp[j], dp[j - 1]);
+                }
+                prev = temp;
+            }
+        }
+        return dp[n];
+    };
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        snapshot: FileSnapshot,
+        newContents: Map<string, string>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newContents.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        // Use LCS to get a more accurate line diff count.
+        const lcsLength = calculateLcsLength(oldLines, newLines);
+        return {
+            added: newLines.length - lcsLength,
+            removed: oldLines.length - lcsLength,
+        };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true, isError:
+    boolean = true): Promise<void> => {
+        if (isError) {
+            logger.warn(`Rolling back changes: ${reason}`);
+        }
+
+        let rollbackSuccessful = false;
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+            rollbackSuccessful = true;
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            notifyRollbackFailure(uuid, enableNotifications);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                if (isError && rollbackSuccessful) {
+                    notifyFailure(uuid, enableNotifications);
+                }
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    type ApprovalOptions = {
+        config: Config;
+        cwd: string;
+        prompter: Prompter;
+        skipConfirmation: boolean;
+    }
+
+
+    const handleApproval = async ({ config, cwd, prompter, skipConfirmation }:
+    ApprovalOptions): Promise<boolean> => {
+        const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+        logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+        
+        const getManualApproval = async (reason: string): Promise<boolean> => {
+            logger.warn(reason);
+            
+            const notificationResult = await requestApprovalWithNotification(config.projectId, config.core.enableNotifications);
+
+            if (notificationResult === 'approved') {
+                logger.info('Approved via notification.');
+                return true;
+            }
+            if (notificationResult === 'rejected') {
+                logger.info('Rejected via notification.');
+                return false;
+            }
+
+            if (notificationResult === 'timeout') {
+                logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');
+            }
+
+            return await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+        };
+
+        if (skipConfirmation) {
+            logger.success('  - Changes approved via -y/--yes flag.');
+            return true;
+        }
+        if (config.patch.approvalMode === 'manual') {
+            return await getManualApproval('Manual approval required because "approvalMode" is set to "manual".');
+        }
+        // auto mode
+        const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+        if (canAutoApprove) {
+            logger.success('  - Changes automatically approved based on your configuration.');
+            return true;
+        }
+        return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const skipConfirmation = options?.yes === true;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        const { minFileChanges, maxFileChanges } = config.patch;
+        const operationCount = operations.length;
+        if (minFileChanges > 0 && operationCount < minFileChanges) {
+            logger.warn(`Skipping patch: Not enough file changes (expected at least ${minFileChanges}, got ${operationCount}).`);
+            return;
+        }
+        if (maxFileChanges && operationCount > maxFileChanges) {
+            logger.warn(`Skipping patch: Too many file changes (expected at most ${maxFileChanges}, got ${operationCount}).`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newContents = await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, snapshot, newContents);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log(chalk.bold('\nPre-flight summary:'));
+            logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+            logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+            const isApproved = await handleApproval({ config, cwd, prompter, skipConfirmation });
+
+            if (isApproved) {
+                stateFile.approved = true;
+                (stateFile as any).linesAdded = totalAdded;
+                (stateFile as any).linesRemoved = totalRemoved;
+                await updatePendingState(cwd, stateFile); // Update state with approval and stats before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.core.enableNotifications);
+                await handleAutoGitBranch(config, stateFile, cwd);
+            } else {
+                logger.warn('Operation cancelled by user. Rolling back changes...');
+                await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        }
+    };
+
+
+    const handleAutoGitBranch = async (config: Config, stateFile: StateFile,
+    cwd: string): Promise<void> => {
+        if (!config.git.autoGitBranch) return;
+
+        let branchNameSegment = '';
+        if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+            branchNameSegment = stateFile.gitCommitMsg;
+        } else {
+            branchNameSegment = stateFile.uuid;
+        }
+
+        const sanitizedSegment = branchNameSegment
+            .trim()
+            .toLowerCase()
+            .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+            .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+            .replace(/-+/g, '-') // Collapse consecutive hyphens
+            .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+            .slice(0, 70); // Truncate
+
+        if (sanitizedSegment) {
+            const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+            logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+            const command = `git checkout -b "${branchName}"`;
+            const result = await executeShellCommand(command, cwd);
+            if (result.exitCode === 0) {
+                logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+            } else {
+                // Exit code 128 from `git checkout -b` often means the branch already exists.
+                if (result.exitCode === 128 && result.stderr.includes('already exists')) {
+                    logger.warn(`Could not create branch '${chalk.magenta(branchName)}' because it already exists.`);
+                } else {
+                    logger.warn(`Could not create git branch '${chalk.magenta(branchName)}'.`);
+                }
+                logger.debug(`'${command}' failed with: ${result.stderr}`);
+            }
+        } else {
+            logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+        }
+    };
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath } from './core/config';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        findStateFileByIdentifier,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState
+    } from './core/state';
+
+    export { processPatch, applyOperations, createSnapshot, restoreSnapshot }
+    from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { getTypeScriptErrorCount } from './utils/typescript';
+
+    export {
+        deleteFile,
+        readFileContent,
+        writeFileContent,
+        fileExists,
+        renameFile,
+        safeRename,
+    } from './utils/fs';
+
+    export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+
+    export { formatTransactionDetails } from './utils/formatters';
+
+    export {
+        createNotifier,
+        notifyPatchDetected,
+        notifyApprovalRequired,
+        requestApprovalWithNotification,
+        notifySuccess,
+        notifyFailure,
+        notifyRollbackFailure,
+    } from './utils/notifier';
+
+    export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+approved: true

@@ -1,0 +1,148 @@
+uuid: a8d53b49-b36c-48c2-a4e1-27083626e27b
+projectId: relaycode
+createdAt: '2025-09-04T16:32:24.506Z'
+linesAdded: 1
+linesRemoved: 0
+gitCommitMsg: 'fix(core): correctly configure build and externals'
+promptSummary: >-
+  User reported that the previous fix for e2e tests was not effective. This
+  applies a more robust fix by both correcting module paths in
+  `relaycode-core/package.json` and marking `apply-multi-diff` as external in
+  its `tsup` config to prevent bundling issues.
+reasoning:
+  - >-
+    My bad, my last fix didn't cut it. Module resolution can be a real pain.
+    After digging deeper, I think I've got the full picture. The problem is a
+    combo of two things: how `relaycode-core` is packaged and how it handles its
+    dependency on `apply-multi-diff`.
+  - >-
+    First, the `.mjs` vs `.js` extension issue in
+    `packages/relaycode-core/package.json` was a real problem, so I'm
+    re-applying that fix. `tsup` generates `.js` for ESM files when `type:
+    "module"` is set, so the `package.json` needs to match that.
+  - >-
+    Second, `tsup` bundles dependencies by default. This can sometimes lead to
+    weird issues, especially with module formats. The symptoms you're seeing
+    (patching functions not behaving correctly) strongly suggest that the
+    bundled version of `apply-multi-diff` inside `relaycode-core` is broken
+    somehow.
+  - >-
+    To fix this for good, I'll tell `tsup` to treat `apply-multi-diff` as an
+    external package. This means it won't be bundled in. Instead, the final
+    `relaycode-core` build will contain a normal `import ... from
+    'apply-multi-diff'`, and the runtime (Bun) will resolve it from
+    `node_modules` like any other package. This is way more robust.
+  - Here are the two patches to get this done.
+  - >-
+    First, let's fix the module paths in `relaycode-core`'s `package.json`
+    again.
+  - >-
+    Second, let's update the `tsup` config to exclude `apply-multi-diff` from
+    the bundle.
+  - >-
+    This two-part fix should resolve the module weirdness and get your tests
+    back to green.
+operations:
+  - type: write
+    path: packages/relaycode-core/package.json
+    content: |-
+      --- packages/relaycode-core/package.json
+      +++ packages/relaycode-core/package.json
+      @@ -19,13 +19,13 @@
+         ],
+         "type": "module",
+         "main": "./dist/index.cjs",
+      -  "module": "./dist/index.mjs",
+      +  "module": "./dist/index.js",
+         "types": "./dist/index.d.ts",
+         "exports": {
+           ".": {
+             "types": "./dist/index.d.ts",
+      -      "import": "./dist/index.mjs",
+      +      "import": "./dist/index.js",
+             "require": "./dist/index.cjs"
+           }
+         },
+         "files": [
+    patchStrategy: new-unified
+  - type: write
+    path: packages/relaycode-core/tsup.config.ts
+    content: |-
+      --- packages/relaycode-core/tsup.config.ts
+      +++ packages/relaycode-core/tsup.config.ts
+      @@ -6,4 +6,5 @@
+         splitting: false,
+         sourcemap: true,
+         clean: true,
+      +  external: ['apply-multi-diff'],
+       });
+    patchStrategy: new-unified
+snapshot:
+  packages/relaycode-core/package.json: |
+    {
+      "name": "relaycode-core",
+      "version": "0.1.0",
+      "description": "The shared engine behind RelayCode and Noca.pro – a zero-friction, AI-native patch engine that turns your clipboard into a surgical code-editing laser.",
+      "author": "Noca.pro",
+      "license": "MIT",
+      "homepage": "https://github.com/nocapro/relaycode-core",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/nocapro/relaycode-core.git"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "patch",
+        "diff",
+        "codemod",
+        "automation",
+        "typescript"
+      ],
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "prepublishOnly": "bun run build"
+      },
+      "dependencies": {
+      "apply-multi-diff": "^0.1.0",
+        // "apply-multi-diff": "workspace:*",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "tsup": "^8.2.3",
+        "typescript": "^5.8.3"
+      },
+      "peerDependencies": {
+        "typescript": "^5"
+      }
+    }
+  packages/relaycode-core/tsup.config.ts: |-
+    import { defineConfig } from 'tsup';
+
+    export default defineConfig({
+      entry: ['src/index.ts'],
+      format: ['esm', 'cjs'],
+      dts: true,
+      splitting: false,
+      sourcemap: true,
+      clean: true,
+    });
+approved: true

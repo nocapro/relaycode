@@ -1,0 +1,404 @@
+uuid: a1d3a6d2-64f3-42e5-ad8e-b5529f5d3092
+projectId: relaycode
+createdAt: '2025-06-21T19:00:42.774Z'
+reasoning:
+  - >-
+    Of course. Dealing with file system operations requires careful handling to
+    ensure atomicity, especially during rollbacks. The issue you're describing,
+    where a failed transaction doesn't perfectly restore all files, often stems
+    from running file operations in parallel. If one operation fails, others
+    might have already completed, leaving the system in an inconsistent state.
+  - >-
+    To fix this, I will modify the core executor logic to process file
+    operations sequentially instead of in parallel. This ensures that if any
+    step in applying a patch or restoring a snapshot fails, the process stops
+    immediately, and the rollback can proceed from a predictable state. This
+    will make the transaction rollbacks much more reliable.
+  - 'Here are the changes for `src/core/executor.ts`:'
+  - '### Step-by-step reasoning:'
+  - >-
+    1.  **Modify `applyOperations`**: I will change this function to iterate
+    through file operations using a sequential `for...of` loop instead of
+    `Promise.all`. This guarantees that operations are applied one by one. If an
+    error occurs, the loop is terminated, and the error is thrown, preventing
+    further changes to the file system.
+  - >-
+    2.  **Modify `restoreSnapshot`**: Similarly, I will update this function to
+    restore files sequentially. This is crucial for rollbacks. If restoring one
+    file fails, the process will stop immediately, preventing a partial rollback
+    and making it easier to diagnose the problem.
+  - >-
+    This approach ensures that both applying patches and rolling them back are
+    more robust and atomic.
+operations:
+  - type: write
+    path: src/core/executor.ts
+    content: >-
+      --- src/core/executor.ts
+
+      +++ src/core/executor.ts
+
+      @@ -69,51 +69,52 @@
+       };
+       
+       export const applyOperations = async (operations: FileOperation[], cwd: string = process.cwd()): Promise<void> => {
+      -  await Promise.all(operations.map(async op => {
+
+      +  // Operations must be applied sequentially to ensure that if one fails,
+
+      +  // we can roll back from a known state.
+
+      +  for (const op of operations) {
+           if (op.type === 'delete') {
+      -      return deleteFile(op.path, cwd);
+
+      +      await deleteFile(op.path, cwd);
+
+      +      continue;
+           }
+           if (op.type === 'rename') {
+      -      return renameFile(op.from, op.to, cwd);
+
+      +      await renameFile(op.from, op.to, cwd);
+
+      +      continue;
+           } 
+           
+           if (op.patchStrategy === 'replace') {
+      -      return writeFileContent(op.path, op.content, cwd);
+
+      -    }
+
+      -
+
+      +      await writeFileContent(op.path, op.content, cwd);
+
+      +      continue;
+
+      +    }
+
+      +
+
+      +    // For patch strategies, apply them sequentially
+           const originalContent = await readFileContent(op.path, cwd);
+           if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+             throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+           }
+       
+      -    const diffParams = {
+
+      -      originalContent: originalContent ?? '',
+
+      -      diffContent: op.content,
+
+      -    };
+
+      -
+
+      -    let result;
+           try {
+      +      const diffParams = {
+
+      +        originalContent: originalContent ?? '',
+
+      +        diffContent: op.content,
+
+      +      };
+
+      +
+
+      +      let result;
+             switch (op.patchStrategy) {
+               case 'new-unified':
+                 const newUnifiedStrategy = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+                 result = await newUnifiedStrategy.applyDiff(diffParams);
+                 break;
+               case 'multi-search-replace':
+                 result = await multiSearchReplaceService.multiSearchReplaceService.applyDiff(diffParams);
+                 break;
+               case 'unified':
+                 result = await unifiedDiffService.unifiedDiffService.applyDiff(diffParams.originalContent, diffParams.diffContent);
+                 break;
+               default:
+                 throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+             }
+       
+             if (result.success) {
+               await writeFileContent(op.path, result.content, cwd);
+             } else {
+               throw new Error(result.error);
+             }
+           } catch (e) {
+             throw new Error(`Error applying patch for ${op.path} with strategy ${op.patchStrategy}: ${e instanceof Error ? e.message : String(e)}`);
+           }
+      -  }));
+
+      +  }
+       };
+       
+       // Helper to check if a directory is empty
+      @@ -156,9 +157,10 @@
+         const entries = Object.entries(snapshot);
+         const directoriesDeleted = new Set<string>();
+       
+      -  // First handle all file operations in parallel
+
+      -  await Promise.all(entries.map(async ([filePath, content]) => {
+
+      +  // Handle all file operations sequentially to ensure atomicity during
+      rollback
+
+      +  for (const [filePath, content] of entries) {
+           const fullPath = path.resolve(cwd, filePath);
+           try {
+             if (content === null) {
+               // If the file didn't exist in the snapshot, make sure it doesn't exist after restore
+      @@ -183,7 +185,7 @@
+             console.error(`Failed to restore ${filePath}:`, error);
+             throw error;
+           }
+      -  }));
+
+      +  }
+         
+         // After all files are processed, clean up empty directories
+         // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+    patchStrategy: new-unified
+snapshot:
+  src/core/executor.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { FileOperation, FileSnapshot } from '../types';
+
+    import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+    unifiedDiffService } from 'diff-apply';
+
+
+    export const readFileContent = async (filePath: string, cwd: string =
+    process.cwd()): Promise<string | null> => {
+      try {
+        return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          return null; // File doesn't exist
+        }
+        throw error;
+      }
+    };
+
+
+    export const writeFileContent = async (filePath: string, content: string,
+    cwd: string = process.cwd()): Promise<void> => {
+      const absolutePath = path.resolve(cwd, filePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, content, 'utf-8');
+    };
+
+
+    export const deleteFile = async (filePath: string, cwd: string =
+    process.cwd()): Promise<void> => {
+      try {
+        await fs.unlink(path.resolve(cwd, filePath));
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          // File already deleted, which is fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const renameFile = async (fromPath: string, toPath: string, cwd:
+    string = process.cwd()): Promise<void> => {
+      const fromAbsolutePath = path.resolve(cwd, fromPath);
+      const toAbsolutePath = path.resolve(cwd, toPath);
+      await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
+      try {
+        await fs.rename(fromAbsolutePath, toAbsolutePath);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'EXDEV') {
+          await fs.copyFile(fromAbsolutePath, toAbsolutePath);
+          await fs.unlink(fromAbsolutePath);
+        } else {
+          throw error;
+        }
+      }
+    };
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      
+      // Process file reads in parallel for better performance
+      const snapshotPromises = filePaths.map(async (filePath) => {
+        try {
+          const absolutePath = path.resolve(cwd, filePath);
+          try {
+            const content = await fs.readFile(absolutePath, 'utf-8');
+            return { path: filePath, content };
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+              return { path: filePath, content: null }; // File doesn't exist, which is fine.
+            } else {
+              throw error;
+            }
+          }
+        } catch (error) {
+          console.error(`Error creating snapshot for ${filePath}:`, error);
+          throw error;
+        }
+      });
+      
+      const results = await Promise.all(snapshotPromises);
+      
+      // Combine results into snapshot object
+      for (const result of results) {
+        snapshot[result.path] = result.content;
+      }
+      
+      return snapshot;
+    };
+
+
+    export const applyOperations = async (operations: FileOperation[], cwd:
+    string = process.cwd()): Promise<void> => {
+      await Promise.all(operations.map(async op => {
+        if (op.type === 'delete') {
+          return deleteFile(op.path, cwd);
+        }
+        if (op.type === 'rename') {
+          return renameFile(op.from, op.to, cwd);
+        } 
+        
+        if (op.patchStrategy === 'replace') {
+          return writeFileContent(op.path, op.content, cwd);
+        }
+
+        const originalContent = await readFileContent(op.path, cwd);
+        if (originalContent === null && op.patchStrategy === 'multi-search-replace') {
+          throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);
+        }
+
+        const diffParams = {
+          originalContent: originalContent ?? '',
+          diffContent: op.content,
+        };
+
+        let result;
+        try {
+          switch (op.patchStrategy) {
+            case 'new-unified':
+              const newUnifiedStrategy = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+              result = await newUnifiedStrategy.applyDiff(diffParams);
+              break;
+            case 'multi-search-replace':
+              result = await multiSearchReplaceService.multiSearchReplaceService.applyDiff(diffParams);
+              break;
+            case 'unified':
+              result = await unifiedDiffService.unifiedDiffService.applyDiff(diffParams.originalContent, diffParams.diffContent);
+              break;
+            default:
+              throw new Error(`Unknown patch strategy: ${op.patchStrategy}`);
+          }
+
+          if (result.success) {
+            await writeFileContent(op.path, result.content, cwd);
+          } else {
+            throw new Error(result.error);
+          }
+        } catch (e) {
+          throw new Error(`Error applying patch for ${op.path} with strategy ${op.patchStrategy}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }));
+    };
+
+
+    // Helper to check if a directory is empty
+
+    const isDirectoryEmpty = async (dirPath: string): Promise<boolean> => {
+      try {
+        const files = await fs.readdir(dirPath);
+        return files.length === 0;
+      } catch (error) {
+        // If directory doesn't exist or is not accessible, consider it "not empty"
+        return false;
+      }
+    };
+
+
+    // Recursively remove all empty parent directories up to a limit
+
+    const removeEmptyParentDirectories = async (dirPath: string, rootDir:
+    string): Promise<void> => {
+      if (!dirPath.startsWith(rootDir) || dirPath === rootDir) {
+        return;
+      }
+      
+      try {
+        const isEmpty = await isDirectoryEmpty(dirPath);
+        if (isEmpty) {
+          await fs.rmdir(dirPath);
+          // Recursively check parent directory
+          await removeEmptyParentDirectories(path.dirname(dirPath), rootDir);
+        }
+      } catch (error) {
+        // Ignore directory removal errors, but don't continue up the chain
+        if (!(error instanceof Error && 'code' in error && 
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) {
+          console.warn(`Failed to clean up directory ${dirPath}:`, error);
+        }
+      }
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesDeleted = new Set<string>();
+
+      // First handle all file operations in parallel
+      await Promise.all(entries.map(async ([filePath, content]) => {
+        const fullPath = path.resolve(cwd, filePath);
+        try {
+          if (content === null) {
+            // If the file didn't exist in the snapshot, make sure it doesn't exist after restore
+            try {
+              await fs.unlink(fullPath);
+              directoriesDeleted.add(path.dirname(fullPath));
+            } catch (error) {
+              if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+                // File or directory already doesn't exist, which is fine
+              } else {
+                throw error;
+              }
+            }
+          } else {
+            // Create directory structure if needed
+            const dir = path.dirname(fullPath);
+            await fs.mkdir(dir, { recursive: true });
+            
+            // Write the original content back to the file
+            await fs.writeFile(fullPath, content, 'utf-8');
+          }
+        } catch (error) {
+          console.error(`Failed to restore ${filePath}:`, error);
+          throw error;
+        }
+      }));
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesDeleted)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+    };
+approved: true

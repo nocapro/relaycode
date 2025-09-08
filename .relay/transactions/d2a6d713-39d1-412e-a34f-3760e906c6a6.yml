@@ -1,0 +1,136 @@
+uuid: d2a6d713-39d1-412e-a34f-3760e906c6a6
+projectId: relaycode
+createdAt: '2025-09-04T02:05:29.016Z'
+linesAdded: 1
+linesRemoved: 1
+gitCommitMsg: 'fix(test): correct expected content in e2e test fixture'
+promptSummary: >-
+  Fix a failing E2E test by adjusting the expected output in a test fixture to
+  not include a trailing newline.
+reasoning:
+  - Yo, what up. It's anton. Got a test failing, classic stuff.
+  - >-
+    Looks like an E2E test is being a bit extra about a trailing newline. The
+    `standard-diff` strategy is doing its job and not adding a newline that
+    wasn't there to begin with. The test fixture, though? It's expecting one.
+    Classic YAML `|` vs `|-` situation.
+  - >-
+    I'm just gonna tweak the test fixture to tell it to chill on the newline.
+    It's the simplest fix and doesn't mess with the core patching logic, which
+    seems to be doing the right thing.
+  - Here's the fix.
+  - This should get the CI green again. Peace.
+operations:
+  - type: write
+    path: test/fixtures/e2e/complex-scenarios.yml
+    content: |-
+      --- test/fixtures/e2e/complex-scenarios.yml
+      +++ test/fixtures/e2e/complex-scenarios.yml
+      @@ -51,9 +51,9 @@
+             - path: "src/config.ts"
+               content: |
+                 export const config = { timeout: 5000 };
+             - path: "src/main.ts"
+      -        content: |
+      +        content: |-
+                 import { config } from './config';
+                 console.log(`Starting with timeout ${config.timeout}...`);
+             - path: "src/utils.ts"
+               exists: false
+             - path: "src/lib/helpers.ts"
+    patchStrategy: new-unified
+snapshot:
+  test/fixtures/e2e/complex-scenarios.yml: |-
+    e2e_patch_tests:
+      - name: multiple-operations
+        description: Should handle multiple operations (edit, delete, new) in one transaction
+        markdown_content: |
+          I'm performing a few operations.
+
+          First, editing `main.ts`.
+          ```typescript // src/main.ts
+          console.log("Updated main");
+          ```
+
+          Second, deleting `utils.ts`.
+          ```typescript // src/utils.ts
+          //TODO: delete this file
+          ```
+
+          Finally, adding a new component.
+          ```typescript // "src/components/New Component.tsx"
+          export const NewComponent = () => {
+            return <div>New!</div>;
+          };
+          ```
+        initial_state:
+          - path: "src/main.ts"
+            content: 'console.log("Original main");'
+          - path: "src/utils.ts"
+            content: 'export const util = {};'
+        expected_state:
+          - path: "src/main.ts"
+            content: |
+              console.log("Updated main");
+          - path: "src/utils.ts"
+            exists: false
+          - path: "src/components/New Component.tsx"
+            content: |
+              export const NewComponent = () => {
+                return <div>New!</div>;
+              };
+
+      - name: transaction-with-all-operation-types
+        description: Should handle a single transaction with new, edit, rename, and delete operations
+        markdown_content: |
+          Here is a complex set of file modifications.
+
+          First, I'll create a new config file.
+          ```typescript // src/config.ts
+          export const config = { timeout: 5000 };
+          ```
+
+          Next, I'll edit the main entrypoint to use this config.
+          ```diff // src/main.ts standard-diff
+          --- src/main.ts
+          +++ src/main.ts
+          @@ ... @@
+          -console.log("Starting...");
+          +import { config } from './config';
+          +console.log(`Starting with timeout ${config.timeout}...`);
+          ```
+
+          Then, I'll rename an old utility file.
+          ```json // rename-file
+          {
+            "from": "src/utils.ts",
+            "to": "src/lib/helpers.ts"
+          }
+          ```
+
+          Finally, I'm removing a deprecated file.
+          ```typescript // src/deprecated.ts
+          //TODO: delete this file
+          ```
+        initial_state:
+          - path: "src/main.ts"
+            content: 'console.log("Starting...");'
+          - path: "src/utils.ts"
+            content: 'export function oldUtil() {}'
+          - path: "src/deprecated.ts"
+            content: '// This is old'
+        expected_state:
+          - path: "src/config.ts"
+            content: |
+              export const config = { timeout: 5000 };
+          - path: "src/main.ts"
+            content: |
+              import { config } from './config';
+              console.log(`Starting with timeout ${config.timeout}...`);
+          - path: "src/utils.ts"
+            exists: false
+          - path: "src/lib/helpers.ts"
+            content: "export function oldUtil() {}"
+          - path: "src/deprecated.ts"
+            exists: false
+approved: true

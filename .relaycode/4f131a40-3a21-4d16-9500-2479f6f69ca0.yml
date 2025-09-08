@@ -1,0 +1,477 @@
+uuid: 4f131a40-3a21-4d16-9500-2479f6f69ca0
+projectId: relaycode
+createdAt: '2025-06-24T03:56:15.771Z'
+gitCommitMsg: 'fix(ui): improve console output for transaction rollbacks'
+promptSummary: >-
+  The user wants to fix a bad console UI experience during transaction
+  rollbacks, particularly when a user cancels an operation.
+reasoning:
+  - >-
+    I've analyzed the console output issue you've pointed out. The interleaved
+    and duplicated messages suggest that user cancellation is being treated as
+    an unexpected error, which complicates the logging, especially in concurrent
+    situations.
+  - >-
+    To fix this, I will refactor the transaction handling logic to differentiate
+    between a rollback caused by an error and a rollback caused by a user
+    deliberately cancelling the operation. This will provide a much cleaner and
+    more intuitive console experience.
+  - 'Here are my changes:'
+  - '### 1. Refactor `src/core/transaction.ts`'
+  - >-
+    I'll modify `processPatch` to handle user disapproval as a standard workflow
+    rather than an exception. This avoids throwing an unnecessary error. I'll
+    also update `rollbackTransaction` to adjust its logging based on whether
+    it's handling an error or a simple cancellation.
+  - >-
+    This change will result in a much cleaner output when you choose not to
+    approve a patch. For example:
+  - >-
+    This is more concise and accurately reflects the user's action. Error-driven
+    rollbacks will continue to show detailed reasons as before.
+  - '---'
+operations:
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+      FileSnapshot, reason: string, enableNotifications: boolean = true):
+      Promise<void> => {
+          logger.warn(`Rolling back changes: ${reason}`);
+          try {
+              await restoreSnapshot(snapshot, cwd);
+              logger.success('  - Files restored to original state.');
+          } catch (error) {
+              logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+              // Do not rethrow; we're already in a final error handling state.
+          } finally {
+              try {
+                  await deletePendingState(cwd, uuid);
+                  logger.success(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                  notifyFailure(uuid, enableNotifications);
+              } catch (cleanupError) {
+                  logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+              }
+          }
+      };
+
+      =======
+
+      const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+      FileSnapshot, reason: string, enableNotifications: boolean = true,
+      isError: boolean = true): Promise<void> => {
+          if (isError) {
+              logger.warn(`Rolling back changes: ${reason}`);
+          }
+          try {
+              await restoreSnapshot(snapshot, cwd);
+              logger.success('  - Files restored to original state.');
+          } catch (error) {
+              logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+              // Do not rethrow; we're already in a final error handling state.
+          } finally {
+              try {
+                  await deletePendingState(cwd, uuid);
+                  logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                  if (isError) {
+                      notifyFailure(uuid, enableNotifications);
+                  }
+              } catch (cleanupError) {
+                  logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+              }
+          }
+      };
+
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+              if (isApproved) {
+                  stateFile.approved = true;
+                  await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                  await commitState(cwd, uuid);
+                  logCompletionSummary(uuid, startTime, operations);
+                  notifySuccess(uuid, config.core.enableNotifications);
+
+                  if (config.git.autoGitBranch) {
+                      let branchNameSegment = '';
+                      if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+                          branchNameSegment = stateFile.gitCommitMsg;
+                      } else {
+                          branchNameSegment = stateFile.uuid;
+                      }
+                  
+                      const sanitizedSegment = branchNameSegment
+                          .trim()
+                          .toLowerCase()
+                          .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+                          .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+                          .replace(/-+/g, '-') // Collapse consecutive hyphens
+                          .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+                          .slice(0, 70); // Truncate
+                  
+                      if (sanitizedSegment) {
+                          const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+                          logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+                          const command = `git checkout -b "${branchName}"`;
+                          const result = await executeShellCommand(command, cwd);
+                          if (result.exitCode === 0) {
+                              logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+                          } else {
+                              logger.warn(`Could not create branch '${chalk.magenta(branchName)}'. It might already exist.`);
+                              logger.debug(`'${command}' failed with: ${result.stderr}`);
+                          }
+                      } else {
+                          logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+                      }
+                  }
+              } else {
+                  throw new Error('Changes were not approved.');
+              }
+          } catch (error) {
+              const reason = getErrorMessage(error);
+              await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications);
+          }
+      =======
+              if (isApproved) {
+                  stateFile.approved = true;
+                  await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                  await commitState(cwd, uuid);
+                  logCompletionSummary(uuid, startTime, operations);
+                  notifySuccess(uuid, config.core.enableNotifications);
+
+                  if (config.git.autoGitBranch) {
+                      let branchNameSegment = '';
+                      if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+                          branchNameSegment = stateFile.gitCommitMsg;
+                      } else {
+                          branchNameSegment = stateFile.uuid;
+                      }
+                  
+                      const sanitizedSegment = branchNameSegment
+                          .trim()
+                          .toLowerCase()
+                          .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+                          .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+                          .replace(/-+/g, '-') // Collapse consecutive hyphens
+                          .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+                          .slice(0, 70); // Truncate
+                  
+                      if (sanitizedSegment) {
+                          const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+                          logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+                          const command = `git checkout -b "${branchName}"`;
+                          const result = await executeShellCommand(command, cwd);
+                          if (result.exitCode === 0) {
+                              logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+                          } else {
+                              logger.warn(`Could not create branch '${chalk.magenta(branchName)}'. It might already exist.`);
+                              logger.debug(`'${command}' failed with: ${result.stderr}`);
+                          }
+                      } else {
+                          logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+                      }
+                  }
+              } else {
+                  logger.warn('Operation cancelled by user. Rolling back changes...');
+                  await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+              }
+          } catch (error) {
+              const reason = getErrorMessage(error);
+              await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+          }
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: Changes applied. Do you want to approve and commit them? (y/N) n
+    content: |-
+      Operation cancelled by user. Rolling back changes...
+        - Files restored to original state.
+      ↩️ Transaction {uuid} rolled back.
+    patchStrategy: replace
+snapshot:
+  src/core/transaction.ts: >-
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { createSnapshot, restoreSnapshot, applyOperations } from
+    './executor';
+
+    import chalk from 'chalk';
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt'
+
+    import { notifyApprovalRequired, notifyFailure, notifySuccess,
+    notifyPatchDetected } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+    };
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        snapshot: FileSnapshot,
+        newContents: Map<string, string>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newContents.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        // This is a simplified diff, for a more accurate count a real diff algorithm is needed,
+        // but this is fast and good enough for a summary.
+        const oldSet = new Set(oldLines);
+        const newSet = new Set(newLines);
+        
+        let added = 0;
+        for (const line of newLines) {
+            if (!oldSet.has(line)) added++;
+        }
+
+        let removed = 0;
+        for (const line of oldLines) {
+            if (!newSet.has(line)) removed++;
+        }
+        
+        return { added, removed };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true):
+    Promise<void> => {
+        logger.warn(`Rolling back changes: ${reason}`);
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.success(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                notifyFailure(uuid, enableNotifications);
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newContents = await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, snapshot, newContents);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log(chalk.bold('\nPre-flight summary:'));
+            logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+            logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+            // Check for approval
+            const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+            logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+            
+            let isApproved: boolean;
+            if (config.patch.approvalMode === 'auto') { // Auto mode allows conditional auto-approval
+                const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+
+                if (canAutoApprove) {
+                    logger.success('  - Changes automatically approved based on your configuration.');
+                    isApproved = true;
+                } else {
+                    notifyApprovalRequired(config.projectId, config.core.enableNotifications);
+                    isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+                }
+            } else { // Manual mode always requires user approval
+                logger.warn('Manual approval required because "approvalMode" is set to "manual".');
+                notifyApprovalRequired(config.projectId, config.core.enableNotifications);
+                isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+            }
+
+            if (isApproved) {
+                stateFile.approved = true;
+                await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.core.enableNotifications);
+
+                if (config.git.autoGitBranch) {
+                    let branchNameSegment = '';
+                    if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+                        branchNameSegment = stateFile.gitCommitMsg;
+                    } else {
+                        branchNameSegment = stateFile.uuid;
+                    }
+                
+                    const sanitizedSegment = branchNameSegment
+                        .trim()
+                        .toLowerCase()
+                        .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+                        .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+                        .replace(/-+/g, '-') // Collapse consecutive hyphens
+                        .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+                        .slice(0, 70); // Truncate
+                
+                    if (sanitizedSegment) {
+                        const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+                        logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+                        const command = `git checkout -b "${branchName}"`;
+                        const result = await executeShellCommand(command, cwd);
+                        if (result.exitCode === 0) {
+                            logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+                        } else {
+                            logger.warn(`Could not create branch '${chalk.magenta(branchName)}'. It might already exist.`);
+                            logger.debug(`'${command}' failed with: ${result.stderr}`);
+                        }
+                    } else {
+                        logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+                    }
+                }
+            } else {
+                throw new Error('Changes were not approved.');
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications);
+        }
+    };
+  Changes applied. Do you want to approve and commit them? (y/N) n: null
+approved: true

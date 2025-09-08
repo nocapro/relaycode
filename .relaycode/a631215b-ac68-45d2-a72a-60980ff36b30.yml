@@ -1,0 +1,520 @@
+uuid: a631215b-ac68-45d2-a72a-60980ff36b30
+projectId: relaycode
+createdAt: '2025-06-27T03:30:06.072Z'
+gitCommitMsg: 'feat(linter): use typescript api for accurate error count'
+promptSummary: >-
+  The user requested a more accurate way to count linter problems, suggesting
+  using a library's API instead of parsing command-line output. I've implemented
+  a solution that uses the TypeScript compiler API to get a precise error count
+  for `tsc` commands, with a fallback to the original method for other linters
+  or if the API call fails.
+reasoning:
+  - >-
+    Of course. Parsing linter output from stdout/stderr is brittle. Using the
+    TypeScript compiler API directly will provide a much more accurate error
+    count. Here's how I'll implement that:
+  - >-
+    1.  **Create a New TypeScript Utility**: I'll add a new file,
+    `src/utils/typescript.ts`, to house the logic for interacting with the
+    TypeScript compiler API.
+  - >-
+    2.  **Implement API-based Error Counting**: Inside the new utility, I'll
+    create a function `getTypeScriptErrorCount` that:
+  - '*   Finds the correct `tsconfig.json` for the user''s project.'
+  - '*   Uses `ts.createProgram` for single-project setups.'
+  - >-
+    *   Uses `ts.createSolutionBuilder` to correctly handle multi-project
+    repositories that use `tsc -b` (build mode), which is the default for
+    `relaycode`.
+  - >-
+    *   Intercepts file-writing operations to prevent unwanted side effects,
+    ensuring a "dry run" for analysis only.
+  - >-
+    3.  **Enhance `getErrorCount`**: I'll update the existing `getErrorCount`
+    function in `src/utils/shell.ts`. It will now first check if the
+    `linterCommand` is a TypeScript command (`tsc`). If so, it will attempt to
+    use the new, more accurate `getTypeScriptErrorCount`. If the API call fails
+    for any reason, it will safely fall back to the original shell execution
+    method.
+  - >-
+    4.  **Update Dependencies**: I'll move `typescript` from `devDependencies`
+    to `dependencies` in `package.json` so it's available at runtime.
+  - >-
+    5.  **Export New Utility**: I will export the new `getTypeScriptErrorCount`
+    function from the main `src/index.ts` file.
+  - >-
+    This approach provides a more robust and accurate linting result while
+    maintaining backward compatibility and safety through the fallback
+    mechanism.
+  - Let's start with creating the new utility file.
+  - >-
+    I'll create the new file `src/utils/typescript.ts` to contain the logic for
+    interacting with the TypeScript compiler API.
+  - >-
+    Now, I'll update `src/utils/shell.ts` to use this new function and fall back
+    to the old method if needed.
+  - >-
+    To make the TypeScript compiler API available, I'll move the `typescript`
+    package to the main dependencies in `package.json`.
+  - Finally, I'll export the new utility from `src/index.ts`.
+  - >-
+    This completes the enhancement. The linter error check is now much more
+    robust for TypeScript projects.
+operations:
+  - type: write
+    path: src/utils/typescript.ts
+    content: >-
+      import ts from 'typescript';
+
+      import path from 'path';
+
+      import { logger } from './logger';
+
+
+      const countErrors = (diagnostics: readonly ts.Diagnostic[]): number => {
+          return diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error).length;
+      };
+
+
+      const parseTscCommand = (command: string) => {
+          const projectFlagRegex = /(?:--project|-p)\s+([^\s]+)/;
+          const buildFlagRegex = /(?:--build|-b)/;
+
+          let projectPath: string | undefined;
+          const projectMatch = command.match(projectFlagRegex);
+          if (projectMatch) {
+              projectPath = projectMatch[1];
+          }
+          
+          let buildPath: string | undefined;
+          const buildMatch = command.match(/(?:--build|-b)\s+([^\s]+)/);
+          if (buildMatch) {
+              buildPath = buildMatch[1];
+          }
+
+          return {
+              project: projectPath,
+              build: buildFlagRegex.test(command),
+              buildPath: buildPath
+          };
+      };
+
+
+      const getTsConfigPath = (command: string, cwd: string): string | undefined
+      => {
+          const options = parseTscCommand(command);
+          let tsconfigPath: string | undefined;
+
+          if (options.buildPath) {
+              tsconfigPath = path.resolve(cwd, options.buildPath);
+          } else if (options.project) {
+              tsconfigPath = path.resolve(cwd, options.project);
+          }
+          
+          if (tsconfigPath && ts.sys.directoryExists(tsconfigPath)) {
+              tsconfigPath = path.join(tsconfigPath, 'tsconfig.json');
+          }
+
+          if (!tsconfigPath) {
+              tsconfigPath = ts.findConfigFile(cwd, ts.sys.fileExists, 'tsconfig.json');
+          }
+          
+          if (!tsconfigPath || !ts.sys.fileExists(tsconfigPath)) {
+              logger.debug(`Could not find tsconfig.json to use with TypeScript API.`);
+              return undefined;
+          }
+
+          logger.debug(`Using tsconfig for API-based linting: ${tsconfigPath}`);
+          return tsconfigPath;
+      };
+
+
+
+      export const getTypeScriptErrorCount = (linterCommand: string, cwd:
+      string): number => {
+          const commandOptions = parseTscCommand(linterCommand);
+          const tsconfigPath = getTsConfigPath(linterCommand, cwd);
+
+          if (!tsconfigPath) {
+              return -1; // Sentinel value to indicate fallback
+          }
+          
+          const diagnostics: ts.Diagnostic[] = [];
+          const reportDiagnostic = (d: ts.Diagnostic) => diagnostics.push(d);
+
+          try {
+              if (commandOptions.build) {
+                  const host = ts.createSolutionBuilderHost(ts.sys, undefined, reportDiagnostic, reportDiagnostic);
+                  
+                  // To prevent emitting files if --noEmit is not in tsconfig, we can't easily override compilerOptions
+                  // for each project in the solution build. Instead, we can just intercept writeFile.
+                  host.writeFile = (path, data, writeByteOrderMark) => {
+                      logger.debug(`Intercepted write for ${path} during API-based linting.`);
+                  };
+                  
+                  const builder = ts.createSolutionBuilder(host, [tsconfigPath], { force: true, verbose: false });
+                  builder.build();
+                  
+                  return countErrors(diagnostics);
+              } else {
+                  const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+                  if (configFile.error) {
+                      diagnostics.push(configFile.error);
+                      return countErrors(diagnostics);
+                  }
+                  
+                  const parsedCommandLine = ts.parseJsonConfigFileContent(
+                      configFile.config,
+                      ts.sys,
+                      path.dirname(tsconfigPath)
+                  );
+          
+                  if (parsedCommandLine.errors.length > 0) {
+                      diagnostics.push(...parsedCommandLine.errors);
+                  }
+          
+                  const program = ts.createProgram(parsedCommandLine.fileNames, parsedCommandLine.options);
+                  diagnostics.push(...ts.getPreEmitDiagnostics(program));
+          
+                  return countErrors(diagnostics);
+              }
+          } catch (e) {
+              logger.debug(`Error during TypeScript API-based linting: ${e instanceof Error ? e.message : String(e)}`);
+              return -1; // Fallback on any error
+          }
+      };
+    patchStrategy: replace
+  - type: write
+    path: src/utils/shell.ts
+    content: >-
+      --- src/utils/shell.ts
+
+      +++ src/utils/shell.ts
+
+      @@ -1,5 +1,6 @@
+       import { spawn } from 'child_process';
+       import path from 'path';
+       import { logger } from './logger';
+      +import { getTypeScriptErrorCount } from './typescript';
+       
+       type ExecutionResult = {
+         exitCode: number;
+      @@ -49,15 +50,26 @@
+         if (!linterCommand || linterCommand.trim() === '') {
+           return 0;
+         }
+         
+      -  const { exitCode, stderr } = await executeShellCommand(linterCommand,
+      cwd);
+
+      +  if (linterCommand.includes('tsc')) {
+
+      +    logger.debug('Detected tsc command, attempting to use TypeScript API
+      for error counting.');
+
+      +    try {
+
+      +      const apiErrorCount = getTypeScriptErrorCount(linterCommand, cwd);
+
+      +      if (apiErrorCount !== -1) {
+
+      +        logger.debug(`TypeScript API returned ${apiErrorCount} errors.`);
+
+      +        return apiErrorCount;
+
+      +      }
+
+      +    } catch (e) {
+
+      +      logger.debug(`TypeScript API error counting threw an exception,
+      falling back to shell execution. Error: ${e instanceof Error ? e.message :
+      String(e)}`);
+
+      +    }
+
+      +    logger.debug('TypeScript API error counting failed or was not
+      applicable, falling back to shell execution.');
+
+      +  }
+
+      +
+
+      +  const { exitCode, stderr } = await executeShellCommand(linterCommand,
+      cwd);
+         if (exitCode === 0) return 0;
+       
+         // Try to extract a number of errors from stderr or assume 1 if non-zero exit code
+         const errorMatches = stderr.match(/(\d+) error/i);
+         if (errorMatches && errorMatches[1]) {
+           return parseInt(errorMatches[1], 10);
+         }
+         return exitCode === 0 ? 0 : 1;
+       };
+    patchStrategy: new-unified
+  - type: write
+    path: package.json
+    content: |-
+      <<<<<<< SEARCH
+          "toasted-notifier": "^10.1.0",
+          "uuid": "^9.0.1",
+          "zod": "^3.25.67"
+        },
+        "devDependencies": {
+          "@types/bun": "latest",
+          "@types/js-yaml": "^4.0.9",
+          "@types/uuid": "^9.0.8",
+          "typescript": "^5.8.3"
+        },
+      =======
+          "toasted-notifier": "^10.1.0",
+          "typescript": "^5.8.3",
+          "uuid": "^9.0.1",
+          "zod": "^3.25.67"
+        },
+        "devDependencies": {
+          "@types/bun": "latest",
+          "@types/js-yaml": "^4.0.9",
+          "@types/uuid": "^9.0.8"
+        },
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/index.ts
+    content: |-
+      --- src/index.ts
+      +++ src/index.ts
+      @@ -21,6 +21,7 @@
+       
+       // Utils
+       export { executeShellCommand, getErrorCount } from './utils/shell';
+      +export { getTypeScriptErrorCount } from './utils/typescript';
+       export {
+           deleteFile,
+           readFileContent,
+    patchStrategy: new-unified
+snapshot:
+  src/utils/typescript.ts: null
+  src/utils/shell.ts: >-
+    import { spawn } from 'child_process';
+
+    import path from 'path';
+
+    import { logger } from './logger';
+
+
+    type ExecutionResult = {
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    };
+
+
+    export const executeShellCommand = (command: string, cwd = process.cwd()):
+    Promise<ExecutionResult> => {
+      if (!command || command.trim() === '') {
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      }
+
+      const normalizedCwd = path.resolve(cwd);
+
+      return new Promise((resolve) => {
+        logger.debug(`Executing command: ${command} in directory: ${normalizedCwd}`);
+        
+        const child = spawn(command, {
+          cwd: normalizedCwd,
+          shell: true, // Use shell to interpret the command (e.g., cmd.exe on Windows, /bin/sh on Linux)
+          stdio: ['ignore', 'pipe', 'pipe'], // stdin, stdout, stderr
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => {
+          stdout += data.toString();
+        });
+
+        child.stderr.on('data', (data) => {
+          stderr += data.toString();
+        });
+        
+        child.on('close', (code) => {
+          resolve({
+            exitCode: code ?? 1,
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+          });
+        });
+
+        child.on('error', (err) => {
+          // e.g., command not found
+          resolve({
+            exitCode: 1,
+            stdout: '',
+            stderr: err.message,
+          });
+        });
+      });
+    };
+
+
+    export const getErrorCount = async (linterCommand: string, cwd =
+    process.cwd()): Promise<number> => {
+      if (!linterCommand || linterCommand.trim() === '') {
+        return 0;
+      }
+      
+      const { exitCode, stderr } = await executeShellCommand(linterCommand, cwd);
+      if (exitCode === 0) return 0;
+
+      // Try to extract a number of errors from stderr or assume 1 if non-zero exit code
+      const errorMatches = stderr.match(/(\d+) error/i);
+      if (errorMatches && errorMatches[1]) {
+        return parseInt(errorMatches[1], 10);
+      }
+      return exitCode === 0 ? 0 : 1;
+    };
+  package.json: |
+    {
+      "name": "relaycode",
+      "version": "1.0.37",
+      "description": "A developer assistant that automates applying code changes from LLMs.",
+      "type": "module",
+      "main": "./dist/index.js",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "bin": {
+        "relay": "./dist/cli.js"
+      },
+      "files": [
+        "dist"
+      ],
+      "exports": {
+        ".": {
+          "import": "./dist/index.js",
+          "require": "./dist/index.js",
+          "types": "./dist/index.d.ts"
+        },
+        "./package.json": "./package.json"
+      },
+      "scripts": {
+        "clean": "rm -rf dist",
+        "build": "bun run clean && bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target node",
+        "test": "bun test",
+        "dev": "bun run src/cli.ts",
+        "prepublishOnly": "bun run build",
+        "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+        "commit": "relaycode git commit -y && git push"
+      },
+      "dependencies": {
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "diff-apply": "^1.0.6",
+        "esbuild": "^0.25.5",
+        "js-yaml": "^4.1.0",
+        "toasted-notifier": "^10.1.0",
+        "uuid": "^9.0.1",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/uuid": "^9.0.8",
+        "typescript": "^5.8.3"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "automation",
+        "codegen",
+        "developer-tool",
+        "cli"
+      ],
+      "author": "Relay Code",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/relaycoder/relaycode.git"
+      },
+      "homepage": "https://relay.code"
+    }
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath } from './core/config';
+
+    export { applyOperations, createSnapshot, restoreSnapshot } from
+    './core/executor';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        findStateFileByIdentifier,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState,
+        getStateFilePath,
+        getUndoneStateFilePath
+    } from './core/state';
+
+    export { processPatch } from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export {
+        deleteFile,
+        readFileContent,
+        writeFileContent,
+        fileExists,
+        renameFile,
+        safeRename,
+    } from './utils/fs';
+
+    export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+
+    export { formatTransactionDetails } from './utils/formatters';
+
+    export {
+        createNotifier,
+        notifyPatchDetected,
+        notifyApprovalRequired,
+        requestApprovalWithNotification,
+        notifySuccess,
+        notifyFailure,
+        notifyRollbackFailure,
+    } from './utils/notifier';
+
+    export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+approved: true

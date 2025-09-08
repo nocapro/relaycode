@@ -1,0 +1,596 @@
+uuid: a6312cfb-b789-43c2-84b2-034873c383e5
+projectId: relaycode
+createdAt: '2025-06-24T02:20:13.185Z'
+gitCommitMsg: 'feat: add watchConfig option to disable config file watching'
+promptSummary: >-
+  The user wants to make watching the relaycode.config.json file configurable to
+  avoid loops when patching the config file during 'relay watch'.
+reasoning:
+  - >-
+    Excellent suggestion. Watching the configuration file for changes is a
+    useful feature for dynamically updating settings, but it can indeed cause
+    issues if a patch modifies that same file. Making this behavior optional is
+    the right approach.
+  - Here are the changes to implement the `watchConfig` option.
+  - >-
+    First, I'll update the `ConfigSchema` in `src/types.ts` to include the new
+    `watchConfig` property. It will default to `true` to maintain the existing
+    behavior for current users.
+  - >-
+    Next, I'll modify the `watchCommand` in `src/commands/watch.ts`. It will now
+    check the `watchConfig` property from the configuration and only start the
+    file watcher if it's enabled. I'll also add some informative log messages
+    for the user.
+  - >-
+    Finally, to make this new option visible to users, I'll add it to the
+    default `relaycode.config.json` file.
+  - >-
+    These changes introduce the `watchConfig` flag, giving you full control over
+    whether `relay watch` reloads on configuration changes, thereby preventing
+    any potential loops when patching the config file itself.
+operations:
+  - type: write
+    path: src/types.ts
+    content: |-
+      <<<<<<< SEARCH
+        autoGitBranch: z.boolean().default(false),
+        gitBranchPrefix: z.string().default('relay/'),
+        gitBranchTemplate: z.enum(['uuid', 'gitCommitMsg']).default('gitCommitMsg'),
+      });
+      =======
+        autoGitBranch: z.boolean().default(false),
+        gitBranchPrefix: z.string().default('relay/'),
+        gitBranchTemplate: z.enum(['uuid', 'gitCommitMsg']).default('gitCommitMsg'),
+        watchConfig: z.boolean().default(true),
+      });
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/commands/watch.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      export const watchCommand = async (cwd: string = process.cwd()): Promise<{
+      stop: () => void }> => {
+        let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+        const configPath = path.resolve(cwd, CONFIG_FILE_NAME);
+        let debounceTimer: NodeJS.Timeout | null = null;
+
+        const startServices = (config: Config) => {
+      =======
+
+      export const watchCommand = async (cwd: string = process.cwd()): Promise<{
+      stop: () => void }> => {
+        let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+        const configPath = path.resolve(cwd, CONFIG_FILE_NAME);
+        let configWatcher: fs.FSWatcher | null = null;
+        let debounceTimer: NodeJS.Timeout | null = null;
+
+        const startServices = (config: Config) => {
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+        // Initial startup
+        const initialConfig = await loadConfigOrExit(cwd);
+        logger.success('Configuration loaded. Starting relaycode watch...');
+        startServices(initialConfig);
+
+        // Watch for changes after initial setup
+        const configWatcher = fs.watch(configPath, handleConfigChange);
+
+        const stopAll = () => {
+          if (clipboardWatcher) {
+            clipboardWatcher.stop();
+          }
+          if (configWatcher) {
+            configWatcher.close();
+            logger.info('Configuration file watcher stopped.');
+          }
+          if (debounceTimer) {
+            clearTimeout(debounceTimer);
+          }
+        };
+        return { stop: stopAll };
+      };
+
+      =======
+        // Initial startup
+        const initialConfig = await loadConfigOrExit(cwd);
+        logger.success('Configuration loaded. Starting relaycode watch...');
+        startServices(initialConfig);
+
+        // Watch for changes after initial setup
+        if (initialConfig.watchConfig) {
+          logger.info('Configuration file watching is enabled.');
+          configWatcher = fs.watch(configPath, handleConfigChange);
+        } else {
+          logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');
+        }
+
+        const stopAll = () => {
+          if (clipboardWatcher) {
+            clipboardWatcher.stop();
+          }
+          if (configWatcher) {
+            configWatcher.close();
+            logger.info('Configuration file watcher stopped.');
+          }
+          if (debounceTimer) {
+            clearTimeout(debounceTimer);
+          }
+        };
+        return { stop: stopAll };
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/types.ts: >-
+    import { z } from 'zod';
+
+
+    export const LogLevelNameSchema = z.enum(['silent', 'error', 'warn', 'info',
+    'debug']).default('info');
+
+    export type LogLevelName = z.infer<typeof LogLevelNameSchema>;
+
+
+    // Schema for relaycode.config.json
+
+    export const ConfigSchema = z.object({
+      projectId: z.string().min(1),
+      logLevel: LogLevelNameSchema,
+      clipboardPollInterval: z.number().int().positive().default(2000),
+      approvalMode: z.enum(['auto', 'manual']).default('auto'),
+      approvalOnErrorCount: z.number().int().min(0).default(0),
+      linter: z.string().default('bun tsc --noEmit'),
+      preCommand: z.string().default(''),
+      postCommand: z.string().default(''),
+      preferredStrategy: z.enum(['auto', 'replace', 'new-unified', 'multi-search-replace']).default('auto'),
+      enableNotifications: z.boolean().default(true),
+      autoGitBranch: z.boolean().default(false),
+      gitBranchPrefix: z.string().default('relay/'),
+      gitBranchTemplate: z.enum(['uuid', 'gitCommitMsg']).default('gitCommitMsg'),
+    });
+
+    export type Config = z.infer<typeof ConfigSchema>;
+
+
+    export const PatchStrategySchema = z.enum([
+      'replace',
+      'new-unified',
+      'multi-search-replace',
+      'unified',
+    ]).default('replace');
+
+    export type PatchStrategy = z.infer<typeof PatchStrategySchema>;
+
+
+    // Schema for operations parsed from code blocks
+
+    export const FileOperationSchema = z.union([
+      z.object({
+        type: z.literal('write'),
+        path: z.string(),
+        content: z.string(),
+        patchStrategy: PatchStrategySchema,
+      }),
+      z.object({
+        type: z.literal('delete'),
+        path: z.string(),
+      }),
+      z.object({
+        type: z.literal('rename'),
+        from: z.string(),
+        to: z.string(),
+      }),
+    ]);
+
+    export type FileOperation = z.infer<typeof FileOperationSchema>;
+
+
+    // Schema for the control YAML block at the end of the LLM response
+
+    export const ControlYamlSchema = z.object({
+      projectId: z.string(),
+      uuid: z.string().uuid(),
+      changeSummary: z.array(z.record(z.string())).optional(), // Not strictly used, but good to parse
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+    });
+
+    export type ControlYaml = z.infer<typeof ControlYamlSchema>;
+
+
+    // The fully parsed response from the clipboard
+
+    export const ParsedLLMResponseSchema = z.object({
+      control: ControlYamlSchema,
+      operations: z.array(FileOperationSchema),
+      reasoning: z.array(z.string()),
+    });
+
+    export type ParsedLLMResponse = z.infer<typeof ParsedLLMResponseSchema>;
+
+
+    // Schema for the snapshot of original files
+
+    export const FileSnapshotSchema = z.record(z.string(),
+    z.string().nullable()); // path -> content | null (if file didn't exist)
+
+    export type FileSnapshot = z.infer<typeof FileSnapshotSchema>;
+
+
+    // Schema for the state file (.relaycode/{uuid}.yml or .pending.yml)
+
+    export const StateFileSchema = z.object({
+      uuid: z.string().uuid(),
+      projectId: z.string(),
+      createdAt: z.string().datetime(),
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+      reasoning: z.array(z.string()),
+      operations: z.array(FileOperationSchema),
+      snapshot: FileSnapshotSchema,
+      approved: z.boolean(),
+    });
+
+    export type StateFile = z.infer<typeof StateFileSchema>;
+
+
+    // Shell command execution result
+
+    export const ShellCommandResultSchema = z.object({
+        stdout: z.string(),
+        stderr: z.string(),
+        exitCode: z.number().nullable(),
+    });
+
+    export type ShellCommandResult = z.infer<typeof ShellCommandResultSchema>;
+  src/commands/watch.ts: >-
+    import { findConfig, loadConfigOrExit } from '../core/config';
+
+    import { createClipboardWatcher } from '../core/clipboard';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { CONFIG_FILE_NAME } from '../utils/constants'
+
+    import { Config } from '../types';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+
+    const getSystemPrompt = (projectId: string, preferredStrategy:
+    Config['preferredStrategy']): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+        const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+        const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+    \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+    the \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+    ...
+
+    \`\`\``;
+
+        const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+        const syntaxNewUnified = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath new-unified
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+        const syntaxMultiSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath multi-search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`multi-search-replace\` patch strategy for all
+    modifications.`;
+
+        const sectionNewUnified = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+        const sectionMultiSearchReplace = `---
+
+    ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    [new content to replace with]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+        const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+        const finalSteps = `---
+
+    ### Final Steps
+
+
+    1.  Add your step-by-step reasoning in plain text before each code block.
+
+    2.  ALWAYS add the following YAML block at the very end of your response.
+    Use the exact projectId shown here. Generate a new random uuid for each
+    response.
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary:
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: "A brief summary of my request."
+        gitCommitMsg: "feat: A concise, imperative git commit message."
+        \`\`\`
+    `;
+        
+        const footer = `---------------------------------------------------------------------------`;
+
+        const syntaxMap = {
+            auto: syntaxAuto,
+            replace: syntaxReplace,
+            'new-unified': syntaxNewUnified,
+            'multi-search-replace': syntaxMultiSearchReplace,
+        };
+
+        const strategyDetailsMap = {
+            auto: `${sectionNewUnified}\n${sectionMultiSearchReplace}`,
+            replace: '', // Covered in 'otherOps'
+            'new-unified': sectionNewUnified,
+            'multi-search-replace': sectionMultiSearchReplace,
+        };
+
+        const syntax = syntaxMap[preferredStrategy] ?? syntaxMap.auto;
+        const strategyDetails = strategyDetailsMap[preferredStrategy] ?? strategyDetailsMap.auto;
+
+        return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    }
+
+
+    export const watchCommand = async (cwd: string = process.cwd()): Promise<{
+    stop: () => void }> => {
+      let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+      const configPath = path.resolve(cwd, CONFIG_FILE_NAME);
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.logLevel);
+        logger.debug(`Log level set to: ${config.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.preferredStrategy));
+
+        clipboardWatcher = createClipboardWatcher(config.clipboardPollInterval, async (content) => {
+          logger.info('New clipboard content detected. Attempting to parse...');
+          const parsedResponse = parseLLMResponse(content);
+
+          if (!parsedResponse) {
+            logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+            return;
+          }
+
+          // Check project ID before notifying and processing.
+          if (parsedResponse.control.projectId !== config.projectId) {
+            logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+            return;
+          }
+
+          await processPatch(config, parsedResponse, { cwd, notifyOnStart: true });
+          logger.info('--------------------------------------------------');
+          logger.info('Watching for next patch...');
+        });
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`${CONFIG_FILE_NAME} is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      const configWatcher = fs.watch(configPath, handleConfigChange);
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+approved: true

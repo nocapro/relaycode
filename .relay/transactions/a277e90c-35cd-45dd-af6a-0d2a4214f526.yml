@@ -1,0 +1,101 @@
+uuid: a277e90c-35cd-45dd-af6a-0d2a4214f526
+projectId: relaycode
+createdAt: '2025-09-03T14:01:53.988Z'
+linesAdded: 10
+linesRemoved: 4
+gitCommitMsg: 'fix(core): improve logger type safety to fix build error'
+promptSummary: >-
+  User provided TypeScript errors in the new logger.ts file due to
+  `noUncheckedIndexedAccess`. Fixing the logger to be more type-safe.
+reasoning:
+  - >-
+    yikes, `noUncheckedIndexedAccess` strikes again. my bad. that logger was a
+    bit too loose with its types. the `[key: string]: number` index signature
+    was telling typescript that any property *might* be undefined, which is what
+    caused the errors.
+  - >-
+    here's a much stricter version. this validates the `LOG_LEVEL` env var and
+    uses inferred types, so typescript knows for sure those properties exist.
+    should clear up all those errors.
+operations:
+  - type: write
+    path: packages/relaycode-core/src/logger.ts
+    content: >-
+      // A simple logger for debugging within the core package.
+
+      // To enable debug logs, set LOG_LEVEL=debug in the environment.
+
+      const levels = {
+        debug: 0,
+        info: 1,
+        warn: 2,
+        error: 3,
+      };
+
+      type LogLevelName = keyof typeof levels;
+
+
+      const isValidLogLevel = (level: string): level is LogLevelName => {
+          return level in levels;
+      }
+
+
+      const envLogLevel = process.env.LOG_LEVEL?.toLowerCase() || 'info';
+
+      const LOG_LEVEL: LogLevelName = isValidLogLevel(envLogLevel) ? envLogLevel
+      : 'info';
+
+
+      const currentLevel = levels[LOG_LEVEL];
+
+
+      const log = (level: number, prefix: string, ...args: any[]) => {
+        if (level >= currentLevel) {
+          if (level === levels.debug) {
+              console.log(`\x1b[90m${prefix}\x1b[0m`, ...args); // Gray for debug
+          } else {
+              console.log(prefix, ...args);
+          }
+        }
+      };
+
+
+      export const logger = {
+        debug: (...args: any[]) => log(levels.debug, '[DEBUG]', ...args),
+        info: (...args: any[]) => log(levels.info, '[INFO]', ...args),
+        warn: (...args: any[]) => log(levels.warn, '[WARN]', ...args),
+        error: (...args: any[]) => log(levels.error, '[ERROR]', ...args),
+      };
+    patchStrategy: replace
+snapshot:
+  packages/relaycode-core/src/logger.ts: |-
+    // A simple logger for debugging within the core package.
+    // To enable debug logs, set LOG_LEVEL=debug in the environment.
+    const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
+
+    const levels: { [key: string]: number } = {
+      debug: 0,
+      info: 1,
+      warn: 2,
+      error: 3,
+    };
+
+    const currentLevel = levels[LOG_LEVEL] ?? 1;
+
+    const log = (level: number, prefix: string, ...args: any[]) => {
+      if (level >= currentLevel) {
+        if (level === levels.debug) {
+            console.log(`\x1b[90m${prefix}\x1b[0m`, ...args); // Gray for debug
+        } else {
+            console.log(prefix, ...args);
+        }
+      }
+    };
+
+    export const logger = {
+      debug: (...args: any[]) => log(levels.debug, '[DEBUG]', ...args),
+      info: (...args: any[]) => log(levels.info, '[INFO]', ...args),
+      warn: (...args: any[]) => log(levels.warn, '[WARN]', ...args),
+      error: (...args: any[]) => log(levels.error, '[ERROR]', ...args),
+    };
+approved: true

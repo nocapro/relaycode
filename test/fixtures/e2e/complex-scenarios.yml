@@ -1,0 +1,92 @@
+e2e_patch_tests:
+  - name: multiple-operations
+    description: Should handle multiple operations (edit, delete, new) in one transaction
+    markdown_content: |
+      I'm performing a few operations.
+
+      First, editing `main.ts`.
+      ```typescript // src/main.ts
+      console.log("Updated main");
+      ```
+
+      Second, deleting `utils.ts`.
+      ```typescript // src/utils.ts
+      //TODO: delete this file
+      ```
+
+      Finally, adding a new component.
+      ```typescript // "src/components/New Component.tsx"
+      export const NewComponent = () => {
+        return <div>New!</div>;
+      };
+      ```
+    initial_state:
+      - path: "src/main.ts"
+        content: 'console.log("Original main");'
+      - path: "src/utils.ts"
+        content: 'export const util = {};'
+    expected_state:
+      - path: "src/main.ts"
+        content: |
+          console.log("Updated main");
+      - path: "src/utils.ts"
+        exists: false
+      - path: "src/components/New Component.tsx"
+        content: |
+          export const NewComponent = () => {
+            return <div>New!</div>;
+          };
+
+  - name: transaction-with-all-operation-types
+    description: Should handle a single transaction with new, edit, rename, and delete operations
+    markdown_content: |
+      Here is a complex set of file modifications.
+
+      First, I'll create a new config file.
+      ```typescript // src/config.ts
+      export const config = { timeout: 5000 };
+      ```
+
+      Next, I'll edit the main entrypoint to use this config.
+      ```diff // src/main.ts standard-diff
+      --- src/main.ts
+      +++ src/main.ts
+      @@ ... @@
+      -console.log("Starting...");
+      +import { config } from './config';
+      +console.log(`Starting with timeout ${config.timeout}...`);
+      ```
+
+      Then, I'll rename an old utility file.
+      ```json // rename-file
+      {
+        "from": "src/utils.ts",
+        "to": "src/lib/helpers.ts"
+      }
+      ```
+
+      Finally, I'm removing a deprecated file.
+      ```typescript // src/deprecated.ts
+      //TODO: delete this file
+      ```
+    initial_state:
+      - path: "src/main.ts"
+        content: 'console.log("Starting...");'
+      - path: "src/utils.ts"
+        content: 'export function oldUtil() {}'
+      - path: "src/deprecated.ts"
+        content: '// This is old'
+    expected_state:
+      - path: "src/config.ts"
+        content: |
+          export const config = { timeout: 5000 };
+      - path: "src/main.ts"
+        content: |-
+          import { config } from './config';
+          console.log(`Starting with timeout ${config.timeout}...`);
+      - path: "src/utils.ts"
+        exists: false
+      - path: "src/lib/helpers.ts"
+        content: "export function oldUtil() {}"
+      - path: "src/deprecated.ts"
+        exists: false

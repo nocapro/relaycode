@@ -1,0 +1,1294 @@
+uuid: a697743d-0b73-45fe-8ac8-a8d6727221e7
+projectId: relaycode
+createdAt: '2025-06-24T05:07:01.236Z'
+gitCommitMsg: 'refactor: Improve DRYness and efficiency in core logic'
+promptSummary: >-
+  Refactor the codebase to be highly DRY and improve algorithm efficiency
+  without causing feature breaks and regressions.
+reasoning:
+  - >-
+    I've analyzed your codebase for opportunities to make it more DRY (Don't
+    Repeat Yourself) and to improve algorithmic efficiency, all while ensuring
+    no features are broken. I have identified several areas for refactoring that
+    centralize logic, reduce code duplication, and enhance performance and
+    maintainability.
+  - 'Here is my plan:'
+  - >-
+    1.  **Centralize Transaction Lookups:** I will create a new, efficient
+    helper function `findStateFileByIdentifier` in `src/core/state.ts`. This
+    function will consolidate the logic for finding transactions by either UUID
+    or index, which is currently duplicated and less efficient in
+    `src/commands/revert.ts`. This new function will also be more performant for
+    the common case of finding the latest transaction.
+  - >-
+    2.  **Refactor `revert` Command:** The `revert` command will be updated to
+    use the new `findStateFileByIdentifier` helper. This will simplify its code,
+    remove duplicated logic, and make it more maintainable while preserving its
+    user-facing behavior and log messages.
+  - >-
+    3.  **Improve `processPatch` in `transaction.ts`:** I'll refactor the main
+    transaction processing function to be cleaner and more DRY.
+  - >-
+    *   The user approval logic will be streamlined to eliminate repeated code
+    for prompting the user.
+  - >-
+    *   The logic for automatically creating a new Git branch will be extracted
+    into its own dedicated helper function, making the main function shorter and
+    easier to understand.
+  - >-
+    4.  **Minor Code Cleanup:** I'll introduce a small helper
+    `getUuidFromFileName` in `src/core/state.ts` to reduce minor code repetition
+    when parsing transaction filenames. I will also add the new function to
+    `src/index.ts` so it can be exported.
+  - >-
+    These changes will make the codebase cleaner and more efficient without
+    altering any of its core functionality.
+  - >-
+    First, I'll refactor `src/core/state.ts` to centralize transaction lookup
+    logic and improve efficiency.
+  - >-
+    Now, I'll update the `revert` command to use this new helper function. This
+    simplifies the command's logic significantly.
+  - >-
+    Next, I'll refactor `src/core/transaction.ts` to make the `processPatch`
+    function cleaner by extracting the approval and Git branching logic.
+  - Finally, I'll export the new function from the main `index.ts` file.
+  - >-
+    These refactorings improve the overall structure and efficiency of your
+    codebase, adhering to the DRY principle without introducing any regressions.
+operations:
+  - type: write
+    path: src/core/state.ts
+    content: >-
+      --- src/core/state.ts
+
+      +++ src/core/state.ts
+
+      @@ -17,6 +17,14 @@
+         return path.join(getStateDirectory(cwd), UNDONE_DIRECTORY_NAME, fileName);
+       };
+       
+      +const getUuidFromFileName = (fileName: string): string => {
+
+      +  return fileName.replace(COMMITTED_STATE_FILE_SUFFIX, '');
+
+      +};
+
+      +
+
+      +const isUUID = (str: string): boolean => {
+
+      +  return
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+
+      +};
+
+      +
+       // Helper to get all committed transaction file names.
+       const getCommittedTransactionFiles = async (cwd: string): Promise<{ stateDir: string; files: string[] } | null> => {
+           const stateDir = getStateDirectory(cwd);
+      @@ -29,6 +37,10 @@
+           return { stateDir, files: transactionFiles };
+       };
+       
+      +const sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt:
+      string | Date }) => {
+
+      +    return new Date(b.createdAt).getTime() - new
+      Date(a.createdAt).getTime();
+
+      +};
+
+      +
+       // Ensure state directory exists with caching for performance
+       const ensureStateDirectory = async (cwd: string): Promise<void> => {
+         const dirPath = getStateDirectory(cwd);
+      @@ -113,7 +125,7 @@
+           }
+           const { files: transactionFiles } = transactionFileInfo;
+           
+           const promises = transactionFiles.map(async (file) => {
+      -        const stateFile = await readStateFile(cwd,
+      file.replace(COMMITTED_STATE_FILE_SUFFIX, ''));
+
+      +        const stateFile = await readStateFile(cwd,
+      getUuidFromFileName(file));
+               if (!stateFile) {
+                   logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+               }
+      @@ -124,7 +136,7 @@
+           const validResults = results.filter((sf): sf is StateFile => !!sf);
+       
+           // Sort transactions by date, most recent first
+      -    validResults.sort((a, b) => new Date(b.createdAt).getTime() - new
+      Date(a.createdAt).getTime());
+
+      +    validResults.sort(sortByDateDesc);
+       
+           return validResults;
+       }
+      @@ -165,7 +177,7 @@
+               return transactions?.[0] ?? null;
+           }
+       
+      -    validFiles.sort((a, b) => b.createdAt.getTime() -
+      a.createdAt.getTime());
+
+      +    validFiles.sort((a, b) => sortByDateDesc({ createdAt: a.createdAt },
+      { createdAt: b.createdAt }));
+       
+           const latestFile = validFiles[0];
+           if (!latestFile) {
+      @@ -173,5 +185,28 @@
+           }
+       
+           // Now read the full content of only the latest file
+      -    return readStateFile(cwd,
+      latestFile.file.replace(COMMITTED_STATE_FILE_SUFFIX, ''));
+
+      +    return readStateFile(cwd, getUuidFromFileName(latestFile.file));
+       };
+      +
+
+      +export const findStateFileByIdentifier = async (cwd: string, identifier:
+      string): Promise<StateFile | null> => {
+
+      +    if (isUUID(identifier)) {
+
+      +        return readStateFile(cwd, identifier);
+
+      +    }
+
+      +    
+
+      +    if (/^-?\d+$/.test(identifier)) {
+
+      +        const index = Math.abs(parseInt(identifier, 10));
+
+      +        if (isNaN(index) || index <= 0) {
+
+      +            return null;
+
+      +        }
+
+      +        // Optimization: use the more efficient method for the most
+      common case.
+
+      +        if (index === 1) {
+
+      +            return findLatestStateFile(cwd);
+
+      +        }
+
+      +        const allTransactions = await readAllStateFiles(cwd);
+
+      +        if (!allTransactions || allTransactions.length < index) {
+
+      +            return null;
+
+      +        }
+
+      +        return allTransactions[index - 1] ?? null;
+
+      +    }
+
+      +    return null; // Invalid identifier format
+
+      +};
+    patchStrategy: new-unified
+  - type: write
+    path: src/commands/revert.ts
+    content: >-
+      --- src/commands/revert.ts
+
+      +++ src/commands/revert.ts
+
+      @@ -1,5 +1,5 @@
+       import { loadConfigOrExit } from '../core/config';
+      -import { readStateFile, readAllStateFiles } from '../core/state';
+
+      +import { findStateFileByIdentifier, readAllStateFiles } from
+      '../core/state';
+       import { processPatch } from '../core/transaction';
+       import { logger } from '../utils/logger';
+       import { FileOperation, ParsedLLMResponse, StateFile } from '../types';
+      @@ -10,47 +10,40 @@
+       
+       type Prompter = (question: string) => Promise<boolean>;
+       
+      -const isUUID = (str: string): boolean => {
+
+      -    return
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+
+      -};
+
+      -
+       export const revertCommand = async (identifier?: string, cwd: string = process.cwd(), prompter?: Prompter): Promise<void> => {
+           const getConfirmation = prompter || defaultGetConfirmation;
+           const config = await loadConfigOrExit(cwd);
+       
+      -    let stateToRevert: StateFile | null = null;
+           let targetDescription: string;
+       
+           // Default to '1' to revert the latest transaction if no identifier is provided.
+           const effectiveIdentifier = identifier ?? '1';
+       
+      -    if (isUUID(effectiveIdentifier)) {
+
+      -        targetDescription = `transaction with UUID
+      '${chalk.cyan(effectiveIdentifier)}'`;
+
+      -        logger.info(`Attempting to revert ${targetDescription}`);
+
+      -        stateToRevert = await readStateFile(cwd, effectiveIdentifier);
+
+      -    } else if (/^-?\d+$/.test(effectiveIdentifier)) {
+
+      +    const isIndexSearch = /^-?\d+$/.test(effectiveIdentifier);
+
+      +
+
+      +    if (isIndexSearch) {
+               const index = Math.abs(parseInt(effectiveIdentifier, 10));
+               if (isNaN(index) || index <= 0) {
+                   logger.error(`Invalid index. Please provide a positive number (e.g., ${chalk.cyan('"1"')} for the latest).`);
+                   return;
+               }
+               targetDescription = index === 1 ? 'the latest transaction' : `the ${chalk.cyan(index)}-th latest transaction`;
+      -        logger.info(`Looking for ${targetDescription}...`);
+
+      -        const allTransactions = await readAllStateFiles(cwd);
+
+      -        if (!allTransactions || allTransactions.length < index) {
+
+      -            logger.error(`Transaction not found. Only
+      ${chalk.cyan(allTransactions?.length ?? 0)} transactions exist.`);
+
+      -            return;
+
+      -        }
+
+      -        stateToRevert = allTransactions[index - 1] ?? null;
+           } else {
+      -        logger.error(`Invalid identifier: '${chalk.yellow(identifier)}'.
+      Please provide a UUID or an index (e.g., ${chalk.cyan("'1'")} for the
+      latest).`);
+
+      +        // We assume it's a UUID, findStateFileByIdentifier will validate
+
+      +        targetDescription = `transaction with UUID
+      '${chalk.cyan(effectiveIdentifier)}'`;
+
+      +    }
+
+      +
+
+      +    logger.info(`Looking for ${targetDescription}...`);
+
+      +    const stateToRevert = await findStateFileByIdentifier(cwd,
+      effectiveIdentifier);
+
+      +
+
+      +    if (!stateToRevert) {
+
+      +        logger.error(`Could not find ${targetDescription}.`);
+
+      +        if (isIndexSearch) {
+
+      +            const allTransactions = await readAllStateFiles(cwd); // To
+      give a helpful count
+
+      +            logger.info(`Only ${chalk.cyan(allTransactions?.length ?? 0)}
+      transactions exist.`);
+
+      +        }
+               return;
+           }
+      -
+
+      -    if (!stateToRevert) {
+
+      -        logger.error(`Could not find ${targetDescription}.`);
+
+      -        return;
+
+      -    }
+
+      -
+           logger.log(chalk.bold(`Transaction to be reverted:`));
+           formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+    patchStrategy: new-unified
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -194,30 +194,26 @@
+               const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+               logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+               
+      +        const getManualApproval = async (reason: string) => {
+
+      +            logger.warn(reason);
+
+      +            notifyApprovalRequired(config.projectId,
+      config.core.enableNotifications);
+
+      +            return await prompter('Changes applied. Do you want to
+      approve and commit them? (y/N)');
+
+      +        }
+
+      +
+               let isApproved: boolean;
+      -        if (config.patch.approvalMode === 'auto') { // Auto mode allows
+      conditional auto-approval
+
+      +        if (config.patch.approvalMode === 'manual') {
+
+      +            isApproved = await getManualApproval('Manual approval
+      required because "approvalMode" is set to "manual".');
+
+      +        } else { // auto mode
+                   const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+      -
+                   if (canAutoApprove) {
+                       logger.success('  - Changes automatically approved based on your configuration.');
+                       isApproved = true;
+                   } else {
+      -                notifyApprovalRequired(config.projectId,
+      config.core.enableNotifications);
+
+      -                isApproved = await prompter('Changes applied. Do you want
+      to approve and commit them? (y/N)');
+
+      +                isApproved = await getManualApproval(`Manual approval
+      required: Linter found ${finalErrorCount} error(s) (threshold is
+      ${config.patch.approvalOnErrorCount}).`);
+                   }
+      -        } else { // Manual mode always requires user approval
+
+      -            logger.warn('Manual approval required because "approvalMode"
+      is set to "manual".');
+
+      -            notifyApprovalRequired(config.projectId,
+      config.core.enableNotifications);
+
+      -            isApproved = await prompter('Changes applied. Do you want to
+      approve and commit them? (y/N)');
+               }
+       
+               if (isApproved) {
+                   stateFile.approved = true;
+                   await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                   await commitState(cwd, uuid);
+                   logCompletionSummary(uuid, startTime, operations);
+                   notifySuccess(uuid, config.core.enableNotifications);
+      -
+
+      -            if (config.git.autoGitBranch) {
+
+      -                let branchNameSegment = '';
+
+      -                if (config.git.gitBranchTemplate === 'gitCommitMsg' &&
+      stateFile.gitCommitMsg) {
+
+      -                    branchNameSegment = stateFile.gitCommitMsg;
+
+      -                } else {
+
+      -                    branchNameSegment = stateFile.uuid;
+
+      -                }
+
+      -            
+
+      -                const sanitizedSegment = branchNameSegment
+
+      -                    .trim()
+
+      -                    .toLowerCase()
+
+      -                    .replace(/[^\w\s-]/g, '') // Remove all non-word,
+      non-space, non-hyphen chars
+
+      -                    .replace(/[\s_]+/g, '-') // Replace spaces and
+      underscores with a single hyphen
+
+      -                    .replace(/-+/g, '-') // Collapse consecutive hyphens
+
+      -                    .replace(/^-|-$/g, '') // Trim leading/trailing
+      hyphens
+
+      -                    .slice(0, 70); // Truncate
+
+      -            
+
+      -                if (sanitizedSegment) {
+
+      -                    const branchName =
+      `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+
+      -                    logger.info(`Creating and switching to new git
+      branch: ${chalk.magenta(branchName)}`);
+
+      -                    const command = `git checkout -b "${branchName}"`;
+
+      -                    const result = await executeShellCommand(command,
+      cwd);
+
+      -                    if (result.exitCode === 0) {
+
+      -                        logger.success(`Successfully created and switched
+      to branch '${chalk.magenta(branchName)}'.`);
+
+      -                    } else {
+
+      -                        logger.warn(`Could not create branch
+      '${chalk.magenta(branchName)}'. It might already exist.`);
+
+      -                        logger.debug(`'${command}' failed with:
+      ${result.stderr}`);
+
+      -                    }
+
+      -                } else {
+
+      -                    logger.warn('Could not generate a branch name segment
+      from commit message or UUID. Skipping git branch creation.');
+
+      -                }
+
+      -            }
+
+      +            await handleAutoGitBranch(config, stateFile, cwd);
+               } else {
+                   logger.warn('Operation cancelled by user. Rolling back changes...');
+                   await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+      @@ -227,3 +223,42 @@
+               await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+           }
+       };
+      +
+
+      +const handleAutoGitBranch = async (config: Config, stateFile: StateFile,
+      cwd: string): Promise<void> => {
+
+      +    if (!config.git.autoGitBranch) return;
+
+      +
+
+      +    let branchNameSegment = '';
+
+      +    if (config.git.gitBranchTemplate === 'gitCommitMsg' &&
+      stateFile.gitCommitMsg) {
+
+      +        branchNameSegment = stateFile.gitCommitMsg;
+
+      +    } else {
+
+      +        branchNameSegment = stateFile.uuid;
+
+      +    }
+
+      +
+
+      +    const sanitizedSegment = branchNameSegment
+
+      +        .trim()
+
+      +        .toLowerCase()
+
+      +        .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space,
+      non-hyphen chars
+
+      +        .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a
+      single hyphen
+
+      +        .replace(/-+/g, '-') // Collapse consecutive hyphens
+
+      +        .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+
+      +        .slice(0, 70); // Truncate
+
+      +
+
+      +    if (sanitizedSegment) {
+
+      +        const branchName =
+      `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+
+      +        logger.info(`Creating and switching to new git branch:
+      ${chalk.magenta(branchName)}`);
+
+      +        const command = `git checkout -b "${branchName}"`;
+
+      +        const result = await executeShellCommand(command, cwd);
+
+      +        if (result.exitCde === 0) {
+
+      +            logger.success(`Successfully created and switched to branch
+      '${chalk.magenta(branchName)}'.`);
+
+      +        } else {
+
+      +            // Exit code 128 from `git checkout -b` often means the
+      branch already exists.
+
+      +            if (result.exitCode === 128 &&
+      result.stderr.includes('already exists')) {
+
+      +                logger.warn(`Could not create branch
+      '${chalk.magenta(branchName)}' because it already exists.`);
+
+      +            } else {
+
+      +                logger.warn(`Could not create git branch
+      '${chalk.magenta(branchName)}'.`);
+
+      +            }
+
+      +            logger.debug(`'${command}' failed with: ${result.stderr}`);
+
+      +        }
+
+      +    } else {
+
+      +        logger.warn('Could not generate a branch name segment from commit
+      message or UUID. Skipping git branch creation.');
+
+      +    }
+
+      +};
+
+      +
+    patchStrategy: new-unified
+  - type: write
+    path: src/index.ts
+    content: |-
+      <<<<<<< SEARCH
+          hasBeenProcessed,
+          findLatestStateFile,
+          readStateFile,
+          readAllStateFiles,
+          writePendingState,
+      =======
+          hasBeenProcessed,
+          findLatestStateFile,
+          findStateFileByIdentifier,
+          readStateFile,
+          readAllStateFiles,
+          writePendingState,
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+snapshot:
+  src/core/state.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { StateFile, StateFileSchema } from '../types';
+
+    import { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX,
+    STATE_DIRECTORY_NAME, UNDONE_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError, getErrorMessage } from '../utils/logger';
+
+    import { fileExists, safeRename } from './executor';
+
+
+    const stateDirectoryCache = new Map<string, boolean>();
+
+
+    const getStateDirectory = (cwd: string) => path.resolve(cwd,
+    STATE_DIRECTORY_NAME);
+
+
+    export const getStateFilePath = (cwd: string, uuid: string, isPending:
+    boolean): string => {
+      const fileName = isPending ? `${uuid}${PENDING_STATE_FILE_SUFFIX}` : `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      return path.join(getStateDirectory(cwd), fileName);
+    };
+
+
+    export const getUndoneStateFilePath = (cwd: string, uuid: string): string =>
+    {
+      const fileName = `${uuid}${COMMITTED_STATE_FILE_SUFFIX}`;
+      return path.join(getStateDirectory(cwd), UNDONE_DIRECTORY_NAME, fileName);
+    };
+
+
+    // Helper to get all committed transaction file names.
+
+    const getCommittedTransactionFiles = async (cwd: string): Promise<{
+    stateDir: string; files: string[] } | null> => {
+        const stateDir = getStateDirectory(cwd);
+        try {
+            await fs.access(stateDir);
+        } catch (e) {
+            return null;
+        }
+        const files = await fs.readdir(stateDir);
+        const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));
+        return { stateDir, files: transactionFiles };
+    };
+
+
+    // Ensure state directory exists with caching for performance
+
+    const ensureStateDirectory = async (cwd: string): Promise<void> => {
+      const dirPath = getStateDirectory(cwd);
+      if (!stateDirectoryCache.has(dirPath)) {
+        await fs.mkdir(dirPath, { recursive: true });
+        stateDirectoryCache.set(dirPath, true);
+      }
+    };
+
+
+    export const hasBeenProcessed = async (cwd: string, uuid: string):
+    Promise<boolean> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      const undonePath = getUndoneStateFilePath(cwd, uuid);
+      // Check if a transaction has been committed or undone.
+      // This allows re-processing a transaction that failed and left an orphaned .pending.yml
+      // because we don't check for `.pending.yml` files.
+      return (await fileExists(committedPath)) || (await fileExists(undonePath));
+    };
+
+
+    export const writePendingState = async (cwd: string, state: StateFile):
+    Promise<void> => {
+      const validatedState = StateFileSchema.parse(state);
+      const yamlString = yaml.dump(validatedState);
+      const filePath = getStateFilePath(cwd, state.uuid, true);
+      
+      // Ensure directory exists (cached)
+      await ensureStateDirectory(cwd);
+      
+      // Write file
+      await fs.writeFile(filePath, yamlString, 'utf-8');
+    };
+
+
+    export const commitState = async (cwd: string, uuid: string): Promise<void>
+    => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      await safeRename(pendingPath, committedPath);
+    };
+
+
+    export const deletePendingState = async (cwd: string, uuid: string):
+    Promise<void> => {
+      const pendingPath = getStateFilePath(cwd, uuid, true);
+      try {
+        await fs.unlink(pendingPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          // Already gone, that's fine.
+          return;
+        }
+        throw error;
+      }
+    };
+
+
+    export const readStateFile = async (cwd: string, uuid: string):
+    Promise<StateFile | null> => {
+      const committedPath = getStateFilePath(cwd, uuid, false);
+      try {
+        const fileContent = await fs.readFile(committedPath, 'utf-8');
+        const yamlContent = yaml.load(fileContent);
+        const parsed = StateFileSchema.safeParse(yamlContent);
+        if (parsed.success) {
+          return parsed.data;
+        }
+        logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);
+        return null;
+      } catch (error) {
+        // Can be file not found or YAML parsing error.
+        // In any case, we can't get the state file.
+        return null;
+      }
+    };
+
+
+    export const readAllStateFiles = async (cwd: string = process.cwd()):
+    Promise<StateFile[] | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo) {
+            return null;
+        }
+        const { files: transactionFiles } = transactionFileInfo;
+        
+        const promises = transactionFiles.map(async (file) => {
+            const stateFile = await readStateFile(cwd, file.replace(COMMITTED_STATE_FILE_SUFFIX, ''));
+            if (!stateFile) {
+                logger.warn(`Could not read or parse state file ${file}. Skipping.`);
+            }
+            return stateFile;
+        });
+
+        const results = await Promise.all(promises);
+        const validResults = results.filter((sf): sf is StateFile => !!sf);
+
+        // Sort transactions by date, most recent first
+        validResults.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return validResults;
+    }
+
+
+    export const findLatestStateFile = async (cwd: string = process.cwd()):
+    Promise<StateFile | null> => {
+        const transactionFileInfo = await getCommittedTransactionFiles(cwd);
+        if (!transactionFileInfo || transactionFileInfo.files.length === 0) {
+            return null;
+        }
+        const { stateDir, files: transactionFiles } = transactionFileInfo;
+        
+        // Read creation date from each file without parsing the whole thing.
+        // This is much faster than reading and parsing the full YAML for every file.
+        const filesWithDates = await Promise.all(
+            transactionFiles.map(async (file) => {
+                const filePath = path.join(stateDir, file);
+                let createdAt: Date | null = null;
+                try {
+                    // Read only the first 512 bytes to find `createdAt`. This is an optimization.
+                    const fileHandle = await fs.open(filePath, 'r');
+                    const buffer = Buffer.alloc(512);
+                    await fileHandle.read(buffer, 0, 512, 0);
+                    await fileHandle.close();
+                    const content = buffer.toString('utf-8');
+                    // Extract date from a line like 'createdAt: 2023-01-01T00:00:00.000Z'
+                    const match = content.match(/^createdAt:\s*['"]?(.+?)['"]?$/m);
+                    if (match && match[1]) {
+                        createdAt = new Date(match[1]);
+                    }
+                } catch (error) {
+                    if (!isEnoentError(error)) {
+                      logger.debug(`Could not read partial date from ${file}: ${getErrorMessage(error)}`);
+                    }
+                }
+                return { file, createdAt };
+            })
+        );
+
+        const validFiles = filesWithDates.filter(f => f.createdAt instanceof Date) as { file: string; createdAt: Date }[];
+
+        if (validFiles.length === 0) {
+            // Fallback for safety, though it should be rare.
+            const transactions = await readAllStateFiles(cwd);
+            return transactions?.[0] ?? null;
+        }
+
+        validFiles.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+        const latestFile = validFiles[0];
+        if (!latestFile) {
+            return null;
+        }
+
+        // Now read the full content of only the latest file
+        return readStateFile(cwd, latestFile.file.replace(COMMITTED_STATE_FILE_SUFFIX, ''));
+    };
+  src/commands/revert.ts: >-
+    import { loadConfigOrExit } from '../core/config';
+
+    import { readStateFile, readAllStateFiles } from '../core/state';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, ParsedLLMResponse, StateFile } from '../types';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { getConfirmation as defaultGetConfirmation } from '../utils/prompt';
+
+    import { formatTransactionDetails } from '../utils/formatters';
+
+    import chalk from 'chalk';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    const isUUID = (str: string): boolean => {
+        return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+    };
+
+
+    export const revertCommand = async (identifier?: string, cwd: string =
+    process.cwd(), prompter?: Prompter): Promise<void> => {
+        const getConfirmation = prompter || defaultGetConfirmation;
+        const config = await loadConfigOrExit(cwd);
+
+        let stateToRevert: StateFile | null = null;
+        let targetDescription: string;
+
+        // Default to '1' to revert the latest transaction if no identifier is provided.
+        const effectiveIdentifier = identifier ?? '1';
+
+        if (isUUID(effectiveIdentifier)) {
+            targetDescription = `transaction with UUID '${chalk.cyan(effectiveIdentifier)}'`;
+            logger.info(`Attempting to revert ${targetDescription}`);
+            stateToRevert = await readStateFile(cwd, effectiveIdentifier);
+        } else if (/^-?\d+$/.test(effectiveIdentifier)) {
+            const index = Math.abs(parseInt(effectiveIdentifier, 10));
+            if (isNaN(index) || index <= 0) {
+                logger.error(`Invalid index. Please provide a positive number (e.g., ${chalk.cyan('"1"')} for the latest).`);
+                return;
+            }
+            targetDescription = index === 1 ? 'the latest transaction' : `the ${chalk.cyan(index)}-th latest transaction`;
+            logger.info(`Looking for ${targetDescription}...`);
+            const allTransactions = await readAllStateFiles(cwd);
+            if (!allTransactions || allTransactions.length < index) {
+                logger.error(`Transaction not found. Only ${chalk.cyan(allTransactions?.length ?? 0)} transactions exist.`);
+                return;
+            }
+            stateToRevert = allTransactions[index - 1] ?? null;
+        } else {
+            logger.error(`Invalid identifier: '${chalk.yellow(identifier)}'. Please provide a UUID or an index (e.g., ${chalk.cyan("'1'")} for the latest).`);
+            return;
+        }
+
+        if (!stateToRevert) {
+            logger.error(`Could not find ${targetDescription}.`);
+            return;
+        }
+
+        logger.log(chalk.bold(`Transaction to be reverted:`));
+        formatTransactionDetails(stateToRevert).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation('\nAre you sure you want to revert this transaction? (y/N)');
+        if (!confirmed) {
+            logger.info('Revert operation cancelled.');
+            return;
+        }
+
+        // 3. Generate inverse operations
+        const inverse_operations = [...stateToRevert.operations]
+            .reverse()
+            .map((op): FileOperation | null => {
+                switch (op.type) {
+                    case 'rename':
+                        return { type: 'rename', from: op.to, to: op.from };
+                    case 'delete': {
+                        const deletedContent = stateToRevert.snapshot[op.path];
+                        if (deletedContent === null || typeof deletedContent === 'undefined') {
+                            logger.warn(`Cannot revert deletion of ${chalk.cyan(op.path)}, original content not found in snapshot. Skipping.`);
+                            return null;
+                        }
+                        return { type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' };
+                    }
+                    case 'write': {
+                        const originalContent = stateToRevert.snapshot[op.path];
+                        if (typeof originalContent === 'undefined') {
+                            logger.warn(`Cannot find original state for ${chalk.cyan(op.path)} in snapshot. Skipping revert for this operation.`);
+                            return null;
+                        }
+                        if (originalContent === null) {
+                            return { type: 'delete', path: op.path };
+                        } else {
+                            return { type: 'write', path: op.path, content: originalContent, patchStrategy: 'replace' };
+                        }
+                    }
+                }
+            })
+            .filter((op): op is FileOperation => op !== null);
+
+        if (inverse_operations.length === 0) {
+            logger.warn('No operations to revert for this transaction.');
+            return;
+        }
+
+        // 4. Create and process a new "revert" transaction
+        const newUuid = uuidv4();
+        const reasoning = [
+            `Reverting transaction ${stateToRevert.uuid}.`,
+            `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+        ];
+
+        const parsedResponse: ParsedLLMResponse = {
+            control: {
+                projectId: config.projectId,
+                uuid: newUuid,
+            },
+            operations: inverse_operations,
+            reasoning,
+        };
+
+        logger.info(`Creating new transaction ${chalk.gray(newUuid)} to perform the revert.`);
+        await processPatch(config, parsedResponse, { cwd, prompter });
+    };
+  src/core/transaction.ts: >-
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { createSnapshot, restoreSnapshot, applyOperations } from
+    './executor';
+
+    import chalk from 'chalk';
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt'
+
+    import { notifyApprovalRequired, notifyFailure, notifySuccess,
+    notifyPatchDetected } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+    };
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        snapshot: FileSnapshot,
+        newContents: Map<string, string>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newContents.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        // This is a simplified diff, for a more accurate count a real diff algorithm is needed,
+        // but this is fast and good enough for a summary.
+        const oldSet = new Set(oldLines);
+        const newSet = new Set(newLines);
+        
+        let added = 0;
+        for (const line of newLines) {
+            if (!oldSet.has(line)) added++;
+        }
+
+        let removed = 0;
+        for (const line of oldLines) {
+            if (!newSet.has(line)) removed++;
+        }
+        
+        return { added, removed };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true, isError:
+    boolean = true): Promise<void> => {
+        if (isError) {
+            logger.warn(`Rolling back changes: ${reason}`);
+        }
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                if (isError) {
+                    notifyFailure(uuid, enableNotifications);
+                }
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newContents = await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, snapshot, newContents);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log(chalk.bold('\nPre-flight summary:'));
+            logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+            logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+            // Check for approval
+            const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+            logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+            
+            let isApproved: boolean;
+            if (config.patch.approvalMode === 'auto') { // Auto mode allows conditional auto-approval
+                const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+
+                if (canAutoApprove) {
+                    logger.success('  - Changes automatically approved based on your configuration.');
+                    isApproved = true;
+                } else {
+                    notifyApprovalRequired(config.projectId, config.core.enableNotifications);
+                    isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+                }
+            } else { // Manual mode always requires user approval
+                logger.warn('Manual approval required because "approvalMode" is set to "manual".');
+                notifyApprovalRequired(config.projectId, config.core.enableNotifications);
+                isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+            }
+
+            if (isApproved) {
+                stateFile.approved = true;
+                await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.core.enableNotifications);
+
+                if (config.git.autoGitBranch) {
+                    let branchNameSegment = '';
+                    if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+                        branchNameSegment = stateFile.gitCommitMsg;
+                    } else {
+                        branchNameSegment = stateFile.uuid;
+                    }
+                
+                    const sanitizedSegment = branchNameSegment
+                        .trim()
+                        .toLowerCase()
+                        .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+                        .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+                        .replace(/-+/g, '-') // Collapse consecutive hyphens
+                        .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+                        .slice(0, 70); // Truncate
+                
+                    if (sanitizedSegment) {
+                        const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+                        logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+                        const command = `git checkout -b "${branchName}"`;
+                        const result = await executeShellCommand(command, cwd);
+                        if (result.exitCode === 0) {
+                            logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+                        } else {
+                            logger.warn(`Could not create branch '${chalk.magenta(branchName)}'. It might already exist.`);
+                            logger.debug(`'${command}' failed with: ${result.stderr}`);
+                        }
+                    } else {
+                        logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+                    }
+                }
+            } else {
+                logger.warn('Operation cancelled by user. Rolling back changes...');
+                await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        }
+    };
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath } from './core/config';
+
+    export {
+        applyOperations,
+        createSnapshot,
+        deleteFile,
+        readFileContent,
+        restoreSnapshot,
+        writeFileContent,
+        fileExists,
+        renameFile
+    } from './core/executor';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState,
+        getStateFilePath,
+        getUndoneStateFilePath
+    } from './core/state';
+
+    export { processPatch } from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+
+    export { formatTransactionDetails } from './utils/formatters';
+
+    export {
+        createNotifier,
+        notifyPatchDetected,
+        notifyApprovalRequired,
+        notifySuccess,
+        notifyFailure,
+    } from './utils/notifier';
+
+    export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+approved: true

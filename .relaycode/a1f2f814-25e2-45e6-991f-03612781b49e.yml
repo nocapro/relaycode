@@ -1,0 +1,1331 @@
+uuid: a1f2f814-25e2-45e6-991f-03612781b49e
+projectId: relaycode
+createdAt: '2025-06-27T14:34:40.409Z'
+gitCommitMsg: 'fix: resolve compiler errors and failing tests'
+promptSummary: >-
+  The user reported several TypeScript errors and a failing test. I will fix the
+  compiler errors, address the test timeout and cleanup issue, and correct the
+  package.json configuration.
+reasoning:
+  - 'Based on the errors and test failures, I''ll perform the following fixes:'
+  - >-
+    1.  **Remove Unused Variable**: Delete the unused `YAML_BLOCK_REGEX`
+    constant from `src/core/parser.ts` to fix the `TS6133` compiler error.
+  - >-
+    2.  **Update Test Utility**: Add the missing `minFileChanges: 0` property to
+    the default configuration in `test/test.util.ts` to resolve the `TS2741`
+    type error.
+  - >-
+    3.  **Fix Test Timeout**: In `test/e2e/transaction.test.ts`, change the
+    linter command from `bun tsc` to the faster `bun tsc --noEmit`. This will
+    prevent the test from timing out.
+  - >-
+    4.  **Correct State File Paths**: Several tests in
+    `test/e2e/transaction.test.ts` were checking for the state file in the wrong
+    directory. I'll correct the path to include the `transactions` subdirectory.
+  - >-
+    5.  **Fix Test Cleanup**: In `test/e2e/transaction.test.ts`, I'll add a
+    check to ensure a directory exists before attempting to change its
+    permissions during cleanup. This avoids an `ENOENT` error that was appearing
+    in the test logs.
+  - >-
+    6.  **Fix `package.json`**: I will reorder the fields in the `exports` map
+    in `package.json` to place the `types` condition first, which resolves the
+    packaging warning.
+  - 'Here are the code changes:'
+operations:
+  - type: write
+    path: src/core/parser.ts
+    content: |-
+      --- src/core/parser.ts
+      +++ src/core/parser.ts
+      @@ -17,8 +17,7 @@
+       } from '../utils/constants';
+       import { getErrorMessage, logger } from '../utils/logger';
+       
+       const CODE_BLOCK_REGEX = /```(?:\w+)?(?:\s*\/\/\s*(.*?)|\s+(.*?))?[\r\n]([\s\S]*?)[\r\n]```/g;
+      -const YAML_BLOCK_REGEX = /```\s*(?:yaml|yml)[\r\n]([\s\S]+?)```/i;
+       
+       type ParsedHeader = {
+           filePath: string;
+    patchStrategy: new-unified
+  - type: write
+    path: test/test.util.ts
+    content: |-
+      --- test/test.util.ts
+      +++ test/test.util.ts
+      @@ -158,6 +158,7 @@
+                   linter: `bun -e "process.exit(0)"`, // A command that always succeeds
+                   preCommand: '',
+                   postCommand: '',
+      +            minFileChanges: 0,
+               },
+               git: {
+                   autoGitBranch: false,
+    patchStrategy: new-unified
+  - type: write
+    path: test/e2e/transaction.test.ts
+    content: |-
+      <<<<<<< SEARCH
+          it('should require manual approval if linter errors exceed approvalOnErrorCount', async () => {
+              await runProcessPatch(
+                  context,
+                  { approvalMode: 'auto', approvalOnErrorCount: 0, linter: 'bun tsc' },
+                  [{ type: 'edit', path: testFile, content: 'const x: string = 123;' }],
+                  { prompter: async () => false }
+              );
+              
+              const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+              expect(finalContent).toBe(originalContent);
+          });
+      =======
+          it('should require manual approval if linter errors exceed approvalOnErrorCount', async () => {
+              await runProcessPatch(
+                  context,
+                  { approvalMode: 'auto', approvalOnErrorCount: 0, linter: 'bun tsc --noEmit' },
+                  [{ type: 'edit', path: testFile, content: 'const x: string = 123;' }],
+                  { prompter: async () => false }
+              );
+              
+              const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+              expect(finalContent).toBe(originalContent);
+          });
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      =======
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      =======
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.test_dir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      =======
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      =======
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+          });
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+          it('should auto-approve if linter errors are within approvalOnErrorCount', async () => {
+              const badContent = 'const x: string = 123;'; // 1 TS error
+
+              const { uuid } = await runProcessPatch(
+                  context,
+                  { approvalMode: 'auto', approvalOnErrorCount: 1, linter: 'bun tsc' },
+                  [{ type: 'edit', path: testFile, content: badContent }]
+              );
+              
+              const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+      =======
+          it('should auto-approve if linter errors are within approvalOnErrorCount', async () => {
+              const badContent = 'const x: string = 123;'; // 1 TS error
+
+              const { uuid } = await runProcessPatch(
+                  context,
+                  { approvalMode: 'auto', approvalOnErrorCount: 1, linter: 'bun tsc --noEmit' },
+                  [{ type: 'edit', path: testFile, content: badContent }]
+              );
+              
+              const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+              } finally {
+                  // Make the file writable again to allow cleanup
+                  try {
+                      await fs.chmod(unwritableFilePath, 0o644);
+                  } catch (err) {
+                      console.error('Failed to restore file permissions:', err);
+                  }
+              }
+          });
+      =======
+              // No state file should have been committed
+              const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`)).then(() => true).catch(() => false);
+              expect(stateFileExists).toBe(false);
+              } finally {
+                  // Make the file writable again to allow cleanup
+                  try {
+                      await fs.chmod(unwritableFilePath, 0o644);
+                  } catch (err) {
+                      console.error('Failed to restore file permissions:', err);
+                  }
+              }
+          });
+      >>>>>>> REPLACE
+      <<<<<<< SEARCH
+                  // No state file should have been committed
+                  const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+                  expect(stateFileExists).toBe(false);
+              } finally {
+                  // Restore permissions for cleanup
+                  try {
+                      await fs.chmod(readonlyDirPath, 0o755);
+                  } catch (err) {
+                      console.error('Failed to restore directory permissions:', err);
+                  }
+              }
+          });
+      =======
+                  // No state file should have been committed
+                  const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`)).then(() => true).catch(() => false);
+                  expect(stateFileExists).toBe(false);
+              } finally {
+                  // Restore permissions for cleanup
+                  try {
+                      // The directory might have been removed on rollback, so check if it exists first.
+                      if (await fs.access(readonlyDirPath).then(() => true).catch(() => false)) {
+                          await fs.chmod(readonlyDirPath, 0o755);
+                      }
+                  } catch (err) {
+                      console.error('Failed to restore directory permissions:', err);
+                  }
+              }
+          });
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: package.json
+    content: |-
+      --- package.json
+      +++ package.json
+      @@ -13,11 +13,11 @@
+         ],
+         "exports": {
+           ".": {
+      +      "types": "./dist/index.d.ts",
+             "import": "./dist/index.js",
+      -      "require": "./dist/index.js",
+      -      "types": "./dist/index.d.ts"
+      +      "require": "./dist/index.js"
+           },
+           "./package.json": "./package.json"
+         },
+    patchStrategy: new-unified
+snapshot:
+  src/core/parser.ts: >-
+    import yaml from 'js-yaml';
+
+    import { z } from 'zod';
+
+    import {
+        ControlYamlSchema,
+        FileOperation,
+        ParsedLLMResponse,
+        ParsedLLMResponseSchema,
+        PatchStrategy,
+        PatchStrategySchema,
+    } from '../types';
+
+    import {
+        CODE_BLOCK_START_MARKER,
+        CODE_BLOCK_END_MARKER,
+        DELETE_FILE_MARKER,
+        RENAME_FILE_OPERATION
+    } from '../utils/constants';
+
+    import { getErrorMessage, logger } from '../utils/logger';
+
+
+    const CODE_BLOCK_REGEX =
+    /```(?:\w+)?(?:\s*\/\/\s*(.*?)|\s+(.*?))?[\r\n]([\s\S]*?)[\r\n]```/g;
+
+    const YAML_BLOCK_REGEX = /```\s*(?:yaml|yml)[\r\n]([\s\S]+?)```/i;
+
+
+    type ParsedHeader = {
+        filePath: string;
+        patchStrategy: PatchStrategy | null;
+    };
+
+
+    const extractCodeBetweenMarkers = (content: string): string => {
+        const startMarkerIndex = content.indexOf(CODE_BLOCK_START_MARKER);
+        const endMarkerIndex = content.lastIndexOf(CODE_BLOCK_END_MARKER);    
+        
+        let relevantContent = content;
+        if (startMarkerIndex !== -1 && endMarkerIndex !== -1 && endMarkerIndex > startMarkerIndex) {
+            relevantContent = content.substring(startMarkerIndex + CODE_BLOCK_START_MARKER.length, endMarkerIndex);
+        }
+        
+        return relevantContent.trim().replace(/\r\n/g, '\n');
+    };
+
+
+    const parseCodeBlockHeader = (headerLine: string): ParsedHeader | null => {
+        const quotedMatch = headerLine.match(/^"(.+?)"(?:\s+(.*))?$/);
+        if (quotedMatch) {
+            const filePath = quotedMatch[1]!;
+            const strategyStr = (quotedMatch[2] || '').trim();
+            if (strategyStr) {
+                const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+                if (!parsedStrategy.success) {
+                    logger.debug(`Invalid patch strategy for quoted path: ${strategyStr}`);
+                    return null;
+                }
+                return { filePath, patchStrategy: parsedStrategy.data };
+            }
+            return { filePath, patchStrategy: null };
+        }
+
+        const parts = headerLine.split(/\s+/);
+        if (parts.length === 1 && parts[0]) {
+            return { filePath: parts[0], patchStrategy: null };
+        }
+        if (parts.length === 2 && parts[0] && parts[1]) {
+            const parsedStrategy = PatchStrategySchema.safeParse(parts[1]);
+            if (parsedStrategy.success) {
+                return { filePath: parts[0], patchStrategy: parsedStrategy.data };
+            } else {
+                logger.debug(`Treating entire header as file path since second word is not a valid strategy: "${headerLine}"`);
+                return { filePath: headerLine, patchStrategy: null };
+            }
+        }
+
+        if (parts.length > 2) {
+            logger.debug(`Skipping unquoted header with more than 2 words: "${headerLine}"`);
+            return null;
+        }
+
+        return null; // For empty or invalid header
+    };
+
+
+    const inferPatchStrategy = (content: string, providedStrategy: PatchStrategy
+    | null): PatchStrategy => {
+        if (providedStrategy) return providedStrategy;
+        if (/^<<<<<<< SEARCH\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) return 'multi-search-replace';
+        if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) return 'new-unified';
+        return 'replace';
+    };
+
+
+    const extractAndParseYaml = (rawText: string) => {
+        // Strategy 1: Find all fenced YAML blocks and try to parse the last one.
+        const yamlBlockMatches = [...rawText.matchAll(/```\s*(?:yaml|yml)[\r\n]([\s\S]+?)```/gi)];
+
+        if (yamlBlockMatches.length > 0) {
+            const lastMatch = yamlBlockMatches[yamlBlockMatches.length - 1]!;
+            try {
+                const yamlContent: unknown = yaml.load(lastMatch[1]!);
+                const control = ControlYamlSchema.parse(yamlContent);
+                // Success! This is our control block.
+                const textWithoutYaml = rawText.substring(0, lastMatch.index) + rawText.substring(lastMatch.index! + lastMatch[0].length);
+                return { control, textWithoutYaml: textWithoutYaml.trim() };
+            } catch (e) {
+                // The last block was not a valid control block.
+                // We will now fall through to the non-fenced strategy, assuming the fenced block was just an example.
+                logger.debug(`Last fenced YAML block was not a valid control block, trying non-fenced. Error: ${getErrorMessage(e)}`);
+            }
+        }
+
+        // Strategy 2: Look for a non-fenced block at the end.
+        const lines = rawText.trim().split('\n');
+        let yamlStartIndex = -1;
+        // Heuristic: project ID is required, so we look for that.
+        const searchLimit = Math.max(0, lines.length - 20);
+        for (let i = lines.length - 1; i >= searchLimit; i--) {
+            if (lines[i]?.trim().match(/^projectId:/)) {
+                yamlStartIndex = i;
+                break;
+            }
+        }
+
+        if (yamlStartIndex !== -1) {
+            const yamlText = lines.slice(yamlStartIndex).join('\n');
+            try {
+                const yamlContent: unknown = yaml.load(yamlText);
+                const control = ControlYamlSchema.parse(yamlContent);
+                // Success!
+                const textWithoutYaml = lines.slice(0, yamlStartIndex).join('\n');
+                return { control, textWithoutYaml: textWithoutYaml.trim() };
+            } catch (e) {
+                logger.debug(`Non-fenced YAML block at the end was not a valid control block. Error: ${getErrorMessage(e)}`);
+            }
+        }
+        
+        // If both strategies fail, there's no valid control block.
+        return { control: null, textWithoutYaml: rawText };
+    };
+
+
+    const parseCodeBlock = (match: RegExpExecArray): { operation: FileOperation,
+    fullMatch: string } | null => {
+        const [fullMatch, commentHeaderLine, spaceHeaderLine, rawContent] = match;
+        const headerLine = (commentHeaderLine || spaceHeaderLine || '').trim();
+        const content = (rawContent || '').trim();
+
+        if (!headerLine) return null;
+
+        if (headerLine === RENAME_FILE_OPERATION) {
+            try {
+                const { from, to } = z.object({ from: z.string().min(1), to: z.string().min(1) }).parse(JSON.parse(content));
+                return { operation: { type: 'rename', from, to }, fullMatch };
+            } catch (e) {
+                logger.debug(`Invalid rename operation content: ${getErrorMessage(e)}`);
+                return null;
+            }
+        }
+
+        const parsedHeader = parseCodeBlockHeader(headerLine);
+        if (!parsedHeader) {
+            logger.debug(`Could not parse header: ${headerLine}`);
+            return null;
+        }
+
+        const { filePath } = parsedHeader;
+
+        if (content === DELETE_FILE_MARKER) {
+            return { operation: { type: 'delete', path: filePath }, fullMatch };
+        }
+
+        const patchStrategy = inferPatchStrategy(content, parsedHeader.patchStrategy);
+        const cleanContent = extractCodeBetweenMarkers(content);
+
+        return {
+            operation: { type: 'write', path: filePath, content: cleanContent, patchStrategy }, 
+            fullMatch
+        };
+    };
+
+
+    export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null
+    => {
+        logger.debug('Parsing LLM response...');
+        const { control, textWithoutYaml } = extractAndParseYaml(rawText);
+
+        if (!control) {
+            logger.debug('Could not parse control YAML from response.');
+            return null;
+        }
+
+        const operations: FileOperation[] = [];
+        const matchedBlocks: string[] = [];
+        let match;
+
+        while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+            const result = parseCodeBlock(match);
+            if (result) {
+                operations.push(result.operation);
+                matchedBlocks.push(result.fullMatch);
+            }
+        }
+
+        if (operations.length === 0) {
+            logger.debug('No valid operations found in response.');
+            return null;
+        }
+
+        let reasoningText = textWithoutYaml;
+        for (const block of matchedBlocks) {
+            reasoningText = reasoningText.replace(block, '');
+        }
+        const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+
+        try {
+            const parsedResponse = ParsedLLMResponseSchema.parse({ control, operations, reasoning });
+            logger.debug('Successfully parsed LLM response.');
+            return parsedResponse;
+        } catch (e) {
+            logger.debug(`Final validation failed: ${getErrorMessage(e)}`);
+            return null;
+        }
+    };
+  test/test.util.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import os from 'os';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import chalk from 'chalk';
+
+    import { Config, PatchStrategy } from '../src/types';
+
+    import { CONFIG_FILE_NAME_JSON } from '../src/utils/constants';
+
+    import { logger } from '../src/utils/logger';
+
+    import { processPatch } from '../src/core/transaction';
+
+    import { parseLLMResponse } from '../src/core/parser';
+
+
+    export type Prompter = (message: string) => Promise<boolean>;
+
+    export interface TestDir {
+        path: string;
+        cleanup: () => Promise<void>;
+    }
+
+
+    export const setupTestDirectory = async (): Promise<TestDir> => {
+        const testDirPath = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-test-'));
+
+        const cleanup = async () => {
+            await fs.rm(testDirPath, { recursive: true, force: true });
+        };
+
+        return { path: testDirPath, cleanup };
+    };
+
+
+    export interface E2ETestContext {
+        testDir: TestDir;
+        cleanup: () => Promise<void>;
+    }
+
+
+    export const setupE2ETest = async (options: { withTsconfig?: boolean } =
+    {}): Promise<E2ETestContext> => {
+        chalk.level = 0; // Disable colors for all tests
+
+        const testDir = await setupTestDirectory();
+
+        if (options.withTsconfig) {
+            await createTestFile(testDir.path, 'tsconfig.json', JSON.stringify({
+                "compilerOptions": { "strict": true, "noEmit": true, "isolatedModules": true },
+                "include": ["src/**/*.ts"]
+            }, null, 2));
+        }
+        
+        // Suppress logger output
+        const originalLogger = {
+            info: (logger as any).info,
+            log: (logger as any).log,
+            warn: (logger as any).warn,
+            error: (logger as any).error,
+            success: (logger as any).success,
+            prompt: (logger as any).prompt,
+        };
+        
+        (logger as any).info = () => {};
+        (logger as any).log = () => {};
+        (logger as any).warn = () => {};
+        (logger as any).error = () => {};
+        if ((logger as any).success) (logger as any).success = () => {};
+        if ((logger as any).prompt) (logger as any).prompt = () => {};
+
+
+        const cleanup = async () => {
+            // Restore logger
+            (logger as any).info = originalLogger.info;
+            (logger as any).log = originalLogger.log;
+            (logger as any).warn = originalLogger.warn;
+            (logger as any).error = originalLogger.error;
+            if (originalLogger.success) (logger as any).success = originalLogger.success;
+            if (originalLogger.prompt) (logger as any).prompt = originalLogger.prompt;
+            
+            // Give fs operations time to complete before cleanup
+            await new Promise(resolve => setTimeout(resolve, 150));
+            
+            // Cleanup directory
+            await testDir.cleanup();
+        };
+
+        return { testDir, cleanup };
+    };
+
+
+    export interface TestOperation {
+        type: 'edit' | 'new' | 'delete';
+        path: string;
+        content?: string;
+        strategy?: PatchStrategy;
+    }
+
+
+    export function createLLMResponseString(
+        operations: TestOperation[],
+        overrides: { uuid?: string, projectId?: string, reasoning?: string[] } = {}
+    ): { response: string, uuid: string } {
+        const uuid = overrides.uuid ?? uuidv4();
+        const projectId = overrides.projectId ?? 'test-project';
+        const reasoning = overrides.reasoning ?? [LLM_RESPONSE_START];
+
+        const blocks = operations.map(op => {
+            if (op.type === 'delete') {
+                return createDeleteFileBlock(op.path);
+            }
+            return createFileBlock(op.path, op.content ?? '', op.strategy);
+        });
+
+        const changeSummary = operations.map(op => ({ [op.type]: op.path }));
+
+        const response = [
+            ...reasoning,
+            ...blocks,
+            LLM_RESPONSE_END(uuid, changeSummary, projectId)
+        ].join('\n');
+
+        return { response, uuid };
+    }
+
+
+    export async function runProcessPatch(
+        context: E2ETestContext,
+        configOverrides: Record<string, any>,
+        operations: TestOperation[],
+        options: { prompter?: Prompter, responseOverrides?: { uuid?: string, projectId?: string, reasoning?: string[] } } = {}
+    ): Promise<{ uuid: string; config: Config }> {
+        const config = await createTestConfig(context.testDir.path, configOverrides);
+        
+        const { response, uuid } = createLLMResponseString(operations, { ...options.responseOverrides, projectId: options.responseOverrides?.projectId ?? config.projectId });
+
+        const parsedResponse = parseLLMResponse(response);
+        if (!parsedResponse) {
+            throw new Error("Failed to parse mock LLM response");
+        }
+
+        await processPatch(config, parsedResponse, { prompter: options.prompter, cwd: context.testDir.path });
+        
+        return { uuid, config };
+    }
+
+
+
+    // Helper function to deep merge objects
+
+    const deepMerge = (target: any, source: any): any => {
+        const result = { ...target };
+        for (const key in source) {
+            if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                result[key] = deepMerge(target[key] || {}, source[key]);
+            } else {
+                result[key] = source[key];
+            }
+        }
+        return result;
+    };
+
+
+    export const createTestConfig = async (cwd: string, overrides:
+    Record<string, any> = {}): Promise<Config> => {
+        const defaultConfig: Config = {
+            projectId: 'test-project',
+            core: {
+                logLevel: 'info',
+                enableNotifications: false,
+                watchConfig: true,
+            },
+            watcher: {
+                clipboardPollInterval: 100,
+                preferredStrategy: 'auto',
+            },
+            patch: {
+                approvalMode: 'auto',
+                approvalOnErrorCount: 0,
+                linter: `bun -e "process.exit(0)"`, // A command that always succeeds
+                preCommand: '',
+                postCommand: '',
+            },
+            git: {
+                autoGitBranch: false,
+                gitBranchPrefix: 'relay/',
+                gitBranchTemplate: 'gitCommitMsg',
+            },
+        };
+        
+        // Handle legacy flat config overrides by mapping them to the new nested structure
+        const normalizedOverrides: any = { ...overrides };
+        
+        // Map flat properties to nested structure for backward compatibility
+        const flatToNestedMapping: Record<string, string> = {
+            'approvalMode': 'patch.approvalMode',
+            'approvalOnErrorCount': 'patch.approvalOnErrorCount',
+            'linter': 'patch.linter',
+            'preCommand': 'patch.preCommand',
+            'postCommand': 'patch.postCommand',
+            'clipboardPollInterval': 'watcher.clipboardPollInterval',
+            'preferredStrategy': 'watcher.preferredStrategy',
+            'logLevel': 'core.logLevel',
+            'enableNotifications': 'core.enableNotifications',
+            'watchConfig': 'core.watchConfig',
+            'autoGitBranch': 'git.autoGitBranch',
+            'gitBranchPrefix': 'git.gitBranchPrefix',
+            'gitBranchTemplate': 'git.gitBranchTemplate',
+        };
+        
+        for (const [flatKey, nestedPath] of Object.entries(flatToNestedMapping)) {
+            if (flatKey in normalizedOverrides) {
+                const value = normalizedOverrides[flatKey];
+                delete normalizedOverrides[flatKey];
+                
+                const pathParts = nestedPath.split('.');
+                let current: any = normalizedOverrides;
+                for (let i = 0; i < pathParts.length - 1; i++) {
+                    const part = pathParts[i];
+                    if (!part) continue;
+                    if (!current[part]) {
+                        current[part] = {};
+                    }
+                    current = current[part];
+                }
+                const lastPart = pathParts[pathParts.length - 1];
+                if (lastPart) {
+                    current[lastPart] = value;
+                }
+            }
+        }
+        
+        const config = deepMerge(defaultConfig, normalizedOverrides);
+        await fs.writeFile(path.join(cwd, CONFIG_FILE_NAME_JSON), JSON.stringify(config, null, 2));
+        return config;
+    };
+
+
+    export const createTestFile = async (cwd: string, filePath: string, content:
+    string): Promise<void> => {
+        const absolutePath = path.resolve(cwd, filePath);
+        const dir = path.dirname(absolutePath);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(absolutePath, content);
+    };
+
+
+    export const LLM_RESPONSE_START = `
+
+    I have analyzed your request and here are the changes.
+
+    First, I will edit the main file.
+
+    `;
+
+
+    export const LLM_RESPONSE_END = (uuid: string, changeSummary: { [key:
+    string]: string }[] = [], projectId: string = 'test-project') => `
+
+    \`\`\`yaml
+
+    projectId: ${projectId}
+
+    uuid: ${uuid}
+
+    changeSummary: ${JSON.stringify(changeSummary)}
+
+    \`\`\`
+
+    `;
+
+
+    export const createFileBlock = (filePath: string, content: string,
+    patchStrategy?: PatchStrategy): string => {
+        const strategyString = patchStrategy ? ` ${patchStrategy}` : '';
+        return `
+    \`\`\`typescript // ${filePath}${strategyString}
+
+    // START
+
+
+    ${content}
+
+
+    // END
+
+    \`\`\`
+
+    `;
+
+    };
+
+
+    export const createDeleteFileBlock = (filePath: string): string => {
+        return `
+    \`\`\`typescript // ${filePath}
+
+    //TODO: delete this file
+
+    \`\`\`
+
+    `;
+
+    };
+  test/e2e/transaction.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import yaml from 'js-yaml';
+
+    import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+    from '../test.util';
+
+    import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+
+
+
+    describe('e2e/transaction', () => {
+        let context: E2ETestContext;
+        const testFile = 'src/index.ts';
+        const originalContent = 'console.log("original");';
+
+        beforeEach(async () => {
+            context = await setupE2ETest({ withTsconfig: true });
+            await createTestFile(context.testDir.path, testFile, originalContent);
+        });
+
+        afterEach(async () => {
+            if (context) await context.cleanup();
+        });
+
+        it('should apply changes, commit, and store correct state in .yml file', async () => {
+            const newContent = 'console.log("new content");';
+            const { uuid } = await runProcessPatch(
+                context,
+                { linter: '', approvalMode: 'auto' },
+                [{ type: 'edit', path: testFile, content: newContent }]
+            );
+            // Add a small delay to ensure file operations have completed
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Check file content
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(newContent);
+
+            // Check state file was committed
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`);
+            
+            // Try multiple times with a small delay to check if the file exists
+            let stateFileExists = false;
+            for (let i = 0; i < 5; i++) {
+                stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+                if (stateFileExists) break;
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            expect(stateFileExists).toBe(true);
+
+            // Check state file content
+            const stateFileContent = await fs.readFile(stateFilePath, 'utf-8');
+            const stateData: any = yaml.load(stateFileContent);
+            expect(stateData.uuid).toBe(uuid);
+            expect(stateData.approved).toBe(true);
+            expect(stateData.operations).toHaveLength(1);
+            expect(stateData.operations[0].path).toBe(testFile);
+            expect(stateData.snapshot[testFile]).toBe(originalContent);
+            expect(stateData.reasoning).toBeDefined();
+        });
+
+        it('should rollback changes when manually disapproved', async () => {
+            const { uuid } = await runProcessPatch(
+                context,
+                { approvalMode: 'manual' },
+                [{ type: 'edit', path: testFile, content: 'console.log("I will be rolled back");' }],
+                { prompter: async () => false }
+            );
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should require manual approval if linter errors exceed approvalOnErrorCount', async () => {
+            await runProcessPatch(
+                context,
+                { approvalMode: 'auto', approvalOnErrorCount: 0, linter: 'bun tsc' },
+                [{ type: 'edit', path: testFile, content: 'const x: string = 123;' }],
+                { prompter: async () => false }
+            );
+            
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+        });
+
+        it('should skip linter if command is empty and auto-approve', async () => {
+            const badContent = 'const x: string = 123;'; // Would fail linter, but it's skipped
+
+            await runProcessPatch(
+                context,
+                { linter: '' },
+                [{ type: 'edit', path: testFile, content: badContent }]
+            );
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(badContent);
+        });
+
+        it('should ignore patch with already processed UUID', async () => {
+            const uuid = uuidv4();
+            
+            // 1. Process and commit a patch
+            await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: "first change" }], { responseOverrides: { uuid }});
+            
+            // 2. Try to process another patch with the same UUID - this will create a new response with the same UUID.
+            // The `processPatch` logic should see the existing state file and ignore it.
+            await runProcessPatch(context, {}, [{ type: 'edit', path: testFile, content: "second change" }], { responseOverrides: { uuid }});
+
+            // Content should be from the first change, not the second
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe("first change");
+        });
+        
+        it('should create nested directories for new files', async () => {
+            const newFilePath = 'src/a/b/c/new-file.ts';
+            const newFileContent = 'hello world';
+            
+            await runProcessPatch(
+                context, 
+                {}, 
+                [{ type: 'new', path: newFilePath, content: newFileContent }]
+            );
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, newFilePath), 'utf-8');
+            expect(finalContent).toBe(newFileContent);
+        });
+
+        it('should rollback new file and its new empty parent directory on rejection', async () => {
+            const newFilePath = 'src/new/dir/file.ts';
+            
+            await runProcessPatch(context, { approvalMode: 'manual' },
+                [{ type: 'new', path: newFilePath, content: 'content' }], { prompter: async () => false });
+
+            const fileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(fileExists).toBe(false);
+
+            const dirExists = await fs.access(path.join(context.testDir.path, 'src/new/dir')).then(() => true).catch(() => false);
+            expect(dirExists).toBe(false);
+
+            const midDirExists = await fs.access(path.join(context.testDir.path, 'src/new')).then(() => true).catch(() => false);
+            expect(midDirExists).toBe(false);
+            
+            // src directory should still exist as it contained a file before
+            const srcDirExists = await fs.access(path.join(context.testDir.path, 'src')).then(() => true).catch(() => false);
+            expect(srcDirExists).toBe(true);
+        });
+
+        it('should not delete parent directory on rollback if it was not empty beforehand', async () => {
+            const existingFilePath = 'src/shared/existing.ts';
+            const newFilePath = 'src/shared/new.ts';
+
+            await createTestFile(context.testDir.path, existingFilePath, 'const existing = true;');
+
+            await runProcessPatch(context, { approvalMode: 'manual' },
+                [{ type: 'new', path: newFilePath, content: 'const brandNew = true;' }],
+                { prompter: async () => false });
+
+            // New file should be gone
+            const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExists).toBe(false);
+
+            // Existing file and its directory should remain
+            const existingFileExists = await fs.access(path.join(context.testDir.path, existingFilePath)).then(() => true).catch(() => false);
+            expect(existingFileExists).toBe(true);
+
+            const sharedDirExists = await fs.access(path.join(context.testDir.path, 'src/shared')).then(() => true).catch(() => false);
+            expect(sharedDirExists).toBe(true);
+        });
+
+        it('should abort transaction if preCommand fails', async () => {
+            const { uuid } = await runProcessPatch(
+                context,
+                { preCommand: 'bun -e "process.exit(1)"' },
+                [{ type: 'edit', path: testFile, content: 'new content' }]
+            );
+
+            // File should not have been changed
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            // No state file should have been created
+            const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should automatically roll back if postCommand fails', async () => {
+            const { uuid } = await runProcessPatch(
+                context,
+                { postCommand: 'bun -e "process.exit(1)"' },
+                [{ type: 'edit', path: testFile, content: 'new content' }]
+            );
+
+            // File should have been rolled back
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            // No state file should have been committed
+            const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should ignore patch with non-matching projectId', async () => {
+            const { uuid } = await runProcessPatch(
+                context,
+                { projectId: 'correct-project' },
+                [{ type: 'edit', path: testFile, content: 'should not be applied' }],
+                { responseOverrides: { projectId: 'wrong-project' }}
+            );
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            // No state file should have been committed
+            const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should correctly apply a file deletion operation', async () => {
+            const fileToDelete = 'src/delete-me.ts';
+            const originalDeleteContent = 'delete this content';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+            
+            const { uuid } = await runProcessPatch(
+                context,
+                {},
+                [{ type: 'delete', path: fileToDelete }]
+            );
+
+            const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(deletedFileExists).toBe(false);
+
+            // State file should have been committed with the deleted file content
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(true);
+        });
+
+        it('should correctly roll back a file deletion operation', async () => {
+            const fileToDelete = 'src/delete-me.ts';
+            const originalDeleteContent = 'delete this content';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+            
+            const { uuid } = await runProcessPatch(
+                context, { approvalMode: 'manual' },
+                [{ type: 'delete', path: fileToDelete }], { prompter: async () => false }
+            );
+
+            const restoredFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(restoredFileExists).toBe(true);
+
+            // Content should be the same as the original
+            const restoredContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+            expect(restoredContent).toBe(originalDeleteContent);
+
+            // No state file should have been committed
+            const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should auto-approve if linter errors are within approvalOnErrorCount', async () => {
+            const badContent = 'const x: string = 123;'; // 1 TS error
+
+            const { uuid } = await runProcessPatch(
+                context,
+                { approvalMode: 'auto', approvalOnErrorCount: 1, linter: 'bun tsc' },
+                [{ type: 'edit', path: testFile, content: badContent }]
+            );
+            
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(badContent);
+
+            // State file should have been committed
+            const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions', `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(true);
+        });
+
+        it('should ignore orphaned .pending.yml file and allow reprocessing', async () => {
+            const uuid = uuidv4();
+            const newContent = 'console.log("final content");';
+
+            // Create an orphaned pending file
+            const stateDir = path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions');
+            await fs.mkdir(stateDir, { recursive: true });
+            const orphanedPendingFile = path.join(stateDir, `${uuid}.pending.yml`);
+            const orphanedState = { uuid, message: 'this is from a crashed run' };
+            await fs.writeFile(orphanedPendingFile, yaml.dump(orphanedState));
+
+            await runProcessPatch(
+                context,
+                {},
+                [{ type: 'edit', path: testFile, content: newContent }],
+                { responseOverrides: { uuid } }
+            );
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(newContent);
+
+            // The pending file should have been removed
+            const pendingFileExists = await fs.access(orphanedPendingFile).then(() => true).catch(() => false);
+            expect(pendingFileExists).toBe(false);
+
+            // A committed state file should exist
+            const committedFileExists = await fs.access(path.join(stateDir, `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(committedFileExists).toBe(true);
+        });
+
+        it('should run pre and post commands in the correct order', async () => {
+            const preCommandFile = path.join(context.testDir.path, 'pre.txt');
+            const postCommandFile = path.join(context.testDir.path, 'post.txt');
+        
+            // Use bun to create files as it's more reliable in this environment
+            await runProcessPatch(
+                context,
+                {
+                    preCommand: `bun -e "await Bun.write('${preCommandFile}', '')"`,
+                    postCommand: `bun -e "await Bun.write('${postCommandFile}', '')"`,
+                },
+                [{ type: 'edit', path: testFile, content: 'new content' }]
+            );
+        
+            const preExists = await fs.access(preCommandFile).then(() => true).catch(() => false);
+            expect(preExists).toBe(true);
+        
+            const postExists = await fs.access(postCommandFile).then(() => true).catch(() => false);
+            expect(postExists).toBe(true);
+        
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe('new content');
+        });
+
+        it('should create a pending file during transaction and remove it on rollback', async () => {
+            const uuid = uuidv4();
+        
+            const stateDir = path.join(context.testDir.path, STATE_DIRECTORY_NAME, 'transactions');
+            const pendingPath = path.join(stateDir, `${uuid}.pending.yml`);
+        
+            // Make sure the directory exists
+            await fs.mkdir(stateDir, { recursive: true });
+        
+            // Check if the pending file exists during the transaction
+            let pendingFileExistedDuringRun = false;
+        
+            const prompter = async (): Promise<boolean> => {
+                pendingFileExistedDuringRun = await fs.access(pendingPath).then(() => true).catch(() => false);
+                return false; // Disapprove to trigger rollback
+            };
+
+            await runProcessPatch(
+                context,
+                { approvalMode: 'manual' },
+                [{ type: 'edit', path: testFile, content: 'I will be rolled back' }],
+                { prompter, responseOverrides: { uuid } }
+            );
+        
+            expect(pendingFileExistedDuringRun).toBe(true);
+            
+            // After rollback, the pending file should be gone
+            const pendingFileExistsAfter = await fs.access(pendingPath).then(() => true).catch(() => false);
+            expect(pendingFileExistsAfter).toBe(false);
+        
+            // No committed file should exist
+            const committedPath = path.join(stateDir, `${uuid}.yml`);
+            const committedFileExists = await fs.access(committedPath).then(() => true).catch(() => false);
+            expect(committedFileExists).toBe(false);
+        });
+
+        it('should fail transaction gracefully if a file is not writable and rollback all changes', async () => {
+            const unwritableFile = 'src/unwritable.ts';
+            const writableFile = 'src/writable.ts';
+            const originalUnwritableContent = 'original unwritable';
+            const originalWritableContent = 'original writable';
+            
+            await createTestFile(context.testDir.path, unwritableFile, originalUnwritableContent);
+            await createTestFile(context.testDir.path, writableFile, originalWritableContent);
+            
+            const unwritableFilePath = path.join(context.testDir.path, unwritableFile);
+            
+            try {
+                await fs.chmod(unwritableFilePath, 0o444); // Make read-only
+
+                const { uuid } = await runProcessPatch(
+                    context, {},
+                    [
+                        { type: 'edit', path: writableFile, content: 'new writable content' },
+                        { type: 'edit', path: unwritableFile, content: 'new unwritable content' }
+                    ]
+                );
+            
+                // Check file states: both should be rolled back to original content.
+                const finalWritable = await fs.readFile(path.join(context.testDir.path, writableFile), 'utf-8');
+                expect(finalWritable).toBe(originalWritableContent);
+                
+                const finalUnwritable = await fs.readFile(path.join(context.testDir.path, unwritableFile), 'utf-8');
+                expect(finalUnwritable).toBe(originalUnwritableContent);
+                
+                // No state file should have been committed
+                const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+                expect(stateFileExists).toBe(false);
+            } finally {
+                // Make the file writable again to allow cleanup
+                try {
+                    await fs.chmod(unwritableFilePath, 0o644);
+                } catch (err) {
+                    console.error('Failed to restore file permissions:', err);
+                }
+            }
+        });
+
+        it('should rollback gracefully if creating a file in a non-writable directory fails', async () => {
+            const readonlyDir = 'src/readonly-dir';
+            const newFilePath = path.join(readonlyDir, 'new-file.ts');
+            const readonlyDirPath = path.join(context.testDir.path, readonlyDir);
+            
+            await fs.mkdir(readonlyDirPath, { recursive: true });
+            await fs.chmod(readonlyDirPath, 0o555); // Read and execute only
+        
+            try {
+                const { uuid } = await runProcessPatch(
+                    context,
+                    {},
+                    [{ type: 'new', path: newFilePath, content: 'this should not be written' }]
+                );
+        
+                // Check that the new file was not created
+                const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+                expect(newFileExists).toBe(false);
+        
+                // No state file should have been committed
+                const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+                expect(stateFileExists).toBe(false);
+            } finally {
+                // Restore permissions for cleanup
+                try {
+                    await fs.chmod(readonlyDirPath, 0o755);
+                } catch (err) {
+                    console.error('Failed to restore directory permissions:', err);
+                }
+            }
+        });
+
+        it('should correctly rollback a complex transaction (modify, delete, create)', async () => {
+            // Setup initial files
+            const fileToModify = 'src/modify.ts';
+            const originalModifyContent = 'export const a = 1;';
+            await createTestFile(context.testDir.path, fileToModify, originalModifyContent);
+            
+            const fileToDelete = 'src/delete.ts';
+            const originalDeleteContent = 'export const b = 2;';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+            
+            const newFilePath = 'src/new/component.ts';
+            const newFileContent = 'export const c = 3;';
+        
+            // Disapprove the transaction
+            await runProcessPatch(
+                context,
+                { approvalMode: 'manual' },
+                [
+                    { type: 'edit', path: fileToModify, content: 'export const a = 100;' },
+                    { type: 'delete', path: fileToDelete },
+                    { type: 'new', path: newFilePath, content: newFileContent }
+                ], { prompter: async () => false }
+            );
+        
+            // Verify rollback
+            const modifiedFileContent = await fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+            expect(modifiedFileContent).toBe(originalModifyContent);
+            
+            const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(deletedFileExists).toBe(true);
+            
+            const deletedFileContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+            expect(deletedFileContent).toBe(originalDeleteContent);
+            
+            const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExists).toBe(false);
+        });
+    });
+  package.json: |
+    {
+      "name": "relaycode",
+      "version": "1.0.37",
+      "description": "A developer assistant that automates applying code changes from LLMs.",
+      "type": "module",
+      "main": "./dist/index.js",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "bin": {
+        "relay": "./dist/cli.js"
+      },
+      "files": [
+        "dist"
+      ],
+      "exports": {
+        ".": {
+          "import": "./dist/index.js",
+          "require": "./dist/index.js",
+          "types": "./dist/index.d.ts"
+        },
+        "./package.json": "./package.json"
+      },
+      "scripts": {
+        "clean": "rm -rf dist",
+        "build": "bun run clean && bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target node",
+        "test": "bun test",
+        "dev": "bun run src/cli.ts",
+        "prepublishOnly": "bun run build",
+        "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+        "commit": "relaycode git commit -y && git push"
+      },
+      "dependencies": {
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "diff-apply": "^1.0.6",
+        "esbuild": "^0.25.5",
+        "js-yaml": "^4.1.0",
+        "toasted-notifier": "^10.1.0",
+        "typescript": "^5.8.3",
+        "uuid": "^9.0.1",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/uuid": "^9.0.8"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "automation",
+        "codegen",
+        "developer-tool",
+        "cli"
+      ],
+      "author": "Relay Code",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/relaycoder/relaycode.git"
+      },
+      "homepage": "https://relay.code"
+    }
+approved: true

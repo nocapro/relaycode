@@ -1,0 +1,550 @@
+uuid: a6925501-1b07-4a00-af15-0d322b7a0f67
+projectId: relaycode
+createdAt: '2025-06-23T00:45:21.924Z'
+reasoning:
+  - >-
+    Of course. I will merge the `undo` functionality into the `revert` command
+    and then remove the now-redundant `undo` command. The `revert` command will
+    be updated to handle reverting the last transaction by default, reverting
+    the N-th last transaction by index, or reverting a specific transaction by
+    its UUID.
+  - 'Here are the changes:'
+  - >-
+    First, I'll update the `revert` command to be more flexible. It will now
+    accept an optional identifier which can be a transaction UUID or a numeric
+    index (e.g., `1` for the latest). If no identifier is provided, it will
+    default to reverting the most recent transaction, effectively replacing the
+    old `undo` command. I've also added a confirmation step so you can review
+    the transaction before it's reverted.
+  - >-
+    Next, I'll update the CLI definition to remove the `undo` command and modify
+    the `revert` command's definition, including changing its alias to `u`.
+  - I'll now remove the export for `undoCommand` from the main `index.ts` file.
+  - Finally, I'll delete the `undo.ts` file as it is no longer needed.
+  - >-
+    These changes consolidate the `undo` and `revert` functionalities,
+    simplifying the command-line interface while providing more powerful and
+    flexible options for reverting transactions.
+operations:
+  - type: write
+    path: src/commands/revert.ts
+    content: >-
+      --- src/commands/revert.ts
+
+      +++ src/commands/revert.ts
+
+      @@ -1,22 +1,65 @@
+       import { loadConfigOrExit } from '../core/config';
+      -import { readStateFile } from '../core/state';
+
+      +import { readStateFile, readAllStateFiles } from '../core/state';
+       import { processPatch } from '../core/transaction';
+       import { logger } from '../utils/logger';
+      -import { FileOperation, ParsedLLMResponse } from '../types';
+
+      +import { FileOperation, ParsedLLMResponse, StateFile } from '../types';
+       import { v4 as uuidv4 } from 'uuid';
+      +import { getConfirmation as defaultGetConfirmation } from
+      '../utils/prompt';
+
+      +import { formatTransactionDetails } from './log';
+
+      +
+
+      +type Prompter = (question: string) => Promise<boolean>;
+
+      +
+
+      +const isUUID = (str: string): boolean => {
+
+      +    return
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+
+      +};
+       
+      -export const revertCommand = async (uuidToRevert: string, cwd: string =
+      process.cwd()): Promise<void> => {
+
+      +export const revertCommand = async (identifier?: string, cwd: string =
+      process.cwd(), prompter?: Prompter): Promise<void> => {
+
+      +    const getConfirmation = prompter || defaultGetConfirmation;
+           const config = await loadConfigOrExit(cwd);
+       
+      -    // 2. Load the state file for the transaction to revert
+
+      -    logger.info(`Attempting to revert transaction: ${uuidToRevert}`);
+
+      -    const stateToRevert = await readStateFile(cwd, uuidToRevert);
+
+      +    let stateToRevert: StateFile | null = null;
+
+      +    let targetDescription: string;
+
+      +
+
+      +    // Default to '1' to revert the latest transaction if no identifier
+      is provided.
+
+      +    const effectiveIdentifier = identifier ?? '1';
+
+      +
+
+      +    if (isUUID(effectiveIdentifier)) {
+
+      +        targetDescription = `transaction with UUID
+      '${effectiveIdentifier}'`;
+
+      +        logger.info(`Attempting to revert ${targetDescription}`);
+
+      +        stateToRevert = await readStateFile(cwd, effectiveIdentifier);
+
+      +    } else if (/^-?\d+$/.test(effectiveIdentifier)) {
+
+      +        const index = Math.abs(parseInt(effectiveIdentifier, 10));
+
+      +        if (isNaN(index) || index <= 0) {
+
+      +            logger.error('Invalid index. Please provide a positive number
+      (e.g., "1" for the latest).');
+
+      +            return;
+
+      +        }
+
+      +        targetDescription = index === 1 ? 'the latest transaction' : `the
+      ${index}-th latest transaction`;
+
+      +        logger.info(`Looking for ${targetDescription}...`);
+
+      +        const allTransactions = await readAllStateFiles(cwd);
+
+      +        if (!allTransactions || allTransactions.length < index) {
+
+      +            logger.error(`Transaction not found. Only
+      ${allTransactions?.length ?? 0} transactions exist.`);
+
+      +            return;
+
+      +        }
+
+      +        stateToRevert = allTransactions[index - 1] ?? null;
+
+      +    } else {
+
+      +        logger.error(`Invalid identifier: '${identifier}'. Please provide
+      a UUID or an index (e.g., '1' for the latest).`);
+
+      +        return;
+
+      +    }
+
+      +
+           if (!stateToRevert) {
+      -        logger.error(`Transaction with UUID '${uuidToRevert}' not found
+      or is invalid.`);
+
+      +        logger.error(`Could not find ${targetDescription}.`);
+               return;
+           }
+       
+      +    logger.log(`Transaction to be reverted:`);
+
+      +    formatTransactionDetails(stateToRevert).forEach(line =>
+      logger.log(line));
+
+      +
+
+      +    const confirmed = await getConfirmation('\nAre you sure you want to
+      revert this transaction? (y/N)');
+
+      +    if (!confirmed) {
+
+      +        logger.info('Revert operation cancelled.');
+
+      +        return;
+
+      +    }
+
+      +
+           // 3. Generate inverse operations
+           const inverse_operations = [...stateToRevert.operations]
+               .reverse()
+      @@ -58,11 +101,11 @@
+           // 4. Create and process a new "revert" transaction
+           const newUuid = uuidv4();
+           const reasoning = [
+      -        `Reverting transaction ${uuidToRevert}.`,
+
+      +        `Reverting transaction ${stateToRevert.uuid}.`,
+               `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+           ];
+       
+      @@ -75,5 +118,5 @@
+           };
+       
+           logger.info(`Creating new transaction ${newUuid} to perform the revert.`);
+      -    await processPatch(config, parsedResponse, { cwd });
+
+      +    await processPatch(config, parsedResponse, { cwd, prompter });
+       };
+    patchStrategy: new-unified
+  - type: write
+    path: src/cli.ts
+    content: >-
+      --- src/cli.ts
+
+      +++ src/cli.ts
+
+      @@ -2,10 +2,9 @@
+       import { Command } from 'commander';
+       import { initCommand } from './commands/init';
+       import { watchCommand } from './commands/watch';
+      -import { logCommand } from './commands/log';
+       import { COMMAND_NAME } from './utils/constants';
+      -import { undoCommand } from './commands/undo';
+       import { revertCommand } from './commands/revert';
+      +import { logCommand } from './commands/log';
+       import { applyCommand } from './commands/apply';
+       import { gitCommitCommand } from './commands/git-commit';
+       import { createRequire } from 'node:module';
+      @@ -43,10 +42,9 @@
+       const commands = [
+         { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
+         { name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.', action: () => { watchCommand(process.cwd()); } },
+         { name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.', args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' }, action: (filePath: string) => applyCommand(filePath) },
+         { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
+      -  { name: 'undo', alias: 'u', description: 'Reverts the last successfully
+      committed transaction.', action: () => undoCommand(process.cwd()) },
+
+      -  { name: 'revert', alias: 'r', description: 'Reverts a committed
+      transaction by its UUID.', args: { syntax: '<uuid>', description: 'The
+      UUID of the transaction to revert.' }, action: (uuid: string) =>
+      revertCommand(uuid) },
+
+      +  { name: 'revert', alias: 'u', description: 'Reverts a transaction.
+      Defaults to the last one.', args: { syntax: '[uuid_or_index]',
+      description: 'The UUID or index (e.g., 1, 2) of the transaction to
+      revert.' }, action: (identifier: string) => revertCommand(identifier) },
+       ];
+       
+       commands.forEach(cmdInfo => {
+    patchStrategy: new-unified
+  - type: write
+    path: src/index.ts
+    content: |-
+      --- src/index.ts
+      +++ src/index.ts
+      @@ -21,7 +21,6 @@
+       export { initCommand } from './commands/init';
+       export { watchCommand } from './commands/watch';
+       export { logCommand } from './commands/log';
+      -export { undoCommand } from './commands/undo';
+       export { revertCommand } from './commands/revert';
+       export { applyCommand } from './commands/apply';
+       export { gitCommitCommand } from './commands/git-commit';
+    patchStrategy: new-unified
+  - type: delete
+    path: src/commands/undo.ts
+snapshot:
+  src/commands/revert.ts: >-
+    import { loadConfigOrExit } from '../core/config';
+
+    import { readStateFile } from '../core/state';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { FileOperation, ParsedLLMResponse } from '../types';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+
+    export const revertCommand = async (uuidToRevert: string, cwd: string =
+    process.cwd()): Promise<void> => {
+        const config = await loadConfigOrExit(cwd);
+
+        // 2. Load the state file for the transaction to revert
+        logger.info(`Attempting to revert transaction: ${uuidToRevert}`);
+        const stateToRevert = await readStateFile(cwd, uuidToRevert);
+        if (!stateToRevert) {
+            logger.error(`Transaction with UUID '${uuidToRevert}' not found or is invalid.`);
+            return;
+        }
+
+        // 3. Generate inverse operations
+        const inverse_operations = [...stateToRevert.operations]
+            .reverse()
+            .map((op): FileOperation | null => {
+                switch (op.type) {
+                    case 'rename':
+                        return { type: 'rename', from: op.to, to: op.from };
+                    case 'delete': {
+                        const deletedContent = stateToRevert.snapshot[op.path];
+                        if (deletedContent === null || typeof deletedContent === 'undefined') {
+                            logger.warn(`Cannot revert deletion of ${op.path}, original content not found in snapshot. Skipping.`);
+                            return null;
+                        }
+                        return { type: 'write', path: op.path, content: deletedContent, patchStrategy: 'replace' };
+                    }
+                    case 'write': {
+                        const originalContent = stateToRevert.snapshot[op.path];
+                        if (typeof originalContent === 'undefined') {
+                            logger.warn(`Cannot find original state for ${op.path} in snapshot. Skipping revert for this operation.`);
+                            return null;
+                        }
+                        if (originalContent === null) {
+                            return { type: 'delete', path: op.path };
+                        } else {
+                            return { type: 'write', path: op.path, content: originalContent, patchStrategy: 'replace' };
+                        }
+                    }
+                }
+            })
+            .filter((op): op is FileOperation => op !== null);
+
+        if (inverse_operations.length === 0) {
+            logger.warn('No operations to revert for this transaction.');
+            return;
+        }
+
+        // 4. Create and process a new "revert" transaction
+        const newUuid = uuidv4();
+        const reasoning = [
+            `Reverting transaction ${uuidToRevert}.`,
+            `Reasoning from original transaction: ${stateToRevert.reasoning.join(' ')}`
+        ];
+
+        const parsedResponse: ParsedLLMResponse = {
+            control: {
+                projectId: config.projectId,
+                uuid: newUuid,
+            },
+            operations: inverse_operations,
+            reasoning,
+        };
+
+        logger.info(`Creating new transaction ${newUuid} to perform the revert.`);
+        await processPatch(config, parsedResponse, { cwd });
+    };
+  src/cli.ts: |-
+    #!/usr/bin/env node
+    import { Command } from 'commander';
+    import { initCommand } from './commands/init';
+    import { watchCommand } from './commands/watch';
+    import { logCommand } from './commands/log';
+    import { COMMAND_NAME } from './utils/constants';
+    import { undoCommand } from './commands/undo';
+    import { revertCommand } from './commands/revert';
+    import { applyCommand } from './commands/apply';
+    import { gitCommitCommand } from './commands/git-commit';
+    import { createRequire } from 'node:module';
+    import { fileURLToPath } from 'node:url';
+    import { dirname, join } from 'node:path';
+
+    // Default version in case we can't find the package.json
+    let version = '0.0.0';
+
+    try {
+      const require = createRequire(import.meta.url);
+      let pkg;
+      try {
+        // This works when installed as a package
+        pkg = require('relaycode/package.json');
+      } catch (e) {
+        // Fallback for local development
+        try {
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+          pkg = require(join(__dirname, '..', 'package.json'));
+        } catch (e2) {
+          // ignore
+        }
+      }
+      
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+    const program = new Command();
+
+    program
+      .name(COMMAND_NAME)
+      .version(version)
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    const commands = [
+      { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
+      { name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.', action: () => { watchCommand(process.cwd()); } },
+      { name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.', args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' }, action: (filePath: string) => applyCommand(filePath) },
+      { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
+      { name: 'undo', alias: 'u', description: 'Reverts the last successfully committed transaction.', action: () => undoCommand(process.cwd()) },
+      { name: 'revert', alias: 'r', description: 'Reverts a committed transaction by its UUID.', args: { syntax: '<uuid>', description: 'The UUID of the transaction to revert.' }, action: (uuid: string) => revertCommand(uuid) },
+    ];
+
+    commands.forEach(cmdInfo => {
+      const command = program
+        .command(cmdInfo.name)
+        .alias(cmdInfo.alias)
+        .description(cmdInfo.description);
+
+      if (cmdInfo.args) {
+        command.argument(cmdInfo.args.syntax, cmdInfo.args.description);
+      }
+
+      command.action(cmdInfo.action);
+    });
+
+    // Git command group
+    const git = program.command('git').description('Git related commands');
+    git
+        .command('commit')
+        .alias('c')
+        .description('Commits the last transaction using the message from the transaction log.')
+        .action(() => gitCommitCommand(process.cwd()));
+
+    program.parse(process.argv);
+
+    if (!process.argv.slice(2).length) {
+        program.outputHelp();
+    }
+  src/index.ts: >-
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit } from './core/config';
+
+    export { 
+        applyOperations, 
+        createSnapshot, 
+        deleteFile, 
+        readFileContent, 
+        restoreSnapshot, 
+        writeFileContent 
+    } from './core/executor';
+
+    export { parseLLMResponse } from './core/parser';
+
+    export {
+        commitState,
+        deletePendingState,
+        hasBeenProcessed,
+        findLatestStateFile,
+        readStateFile,
+        readAllStateFiles,
+        writePendingState,
+        getStateFilePath,
+        getUndoneStateFilePath
+    } from './core/state';
+
+    export { processPatch } from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { undoCommand } from './commands/undo';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from './types';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { logger } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+  src/commands/undo.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { findLatestStateFile, getStateFilePath, getUndoneStateFilePath }
+    from '../core/state';
+
+    import { restoreSnapshot } from '../core/executor';
+
+    import { getConfirmation as defaultGetConfirmation } from '../utils/prompt';
+
+    import { formatTransactionDetails } from './log';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    export const undoCommand = async (cwd: string = process.cwd(), prompter?:
+    Prompter): Promise<void> => {
+        const getConfirmation = prompter || defaultGetConfirmation;
+        logger.info('Attempting to undo the last transaction...');
+
+        const latestTransaction = await findLatestStateFile(cwd);
+
+        if (!latestTransaction) {
+            logger.warn('No committed transactions found to undo.');
+            return;
+        }
+
+        const [uuidLine, ...otherLines] = formatTransactionDetails(latestTransaction, { showSpacing: true });
+        logger.log(`The last transaction to be undone is:`);
+        if (uuidLine) {
+            logger.info(uuidLine); // UUID line with info color
+        }
+        otherLines.forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation('Are you sure you want to undo this transaction? (y/N)');
+
+        if (!confirmed) {
+            logger.info('Undo operation cancelled.');
+            return;
+        }
+        
+        logger.info(`Undoing transaction ${latestTransaction.uuid}...`);
+
+        try {
+            await restoreSnapshot(latestTransaction.snapshot, cwd);
+            logger.success('  - Successfully restored file snapshot.');
+
+            const oldPath = getStateFilePath(cwd, latestTransaction.uuid, false);
+            const newPath = getUndoneStateFilePath(cwd, latestTransaction.uuid);
+
+            await fs.mkdir(path.dirname(newPath), { recursive: true });
+            await fs.rename(oldPath, newPath);
+            logger.success(`  - Moved transaction file to 'undone' directory.`);
+            logger.success(`✅ Last transaction successfully undone.`);
+
+        } catch (error) {
+            logger.error(`Failed to undo transaction: ${getErrorMessage(error)}`);
+            logger.error('Your file system may be in a partially restored state. Please check your files.');
+        }
+    };
+approved: true
+gitCommitMsg: 'refactor: merge undo command into revert command'
+promptSummary: >-
+  The user wants to merge the 'undo' command into the 'revert' command. The
+  'revert' command should be updated to handle reverting by index or UUID, and
+  default to reverting the last transaction. The 'undo' command and its related
+  files/exports should then be removed.

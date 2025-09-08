@@ -1,0 +1,69 @@
+uuid: d89c1682-1271-464a-a309-c124e6a88b50
+projectId: relaycode
+createdAt: '2025-06-21T19:29:26.724Z'
+reasoning:
+  - >-
+    Of course! It looks like there was a syntax error in my last patch that I
+    need to fix. My apologies for that.
+  - >-
+    Here is the corrected patch for `src/core/transaction.ts` which resolves the
+    compilation error. I've fixed the malformed `if-else` block.
+  - >-
+    This should fix the build error and allow the tests to run correctly. Let me
+    know if you need anything else!
+operations:
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -174,19 +174,18 @@
+               logger.log(`  - Final linter error count: ${finalErrorCount}`);
+               
+               let isApproved: boolean;
+      -        if (config.approval === 'yes') { // config.approval === 'yes' is
+      default, allows auto-approval
+
+      +        if (config.approval === 'yes') { // config.approval === 'yes' is
+      default, allows auto-approval
+                   const canAutoApprove = finalErrorCount <= config.approvalOnErrorCount;
+       
+                   if (canAutoApprove) {
+                       logger.success('  - Changes automatically approved based on your configuration.');
+                       isApproved = true;
+                   } else {
+                       notifyApprovalRequired(config.projectId);
+                       isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+      -            } else { // config.approval === 'no' now means "always
+      prompt"
+
+      -            logger.warn('Manual approval required because "approval" is
+      set to "no".');
+
+      -            notifyApprovalRequired(config.projectId);
+
+      -            isApproved = await prompter('Changes applied. Do you want to
+      approve and commit them? (y/N)');
+
+      -        }
+
+      +            }
+
+      +        } else { // config.approval === 'no' now means "always prompt"
+
+      +            logger.warn('Manual approval required because "approval" is
+      set to "no".');
+
+      +            notifyApprovalRequired(config.projectId);
+
+      +            isApproved = await prompter('Changes applied. Do you want to
+      approve and commit them? (y/N)');
+               }
+       
+               if (isApproved) {
+    patchStrategy: new-unified
+snapshot:
+  src/core/transaction.ts: "import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation } from '../types';\r\nimport { logger } from '../utils/logger';\r\nimport { getErrorCount, executeShellCommand } from '../utils/shell';\r\nimport { createSnapshot, restoreSnapshot, applyOperations, readFileContent } from './executor';\r\nimport { hasBeenProcessed, writePendingState, commitState, deletePendingState } from './state';\r\nimport { getConfirmation } from '../utils/prompt';\r\nimport { notifyApprovalRequired, notifyFailure, notifySuccess } from '../utils/notifier';\r\n\r\ntype Prompter = (question: string) => Promise<boolean>;\r\n\r\ntype ProcessPatchOptions = {\r\n    prompter?: Prompter;\r\n    cwd?: string;\r\n};\r\n\r\nconst calculateLineChanges = async (op: FileOperation, snapshot: FileSnapshot, cwd: string): Promise<{ added: number; removed: number }> => {\r\n    if (op.type === 'rename') {\n        return { added: 0, removed: 0 };\n    }\n    const oldContent = snapshot[op.path] ?? null;\r\n\r\n    if (op.type === 'delete') {\r\n        const oldLines = oldContent ? oldContent.split('\\n') : [];\r\n        return { added: 0, removed: oldLines.length };\r\n    }\r\n\r\n    // After applyOperations, the new content is on disk\r\n    const newContent = await readFileContent(op.path, cwd);\r\n    if (oldContent === newContent) return { added: 0, removed: 0 };\r\n\r\n    const oldLines = oldContent ? oldContent.split('\\n') : [];\r\n    const newLines = newContent ? newContent.split('\\n') : [];\r\n\r\n    if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };\r\n    if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };\r\n    \r\n    const oldSet = new Set(oldLines);\r\n    const newSet = new Set(newLines);\r\n    \r\n    const added = newLines.filter(line => !oldSet.has(line)).length;\r\n    const removed = oldLines.filter(line => !newSet.has(line)).length;\r\n    \r\n    return { added, removed };\r\n};\r\n\r\nconst logCompletionSummary = (\r\n    uuid: string,\r\n    startTime: number,\r\n    operations: FileOperation[]\n) => {\r\n    const duration = performance.now() - startTime;\r\n\r\n    logger.log('\\nSummary:');\r\n    logger.log(`Applied ${operations.length} file operation(s) successfully.`);\r\n    logger.log(`Total time from start to commit: ${duration.toFixed(2)}ms`);\r\n    logger.success(`✅ Transaction ${uuid} committed successfully!`);\r\n};\r\n\r\nconst rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnapshot, reason: string): Promise<void> => {\r\n    logger.warn(`Rolling back changes: ${reason}`);\r\n    try {\r\n        await restoreSnapshot(snapshot, cwd);\r\n        logger.success('  - Files restored to original state.');\r\n    } catch (error) {\r\n        logger.error(`Fatal: Rollback failed: ${error instanceof Error ? error.message : String(error)}`);\r\n        // Do not rethrow; we're already in a final error handling state.\r\n    } finally {\r\n        try {\r\n            await deletePendingState(cwd, uuid);\r\n            logger.success(`↩️ Transaction ${uuid} rolled back.`);\r\n            notifyFailure(uuid);\r\n        } catch (cleanupError) {\r\n            logger.error(`Fatal: Could not clean up pending state for ${uuid}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);\r\n        }\r\n    }\r\n};\r\n\r\nexport const processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {\r\n    const cwd = options?.cwd || process.cwd();\r\n    const prompter = options?.prompter || getConfirmation;\r\n    const { control, operations, reasoning } = parsedResponse;\r\n    const { uuid, projectId } = control;\r\n    const startTime = performance.now();\r\n\r\n    // 1. Validation\r\n    if (projectId !== config.projectId) {\r\n        logger.warn(`Skipping patch: projectId mismatch (expected '${config.projectId}', got '${projectId}').`);\r\n        return;\r\n    }\r\n    if (await hasBeenProcessed(cwd, uuid)) {\r\n        logger.info(`Skipping patch: uuid '${uuid}' has already been processed.`);\r\n        return;\r\n    }\r\n\r\n    // 2. Pre-flight checks\r\n    if (config.preCommand) {\r\n        logger.log(`  - Running pre-command: ${config.preCommand}`);\r\n        const { exitCode, stderr } = await executeShellCommand(config.preCommand, cwd);\r\n        if (exitCode !== 0) {\r\n            logger.error(`Pre-command failed with exit code ${exitCode}, aborting transaction.`);\r\n            if (stderr) logger.error(`Stderr: ${stderr}`);\r\n            return;\r\n        }\r\n    }\r\n\r\n    logger.info(`🚀 Starting transaction for patch ${uuid}...`);\r\n    logger.log(`Reasoning:\\n  ${reasoning.join('\\n  ')}`);\r\n\r\n    const affectedFilePaths = operations.reduce<string[]>((acc, op) => {\n        if (op.type === 'rename') {\n            acc.push(op.from, op.to);\n        } else {\n            acc.push(op.path);\n        }\n        return acc;\n    }, []);\r\n    const snapshot = await createSnapshot(affectedFilePaths, cwd);\r\n    \r\n    const stateFile: StateFile = {\r\n        uuid, projectId, createdAt: new Date().toISOString(), reasoning, operations, snapshot, approved: false,\r\n    };\r\n\r\n    try {\r\n        await writePendingState(cwd, stateFile);\r\n        logger.success('  - Staged changes to .pending.yml file.');\r\n\r\n        // Apply changes\r\n        logger.log('  - Applying file operations...');\r\n        await applyOperations(operations, cwd);\r\n        logger.success('  - File operations complete.');\r\n\r\n        const opStatsPromises = operations.map(async op => {\r\n            const stats = await calculateLineChanges(op, snapshot, cwd);\r\n            if (op.type === 'write') {\r\n                logger.success(`✔ Written: ${op.path} (+${stats.added}, -${stats.removed})`);\r\n            } else if (op.type === 'delete') {\r\n                logger.success(`✔ Deleted: ${op.path}`);\r\n            } else if (op.type === 'rename') {\n                logger.success(`✔ Renamed: ${op.from} -> ${op.to}`);\n            }\r\n            return stats;\r\n        });\r\n        const opStats = await Promise.all(opStatsPromises);\r\n\r\n        // Run post-command\r\n        if (config.postCommand) {\r\n            logger.log(`  - Running post-command: ${config.postCommand}`);\r\n            const postResult = await executeShellCommand(config.postCommand, cwd);\r\n            if (postResult.exitCode !== 0) {\r\n                logger.error(`Post-command failed with exit code ${postResult.exitCode}.`);\r\n                if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);\r\n                throw new Error('Post-command failed, forcing rollback.');\r\n            }\r\n        }\r\n\r\n        // Log summary before asking for approval\n        const checksDuration = performance.now() - startTime;\n        const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);\n        const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);\n\n        logger.log('\\nPre-flight summary:');\n        logger.success(`Lines changed: +${totalAdded}, -${totalRemoved}`);\n        logger.log(`Checks completed in ${checksDuration.toFixed(2)}ms`);\n\n        // Check for approval\n        const finalErrorCount = await getErrorCount(config.linter, cwd);\n        logger.log(`  - Final linter error count: ${finalErrorCount}`);\n        \n        let isApproved: boolean;\n        if (config.approval === 'yes') { // config.approval === 'yes' is default, allows auto-approval\n            const canAutoApprove = finalErrorCount <= config.approvalOnErrorCount;\r\n\n            if (canAutoApprove) {\r\n                logger.success('  - Changes automatically approved based on your configuration.');\r\n                isApproved = true;\r\n            } else {\r\n                notifyApprovalRequired(config.projectId);\r\n                isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');\r\n            } else { // config.approval === 'no' now means \"always prompt\"\n            logger.warn('Manual approval required because \"approval\" is set to \"no\".');\n            notifyApprovalRequired(config.projectId);\n            isApproved = await prompter('Changes applied. Do you want to approve and commit them? (y/N)');\n        }\n        }\r\n\r\n        if (isApproved) {\r\n            stateFile.approved = true;\r\n            await writePendingState(cwd, stateFile); // Update state with approved: true before commit\r\n            await commitState(cwd, uuid);\r\n            logCompletionSummary(uuid, startTime, operations);\r\n            notifySuccess(uuid);\r\n        } else {\r\n            throw new Error('Changes were not approved.');\r\n        }\r\n    } catch (error) {\r\n        const reason = error instanceof Error ? error.message : String(error);\r\n        await rollbackTransaction(cwd, uuid, snapshot, reason);\r\n    }\r\n};"
+approved: true

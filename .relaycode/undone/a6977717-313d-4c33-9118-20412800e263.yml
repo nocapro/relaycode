@@ -1,0 +1,2200 @@
+uuid: a6977717-313d-4c33-9118-20412800e263
+projectId: relaycode
+createdAt: '2025-06-21T20:24:52.814Z'
+reasoning:
+  - >-
+    Of course! I can certainly help refactor your test codebase to be more DRY
+    (Don't Repeat Yourself), reducing code duplication and line count while
+    ensuring all tests continue to pass. I'll introduce a set of new test
+    helpers to achieve this.
+  - 'Here are the step-by-step changes:'
+  - '### Step 1: Enhance Test Utilities'
+  - >-
+    I'll start by augmenting `test/test.util.ts` with powerful new helpers. I'm
+    adding an `E2EHelper` class to encapsulate common test setup, teardown, and
+    file operations. I'm also creating a `MockLLMResponseBuilder` to simplify
+    the creation of mock AI responses for testing.
+  - '### Step 2: Refactor Parser Unit Tests'
+  - >-
+    Next, I'll refactor the parser unit tests in `test/unit/parser.test.ts`.
+    I'll use the new `MockLLMResponseBuilder` to make the test cases for simple
+    response structures cleaner and more readable. For tests that verify the
+    parser's handling of more complex or unusual structures (like interleaved
+    reasoning), I will retain the manual string construction to ensure the
+    test's intent is preserved.
+  - '### Step 3: Refactor E2E Tests'
+  - >-
+    Now, I'll systematically refactor all E2E test files (`init`, `patcher`,
+    `transaction`, and `watch`) to use the new `E2EHelper` and
+    `MockLLMResponseBuilder`. This will dramatically reduce boilerplate code
+    related to test environment setup, file I/O, configuration, and transaction
+    processing, making the tests much more concise and focused on their specific
+    assertions.
+  - '#### Refactoring `init.test.ts`'
+  - '#### Refactoring `patcher.test.ts`'
+  - '#### Refactoring `transaction.test.ts`'
+  - '#### Refactoring `watch.test.ts`'
+  - >-
+    These changes significantly reduce the amount of repeated code across your
+    E2E tests, making them easier to read, maintain, and extend. The core logic
+    of each test is now much more prominent.
+operations:
+  - type: write
+    path: test/test.util.ts
+    content: ${content}
+    patchStrategy: replace
+  - type: write
+    path: test/unit/parser.test.ts
+    content: |-
+      ');
+                      expect(operation.content).not.toContain('// END');
+                  }
+              });
+
+              it('should treat an unknown patch strategy as part of the file path', () => {
+                  const filePath = 'src/index.ts';
+                  const content = 'console.log("hello");';
+                  const block = `
+      \`\`\`typescript // ${filePath} unknown-strategy
+      ${content}
+      \`\`\`
+                  `;
+                  const fullPath = `${filePath} unknown-strategy`;
+                  const response = block + LLM_RESPONSE_END(uuidv4(), [{ edit: fullPath }]);
+                  const parsed = parseLLMResponse(response);
+                  expect(parsed).not.toBeNull();
+                  expect(parsed!.operations).toHaveLength(1);
+                  const op = parsed!.operations[0]!;
+                  expect(op.type).toBe('write');
+                  expect(op.path).toBe(fullPath);
+              });
+          });
+
+          describe('from fixtures', () => {
+              const fixturesDir = path.resolve(__dirname, '../fixtures');
+
+              const readFixture = (name: string) => fs.readFile(path.join(fixturesDir, name), 'utf-8');
+
+              it('should correctly parse multi-search-replace.md', async () => {
+                  const content = await readFixture('multi-search-replace.md');
+                  const parsed = parseLLMResponse(content);
+
+                  expect(parsed).not.toBeNull();
+                  expect(parsed?.control.projectId).toBe('diff-apply');
+                  expect(parsed?.control.uuid).toBe('486a43f8-874e-4f16-832f-b2fd3769c36c');
+                  expect(parsed?.operations).toHaveLength(1);
+
+                  const op = parsed!.operations[0];
+                  expect(op.type).toBe('write');
+                  if (op.type === 'write') {
+                      expect(op.path).toBe('package.json');
+                      expect(op.patchStrategy).toBe('multi-search-replace');
+                      expect(op.content).toContain('<<<<<<< SEARCH');
+                      expect(op.content).toContain('>>>>>>> REPLACE');
+                      expect(op.content).toContain('"name": "diff-patcher"');
+                  }
+                  expect(parsed?.reasoning.join(' ')).toContain("I will update the `package.json` file");
+              });
+
+              it('should correctly parse replace-with-markers.md', async () => {
+                  const content = await readFixture('replace-with-markers.md');
+                  const parsed = parseLLMResponse(content);
+                  const expectedContent = `export const newFunction = () => {\n    console.log("new file");\n};`;
+                  
+                  expect(parsed).not.toBeNull();
+                  expect(parsed?.control.uuid).toBe('1c8a41a8-20d7-4663-856e-9ebd03f7a1e1');
+                  expect(parsed?.operations).toHaveLength(1);
+
+                  const op = parsed!.operations[0];
+                  expect(op.type).toBe('write');
+                  if (op.type === 'write') {
+                      expect(op.path).toBe('src/new.ts');
+                      expect(op.patchStrategy).toBe('replace');
+                      expect(op.content).toBe(expectedContent);
+                      expect(op.content).not.toContain('// START');
+                      expect(op.content).not.toContain('
+    patchStrategy: replace
+  - type: write
+    path: test/e2e/init.test.ts
+    content: >-
+      import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import { initCommand } from '../../src/commands/init';
+
+      import { E2EHelper } from '../test.util';
+
+      import { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME }
+      from '../../src/utils/constants';
+
+      import { ConfigSchema } from '../../src/types';
+
+      import { logger } from '../../src/utils/logger';
+
+
+      describe('e2e/init', () => {
+          const helper = new E2EHelper();
+
+          beforeEach(async () => {
+              await helper.setup();
+          });
+
+          afterEach(async () => {
+              await helper.cleanup();
+          });
+
+          it('should create config file with correct defaults, state directory, and .gitignore', async () => {
+              await initCommand(helper.testDir);
+
+              // Check for config file
+              const configPath = path.join(helper.testDir, CONFIG_FILE_NAME);
+              const configExists = await helper.fileExists(CONFIG_FILE_NAME);
+              expect(configExists).toBe(true);
+
+              const configContent = await helper.readFile(CONFIG_FILE_NAME);
+              const config = JSON.parse(configContent);
+              
+              // Validate against schema to check defaults
+              const parsedConfig = ConfigSchema.parse(config);
+              expect(parsedConfig.projectId).toBe(path.basename(helper.testDir));
+              expect(parsedConfig.clipboardPollInterval).toBe(2000);
+              expect(parsedConfig.approval).toBe('yes');
+              expect(parsedConfig.linter).toBe('bun tsc --noEmit');
+
+              // Check for state directory
+              const stateDirPath = path.join(helper.testDir, STATE_DIRECTORY_NAME);
+              const stateDirExists = await fs.stat(stateDirPath).then(s => s.isDirectory()).catch(() => false);
+              expect(stateDirExists).toBe(true);
+
+              // Check for .gitignore
+              const gitignoreExists = await helper.fileExists(GITIGNORE_FILE_NAME);
+              expect(gitignoreExists).toBe(true);
+
+              const gitignoreContent = await helper.readFile(GITIGNORE_FILE_NAME);
+              expect(gitignoreContent).toContain(`/${STATE_DIRECTORY_NAME}/`);
+          });
+
+          it('should use package.json name for projectId if available', async () => {
+              const pkgName = 'my-awesome-project';
+              await helper.createFile('package.json', JSON.stringify({ name: pkgName }));
+
+              await initCommand(helper.testDir);
+
+              const configContent = await helper.readFile(CONFIG_FILE_NAME);
+              const config = JSON.parse(configContent);
+              expect(config.projectId).toBe(pkgName);
+          });
+
+          it('should append to existing .gitignore', async () => {
+              const initialContent = '# Existing rules\nnode_modules/';
+              await helper.createFile(GITIGNORE_FILE_NAME, initialContent);
+
+              await initCommand(helper.testDir);
+
+              const gitignoreContent = await helper.readFile(GITIGNORE_FILE_NAME);
+              expect(gitignoreContent).toContain(initialContent);
+              expect(gitignoreContent).toContain(`/${STATE_DIRECTORY_NAME}/`);
+          });
+
+          it('should not add entry to .gitignore if it already exists', async () => {
+              const entry = `/${STATE_DIRECTORY_NAME}/`;
+              const initialContent = `# Existing rules\n${entry}`;
+              await helper.createFile(GITIGNORE_FILE_NAME, initialContent);
+
+              await initCommand(helper.testDir);
+
+              const gitignoreContent = await helper.readFile(GITIGNORE_FILE_NAME);
+              const occurrences = (gitignoreContent.match(new RegExp(entry, 'g')) || []).length;
+              expect(occurrences).toBe(1);
+          });
+
+          it('should not overwrite an existing relaycode.config.json', async () => {
+              const customConfig = { projectId: 'custom', customField: true };
+              await helper.createFile(CONFIG_FILE_NAME, JSON.stringify(customConfig));
+
+              await initCommand(helper.testDir);
+
+              const configContent = await helper.readFile(CONFIG_FILE_NAME);
+              const config = JSON.parse(configContent);
+              expect(config.projectId).toBe('custom');
+              expect(config.customField).toBe(true);
+          });
+
+          it('should output the system prompt with the correct project ID', async () => {
+              const capturedOutput: string[] = [];
+              const originalLog = logger.log;
+              (logger as any).log = (message: string) => capturedOutput.push(message);
+
+              const pkgName = 'my-prompt-project';
+              await helper.createFile('package.json', JSON.stringify({ name: pkgName }));
+
+              await initCommand(helper.testDir);
+
+              (logger as any).log = originalLog; // Restore
+
+              const outputString = capturedOutput.join('\n');
+              expect(outputString).toContain(`Project ID: ${pkgName}`);
+          });
+
+          it('should log an error if .gitignore is not writable', async () => {
+              const gitignorePath = path.join(helper.testDir, GITIGNORE_FILE_NAME);
+              await helper.createFile(GITIGNORE_FILE_NAME, '# initial');
+              
+              const capturedErrors: string[] = [];
+              const originalError = logger.error;
+              (logger as any).error = (message: string) => capturedErrors.push(message);
+
+              try {
+                  await fs.chmod(gitignorePath, 0o444); // Read-only
+
+                  // initCommand doesn't throw, it just logs an error.
+                  await initCommand(helper.testDir);
+
+                  const gitignoreContent = await helper.readFile(GITIGNORE_FILE_NAME);
+                  expect(gitignoreContent).toBe('# initial'); // Should not have changed
+                  expect(capturedErrors.length).toBe(1);
+                  expect(capturedErrors[0]).toContain(`Failed to update ${GITIGNORE_FILE_NAME}`);
+              } finally {
+                  // Restore logger
+                  (logger as any).error = originalError;
+                  
+                  // Make writable again for cleanup
+                  await fs.chmod(gitignorePath, 0o666);
+              }
+          });
+      });
+    patchStrategy: replace
+  - type: write
+    path: test/e2e/patcher.test.ts
+    content: >-
+      import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+      import path from 'path';
+
+      import { v4 as uuidv4 } from 'uuid';
+
+      import { E2EHelper, MockLLMResponseBuilder } from '../test.util';
+
+      import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+
+
+      // NOTE: This test file uses the actual 'diff-apply' dependency, not a
+      mock.
+
+
+      describe('e2e/patcher', () => {
+          const helper = new E2EHelper();
+
+          beforeEach(async () => {
+              await helper.setup();
+          });
+
+          afterEach(async () => {
+              await helper.cleanup();
+          });
+
+          it('should correctly apply a patch using the multi-search-replace strategy', async () => {
+              const testFile = 'src/config.js';
+              const originalContent = `
+      const config = {
+          port: 3000,
+          host: 'localhost',
+          enableLogging: true,
+      };
+
+      `;
+              await helper.createFile(testFile, originalContent);
+
+              const diffContent = `
+      <<<<<<< SEARCH
+
+      -------
+          port: 3000,
+      =======
+          port: 8080,
+      >>>>>>> REPLACE
+
+      <<<<<<< SEARCH
+
+      -------
+          enableLogging: true,
+      =======
+          enableLogging: false,
+      >>>>>>> REPLACE
+
+      `;
+              
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, diffContent, { strategy: 'multi-search-replace' })
+                  .build(uuidv4());
+
+              await helper.runTransaction(llmResponse);
+
+              const finalContent = await helper.readFile(testFile);
+              
+              const expectedContent = `
+      const config = {
+          port: 8080,
+          host: 'localhost',
+          enableLogging: false,
+      };
+
+      `;
+              expect(finalContent.replace(/\s/g, '')).toBe(expectedContent.replace(/\s/g, ''));
+          });
+
+          it('should correctly apply a patch using the new-unified strategy', async () => {
+              const testFile = 'src/utils.js';
+              const originalContent = `function calculate() {
+          const a = 1;
+          const b = 2;
+          return a + b;
+      }`;
+              await helper.createFile(testFile, originalContent);
+
+              const diffContent = `--- a/${testFile}
+      +++ b/${testFile}
+
+      @@ -2,4 +2,5 @@
+           const a = 1;
+           const b = 2;
+      -    return a + b;
+
+      +    // A more complex calculation
+
+      +    return (a + b) * 2;
+       }`;
+              
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, diffContent, { strategy: 'new-unified' })
+                  .build(uuidv4());
+
+              await helper.runTransaction(llmResponse);
+
+              const finalContent = await helper.readFile(testFile);
+              
+              const expectedContent = `function calculate() {
+          const a = 1;
+          const b = 2;
+          // A more complex calculation
+          return (a + b) * 2;
+      }`;
+              // Normalize line endings for comparison
+              expect(finalContent.replace(/\r\n/g, '\n')).toBe(expectedContent.replace(/\r\n/g, '\n'));
+          });
+
+
+          it('should fail transaction if multi-search-replace content is not found', async () => {
+              const testFile = 'src/index.js';
+              const originalContent = 'const version = 1;';
+              await helper.createFile(testFile, originalContent);
+
+              const diffContent = `
+      <<<<<<< SEARCH
+
+      -------
+
+      const version = 2; // This content does not exist
+
+      =======
+
+      const version = 3;
+
+      >>>>>>> REPLACE
+
+      `;
+              const uuid = uuidv4();
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, diffContent, { strategy: 'multi-search-replace' })
+                  .build(uuid);
+              
+              await helper.runTransaction(llmResponse);
+
+              // The file content should remain unchanged
+              const finalContent = await helper.readFile(testFile);
+              expect(finalContent).toBe(originalContent);
+
+              // No state file should have been committed
+              const stateFileExists = await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`));
+              expect(stateFileExists).toBe(false);
+          });
+      });
+    patchStrategy: multi-search-replace
+  - type: write
+    path: test/e2e/transaction.test.ts
+    content: |-
+      import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+      import path from 'path';
+      import { v4 as uuidv4 } from 'uuid';
+      import yaml from 'js-yaml';
+      import { E2EHelper, MockLLMResponseBuilder } from '../test.util';
+      import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+
+
+      describe('e2e/transaction', () => {
+          const helper = new E2EHelper();
+          const testFile = 'src/index.ts';
+          const originalContent = 'console.log("original");';
+
+          beforeEach(async () => {
+              await helper.setup({ withTsconfig: true });
+              await helper.createFile(testFile, originalContent);
+          });
+
+          afterEach(async () => {
+              await helper.cleanup();
+          });
+
+          it('should apply changes, commit, and store correct state in .yml file', async () => {
+              const newContent = 'console.log("new content");';
+              const uuid = uuidv4();
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, newContent)
+                  .build(uuid);
+              
+              const { parsedResponse } = await helper.runTransaction(llmResponse, { 
+                  config: { linter: '', approval: 'yes' }
+              });
+
+              // Check file content
+              const finalContent = await helper.readFile(testFile);
+              expect(finalContent).toBe(newContent);
+
+              // Check state file was committed
+              const stateFilePath = path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`);
+              const stateFileExists = await helper.fileExists(stateFilePath);
+              expect(stateFileExists).toBe(true);
+
+              // Check state file content
+              const stateFileContent = await helper.readFile(stateFilePath);
+              const stateData: any = yaml.load(stateFileContent);
+              expect(stateData.uuid).toBe(uuid);
+              expect(stateData.approved).toBe(true);
+              expect(stateData.operations).toHaveLength(1);
+              expect(stateData.operations[0].path).toBe(testFile);
+              expect(stateData.snapshot[testFile]).toBe(originalContent);
+              expect(stateData.reasoning).toEqual(parsedResponse!.reasoning);
+          });
+
+          it('should rollback changes when manually disapproved', async () => {
+              const newContent = 'console.log("I will be rolled back");';
+              const uuid = uuidv4();
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, newContent)
+                  .build(uuid);
+
+              const prompter = async () => false; // Disapprove
+              await helper.runTransaction(llmResponse, { config: { approval: 'no' }, prompter });
+
+              const finalContent = await helper.readFile(testFile);
+              expect(finalContent).toBe(originalContent);
+
+              const stateFileExists = await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`));
+              expect(stateFileExists).toBe(false);
+          });
+
+          it('should require manual approval if linter errors exceed approvalOnErrorCount', async () => {
+              const badContent = 'const x: string = 123;'; // 1 TS error
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, badContent)
+                  .build(uuidv4());
+              
+              // Disapprove when prompted
+              const prompter = async () => false;
+              await helper.runTransaction(llmResponse, { 
+                  config: { approval: 'yes', approvalOnErrorCount: 0, linter: `bun tsc` }, 
+                  prompter 
+              });
+              
+              const finalContent = await helper.readFile(testFile);
+              expect(finalContent).toBe(originalContent);
+          });
+
+          it('should skip linter if command is empty and auto-approve', async () => {
+              const badContent = 'const x: string = 123;'; // Would fail linter, but it's skipped
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, badContent)
+                  .build(uuidv4());
+
+              await helper.runTransaction(llmResponse, { config: { linter: '' } });
+
+              const finalContent = await helper.readFile(testFile);
+              expect(finalContent).toBe(badContent);
+          });
+
+          it('should ignore patch with already processed UUID', async () => {
+              const uuid = uuidv4();
+              
+              // 1. Process and commit a patch
+              const response1 = new MockLLMResponseBuilder().addFile(testFile, "first change").build(uuid);
+              await helper.runTransaction(response1);
+              
+              // 2. Try to process another patch with the same UUID
+              const response2 = new MockLLMResponseBuilder().addFile(testFile, "second change").build(uuid);
+              await helper.runTransaction(response2);
+
+              // Content should be from the first change, not the second
+              const finalContent = await helper.readFile(testFile);
+              expect(finalContent).toBe("first change");
+          });
+          
+          it('should create nested directories for new files', async () => {
+              const newFilePath = 'src/a/b/c/new-file.ts';
+              const newFileContent = 'hello world';
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(newFilePath, newFileContent, { type: 'new' })
+                  .build(uuidv4());
+
+              await helper.runTransaction(llmResponse);
+
+              const finalContent = await helper.readFile(newFilePath);
+              expect(finalContent).toBe(newFileContent);
+          });
+
+          it('should rollback new file and its new empty parent directory on rejection', async () => {
+              const newFilePath = 'src/new/dir/file.ts';
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(newFilePath, 'content', { type: 'new' })
+                  .build(uuidv4());
+
+              await helper.runTransaction(llmResponse, { config: { approval: 'no' }, prompter: async () => false });
+
+              expect(await helper.fileExists(newFilePath)).toBe(false);
+              expect(await helper.fileExists('src/new/dir')).toBe(false);
+              expect(await helper.fileExists('src/new')).toBe(false);
+              // src directory should still exist as it contained a file before
+              expect(await helper.fileExists('src')).toBe(true);
+          });
+
+          it('should not delete parent directory on rollback if it was not empty beforehand', async () => {
+              const existingFilePath = 'src/shared/existing.ts';
+              const newFilePath = 'src/shared/new.ts';
+              await helper.createFile(existingFilePath, 'const existing = true;');
+
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(newFilePath, 'const brandNew = true;', { type: 'new' })
+                  .build(uuidv4());
+
+              await helper.runTransaction(llmResponse, { config: { approval: 'no' }, prompter: async () => false });
+
+              expect(await helper.fileExists(newFilePath)).toBe(false);
+              expect(await helper.fileExists(existingFilePath)).toBe(true);
+              expect(await helper.fileExists('src/shared')).toBe(true);
+          });
+
+          it('should abort transaction if preCommand fails', async () => {
+              const uuid = uuidv4();
+              const llmResponse = new MockLLMResponseBuilder().addFile(testFile, "new content").build(uuid);
+              await helper.runTransaction(llmResponse, { config: { preCommand: 'bun -e "process.exit(1)"' } });
+
+              expect(await helper.readFile(testFile)).toBe(originalContent);
+              expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(false);
+          });
+
+          it('should automatically roll back if postCommand fails', async () => {
+              const uuid = uuidv4();
+              const llmResponse = new MockLLMResponseBuilder().addFile(testFile, "new content").build(uuid);
+              await helper.runTransaction(llmResponse, { config: { postCommand: 'bun -e "process.exit(1)"' } });
+
+              expect(await helper.readFile(testFile)).toBe(originalContent);
+              expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(false);
+          });
+
+          it('should ignore patch with non-matching projectId', async () => {
+              const uuid = uuidv4();
+              const llmResponse = new MockLLMResponseBuilder()
+                  .addFile(testFile, 'should not be applied')
+                  .build(uuid, 'wrong-project');
+              
+              await helper.runTransaction(llmResponse, { config: { projectId: 'correct-project' } });
+
+              expect(await helper.readFile(testFile)).toBe(originalContent);
+              expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(false);
+          });
+
+          it('should correctly apply a file deletion operation', async () => {
+              const fileToDelete = 'src/delete-me.ts';
+              const originalDeleteContent = 'delete this content';
+              await helper.createFile(fileToDelete, originalDeleteContent);
+              
+              const uuid = uuidv4();
+              const response = new MockLLMResponseBuilder()
+                  .deleteFile(fileToDelete)
+                  .build(uuid);
+              
+              await helper.runTransaction(response);
+
+              expect(await helper.fileExists(fileToDelete)).toBe(false);
+              
+              const stateFilePath = path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`);
+              const stateFileContent = await helper.readFile(stateFilePath);
+              const stateData: any = yaml.load(stateFileContent);
+              expect(stateData.snapshot[fileToDelete]).toBe(originalDeleteContent);
+              expect(stateData.operations[0]).toEqual({ type: 'delete', path: fileToDelete });
+          });
+
+          it('should correctly roll back a file deletion operation', async () => {
+              const fileToDelete = 'src/delete-me.ts';
+              const originalDeleteContent = 'delete this content';
+              await helper.createFile(fileToDelete, originalDeleteContent);
+              
+              const uuid = uuidv4();
+              const response = new MockLLMResponseBuilder()
+                  .deleteFile(fileToDelete)
+                  .build(uuid);
+              
+              await helper.runTransaction(response, { config: { approval: 'no' }, prompter: async () => false });
+
+              expect(await helper.fileExists(fileToDelete)).toBe(true);
+              expect(await helper.readFile(fileToDelete)).toBe(originalDeleteContent);
+              expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(false);
+          });
+
+          it('should auto-approve if linter errors are within approvalOnErrorCount', async () => {
+              const badContent = 'const x: string = 123;'; // 1 TS error
+              const uuid = uuidv4();
+              const response = new MockLLMResponseBuilder()
+                  .addFile(testFile, badContent)
+                  .build(uuid);
+              
+              await helper.runTransaction(response, { config: { approval: 'yes', approvalOnErrorCount: 1, linter: 'bun tsc' } });
+              
+              expect(await helper.readFile(testFile)).toBe(badContent);
+              expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(true);
+          });
+
+          it('should ignore orphaned .pending.yml file and allow reprocessing', async () => {
+              const config = await helper.createConfig();
+              const uuid = uuidv4();
+              const newContent = 'console.log("final content");';
+
+              const stateDir = path.join(helper.testDir, STATE_DIRECTORY_NAME);
+              await fs.mkdir(stateDir, { recursive: true });
+              const orphanedPendingFile = path.join(stateDir, `${uuid}.pending.yml`);
+              await fs.writeFile(orphanedPendingFile, yaml.dump({ uuid, message: 'this is from a crashed run' }));
+
+              const response = new MockLLMResponseBuilder().addFile(testFile, newContent).build(uuid);
+              await helper.runTransaction(response);
+              
+              expect(await helper.readFile(testFile)).toBe(newContent);
+              
+              const finalStateFile = path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`);
+              expect(await helper.fileExists(finalStateFile)).toBe(true);
+
+              const stateData: any = yaml.load(await helper.readFile(finalStateFile));
+              expect(stateData.projectId).toBe(config.projectId);
+              expect(stateData.approved).toBe(true);
+          });
+
+          it('should successfully run pre and post commands (happy path)', async () => {
+              const preCommandFile = 'pre.txt';
+              const postCommandFile = 'post.txt';
+          
+              const preCommandFilePath = path.join(helper.testDir, preCommandFile).replace(/\\/g, '\\\\');
+              const postCommandFilePath = path.join(helper.testDir, postCommandFile).replace(/\\/g, '\\\\');
+          
+              const response = new MockLLMResponseBuilder().addFile(testFile, "new content").build(uuidv4());
+          
+              await helper.runTransaction(response, {
+                  config: {
+                      preCommand: `node -e "require('fs').writeFileSync('${preCommandFilePath}', '')"`,
+                      postCommand: `node -e "require('fs').writeFileSync('${postCommandFilePath}', '')"`,
+                  }
+              });
+          
+              expect(await helper.fileExists(preCommandFile)).toBe(true);
+              expect(await helper.fileExists(postCommandFile)).toBe(true);
+              expect(await helper.readFile(testFile)).toBe("new content");
+          });
+
+          it('should create a pending file during transaction and remove it on rollback', async () => {
+              const uuid = uuidv4();
+              const response = new MockLLMResponseBuilder()
+                  .addFile(testFile, 'I will be rolled back')
+                  .build(uuid);
+          
+              const pendingPath = path.join(STATE_DIRECTORY_NAME, `${uuid}.pending.yml`);
+              let pendingFileExistedDuringRun = false;
+          
+              const prompter = async (): Promise<boolean> => {
+                  pendingFileExistedDuringRun = await helper.fileExists(pendingPath);
+                  return false; // Disapprove to trigger rollback
+              };
+          
+              await helper.runTransaction(response, { config: { approval: 'no' }, prompter });
+          
+              expect(pendingFileExistedDuringRun).toBe(true);
+              expect(await helper.readFile(testFile)).toBe(originalContent);
+              expect(await helper.fileExists(pendingPath)).toBe(false);
+              expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(false);
+          });
+
+          it('should fail transaction gracefully if a file is not writable and rollback all changes', async () => {
+              const unwritableFile = 'src/unwritable.ts';
+              const writableFile = 'src/writable.ts';
+              const originalUnwritableContent = 'original unwritable';
+              const originalWritableContent = 'original writable';
+          
+              await helper.createFile(unwritableFile, originalUnwritableContent);
+              await helper.createFile(writableFile, originalWritableContent);
+              
+              const unwritableFilePath = path.join(helper.testDir, unwritableFile);
+
+              try {
+                  await fs.chmod(unwritableFilePath, 0o444); // Make read-only
+
+                  const uuid = uuidv4();
+                  const response = new MockLLMResponseBuilder()
+                      .addFile(writableFile, "new writable content")
+                      .addFile(unwritableFile, "new unwritable content")
+                      .build(uuid);
+                  
+                  await helper.runTransaction(response);
+              
+                  expect(await helper.readFile(writableFile)).toBe(originalWritableContent); 
+                  expect(await helper.readFile(unwritableFile)).toBe(originalUnwritableContent);
+                  expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.pending.yml`))).toBe(false);
+                  expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(false);
+              } finally {
+                  await fs.chmod(unwritableFilePath, 0o666);
+              }
+          });
+
+          it('should rollback gracefully if creating a file in a non-writable directory fails', async () => {
+              const readonlyDir = 'src/readonly-dir';
+              const newFilePath = path.join(readonlyDir, 'new-file.ts');
+              const readonlyDirPath = path.join(helper.testDir, readonlyDir);
+          
+              await fs.mkdir(readonlyDirPath, { recursive: true });
+              await fs.chmod(readonlyDirPath, 0o555); // Read and execute only
+          
+              try {
+                  const uuid = uuidv4();
+                  const response = new MockLLMResponseBuilder()
+                      .addFile(newFilePath, 'this should not be written', { type: 'new' })
+                      .build(uuid);
+                  
+                  await helper.runTransaction(response);
+          
+                  expect(await helper.fileExists(newFilePath)).toBe(false);
+                  expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.yml`))).toBe(false);
+                  expect(await helper.fileExists(path.join(STATE_DIRECTORY_NAME, `${uuid}.pending.yml`))).toBe(false);
+              } finally {
+                  await fs.chmod(readonlyDirPath, 0o777); // Make writable again for cleanup
+              }
+          });
+
+          it('should correctly rollback a complex transaction (modify, delete, create)', async () => {
+              const fileToModify = 'src/modify.ts';
+              const originalModifyContent = 'export const a = 1;';
+              await helper.createFile(fileToModify, originalModifyContent);
+          
+              const fileToDelete = 'src/delete.ts';
+              const originalDeleteContent = 'export const b = 2;';
+              await helper.createFile(fileToDelete, originalDeleteContent);
+          
+              const newFilePath = 'src/new/component.ts';
+              const newFileContent = 'export const c = 3;';
+          
+              const uuid = uuidv4();
+              const response = new MockLLMResponseBuilder()
+                  .addFile(fileToModify, 'export const a = 100;')
+                  .deleteFile(fileToDelete)
+                  .addFile(newFilePath, newFileContent, { type: 'new' })
+                  .build(uuid);
+          
+              await helper.runTransaction(response, { config: { approval: 'no' }, prompter: async () => false });
+          
+              expect(await helper.readFile(fileToModify)).toBe(originalModifyContent);
+          
+              expect(await helper.fileExists(fileToDelete)).toBe(true);
+              expect(await helper.readFile(fileToDelete)).toBe(originalDeleteContent);
+          
+              expect(await helper.fileExists(newFilePath)).toBe(false);
+              expect(await helper.fileExists('src/new')).toBe(false);
+          });
+      });
+    patchStrategy: replace
+  - type: write
+    path: test/e2e/watch.test.ts
+    content: |-
+      import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+      import { v4 as uuidv4 } from 'uuid';
+      import { createClipboardWatcher } from '../../src/core/clipboard';
+      import { parseLLMResponse } from '../../src/core/parser';
+      import { processPatch } from '../../src/core/transaction';
+      import { findConfig } from '../../src/core/config';
+      import { E2EHelper, MockLLMResponseBuilder } from '../test.util';
+
+      describe('e2e/watch', () => {
+          const helper = new E2EHelper();
+          let watcher: { stop: () => void } | null = null;
+
+          beforeEach(async () => {
+              await helper.setup();
+          });
+
+          afterEach(async () => {
+              if (watcher) {
+                  watcher.stop();
+                  watcher = null;
+              }
+              await helper.cleanup();
+          });
+
+          it('should ignore invalid patch and process subsequent valid patch', async () => {
+              const pollInterval = 50;
+              await helper.createConfig({ clipboardPollInterval: pollInterval });
+              const testFile = 'src/index.ts';
+              const originalContent = 'console.log("original");';
+              await helper.createFile(testFile, originalContent);
+          
+              let fakeClipboardContent = 'this is not a valid patch, just some random text.';
+              const clipboardReader = async () => fakeClipboardContent;
+          
+              const onClipboardChange = async (content: string) => {
+                  const currentConfig = await findConfig(helper.testDir);
+                  const parsedResponse = parseLLMResponse(content);
+                  if (!currentConfig || !parsedResponse) {
+                      return;
+                  }
+                  await processPatch(currentConfig, parsedResponse, { cwd: helper.testDir });
+              };
+          
+              watcher = createClipboardWatcher(pollInterval, onClipboardChange, clipboardReader);
+          
+              // Wait for a couple of poll cycles to ensure the invalid patch is read and ignored
+              await new Promise(resolve => setTimeout(resolve, pollInterval * 3));
+          
+              const contentAfterInvalid = await helper.readFile(testFile);
+              expect(contentAfterInvalid).toBe(originalContent);
+          
+              // Now, provide a valid patch
+              const newContent = 'console.log("new content");';
+              const validPatch = new MockLLMResponseBuilder()
+                  .addFile(testFile, newContent)
+                  .build(uuidv4());
+              
+              fakeClipboardContent = validPatch;
+
+              // Directly trigger the callback with the valid patch for speed,
+              // but also wait for polling to ensure it works via watcher mechanism.
+              await onClipboardChange(validPatch);
+              await new Promise(resolve => setTimeout(resolve, pollInterval * 5));
+          
+              const contentAfterValid = await helper.readFile(testFile);
+              expect(contentAfterValid).toBe(newContent);
+          });
+      });
+    patchStrategy: replace
+snapshot:
+  test/test.util.ts: "import { promises as fs } from 'fs';\r\nimport path from 'path';\r\nimport os from 'os';\r\nimport { Config, PatchStrategy } from '../src/types';\r\nimport { CONFIG_FILE_NAME } from '../src/utils/constants';\r\nimport { logger } from '../src/utils/logger';\r\n\r\nexport interface TestDir {\r\n    path: string;\r\n    cleanup: () => Promise<void>;\r\n}\r\n\r\nexport const setupTestDirectory = async (): Promise<TestDir> => {\r\n    const testDirPath = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-test-'));\r\n\r\n    const cleanup = async () => {\r\n        await fs.rm(testDirPath, { recursive: true, force: true });\r\n    };\r\n\r\n    return { path: testDirPath, cleanup };\r\n};\r\n\r\nexport interface E2ETestContext {\r\n    testDir: TestDir;\r\n    cleanup: () => Promise<void>;\r\n}\r\n\r\nexport const setupE2ETest = async (options: { withTsconfig?: boolean } = {}): Promise<E2ETestContext> => {\r\n    const testDir = await setupTestDirectory();\r\n\r\n    if (options.withTsconfig) {\r\n        await createTestFile(testDir.path, 'tsconfig.json', JSON.stringify({\r\n            \"compilerOptions\": { \"strict\": true, \"noEmit\": true, \"isolatedModules\": true },\r\n            \"include\": [\"src/**/*.ts\"]\r\n        }, null, 2));\r\n    }\r\n    \r\n    // Suppress logger output\r\n    const originalLogger = {\r\n        info: (logger as any).info,\r\n        log: (logger as any).log,\r\n        warn: (logger as any).warn,\r\n        error: (logger as any).error,\r\n        success: (logger as any).success,\r\n        prompt: (logger as any).prompt,\r\n    };\r\n    \r\n    (logger as any).info = () => {};\r\n    (logger as any).log = () => {};\r\n    (logger as any).warn = () => {};\r\n    (logger as any).error = () => {};\r\n    if ((logger as any).success) (logger as any).success = () => {};\r\n    if ((logger as any).prompt) (logger as any).prompt = () => {};\r\n\r\n\r\n    const cleanup = async () => {\r\n        // Restore logger\r\n        (logger as any).info = originalLogger.info;\r\n        (logger as any).log = originalLogger.log;\r\n        (logger as any).warn = originalLogger.warn;\r\n        (logger as any).error = originalLogger.error;\r\n        if (originalLogger.success) (logger as any).success = originalLogger.success;\r\n        if (originalLogger.prompt) (logger as any).prompt = originalLogger.prompt;\r\n        \r\n        // Give fs operations time to complete before cleanup\r\n        await new Promise(resolve => setTimeout(resolve, 150));\r\n        \r\n        // Cleanup directory\r\n        await testDir.cleanup();\r\n    };\r\n\r\n    return { testDir, cleanup };\r\n};\r\n\r\n\r\nexport const createTestConfig = async (cwd: string, overrides: Partial<Config> = {}): Promise<Config> => {\r\n    const defaultConfig: Config = {\r\n        projectId: 'test-project',\r\n        clipboardPollInterval: 100,\r\n        approval: 'yes',\r\n        approvalOnErrorCount: 0,\r\n        linter: `bun -e \"process.exit(0)\"`, // A command that always succeeds\r\n        preCommand: '',\r\n        postCommand: '',\r\n    };\r\n    const config = { ...defaultConfig, ...overrides };\r\n    await fs.writeFile(path.join(cwd, CONFIG_FILE_NAME), JSON.stringify(config, null, 2));\r\n    return config;\r\n};\r\n\r\nexport const createTestFile = async (cwd: string, filePath: string, content: string): Promise<void> => {\r\n    const absolutePath = path.resolve(cwd, filePath);\r\n    const dir = path.dirname(absolutePath);\r\n    await fs.mkdir(dir, { recursive: true });\r\n    await fs.writeFile(absolutePath, content);\r\n};\r\n\r\nexport const LLM_RESPONSE_START = `\r\nI have analyzed your request and here are the changes.\r\nFirst, I will edit the main file.\r\n`;\r\n\r\nexport const LLM_RESPONSE_END = (uuid: string, changeSummary: { [key: string]: string }[]) => `\r\n\\`\\`\\`yaml\r\nprojectId: test-project\r\nuuid: ${uuid}\r\nchangeSummary: ${JSON.stringify(changeSummary)}\r\n\\`\\`\\`\r\n`;\r\n\r\nexport const createFileBlock = (filePath: string, content: string, patchStrategy?: PatchStrategy): string => {\r\n    const strategyString = patchStrategy ? ` ${patchStrategy}` : '';\r\n    return `\r\n\\`\\`\\`typescript // ${filePath}${strategyString}\r\n// START\r\n\r\n${content}\r\n\r\n// END\r\n\\`\\`\\`\r\n`;\r\n};\r\n\r\nexport const createDeleteFileBlock = (filePath: string): string => {\r\n    return `\r\n\\`\\`\\`typescript // ${filePath}\r\n//TODO: delete this file\r\n\\`\\`\\`\r\n`;\r\n};"
+  test/unit/parser.test.ts: >-
+    import { describe, it, expect } from 'bun:test';
+
+    import { parseLLMResponse } from '../../src/core/parser';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { LLM_RESPONSE_START, LLM_RESPONSE_END, createFileBlock,
+    createDeleteFileBlock } from '../test.util';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+
+    describe('core/parser', () => {
+
+        describe('legacy tests', () => {
+            const testUuid = uuidv4();
+
+            it('should return null if YAML block is missing', () => {
+                const response = `
+    \`\`\`typescript // src/index.ts
+
+    console.log("hello");
+
+    \`\`\`
+                `;
+                expect(parseLLMResponse(response)).toBeNull();
+            });
+
+            it('should return null if YAML is malformed', () => {
+                const response = `
+    \`\`\`typescript // src/index.ts
+
+    console.log("hello");
+
+    \`\`\`
+
+    \`\`\`yaml
+
+    projectId: test-project
+
+    uuid: ${testUuid}
+      malformed: - yaml
+    \`\`\`
+                `;
+                expect(parseLLMResponse(response)).toBeNull();
+            });
+
+            it('should return null if YAML is missing required fields', () => {
+                const response = `
+    \`\`\`typescript // src/index.ts
+
+    console.log("hello");
+
+    \`\`\`
+
+    \`\`\`yaml
+
+    projectId: test-project
+
+    \`\`\`
+                `;
+                expect(parseLLMResponse(response)).toBeNull();
+            });
+
+            it('should return null if no code blocks are found', () => {
+                const response = LLM_RESPONSE_START + LLM_RESPONSE_END(testUuid, []);
+                expect(parseLLMResponse(response)).toBeNull();
+            });
+
+            it('should correctly parse a single file write operation with default "replace" strategy', () => {
+                const content = 'const a = 1;';
+                const filePath = 'src/utils.ts';
+                const block = createFileBlock(filePath, content); // No strategy provided
+                const response = LLM_RESPONSE_START + block + LLM_RESPONSE_END(testUuid, [{ edit: filePath }]);
+                
+                const parsed = parseLLMResponse(response);
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.control.uuid).toBe(testUuid);
+                expect(parsed?.control.projectId).toBe('test-project');
+                expect(parsed?.reasoning.join(' ')).toContain('I have analyzed your request and here are the changes.');
+                expect(parsed?.operations).toHaveLength(1);
+                expect(parsed?.operations[0]).toEqual({
+                    type: 'write',
+                    path: filePath,
+                    content: content,
+                    patchStrategy: 'replace',
+                });
+            });
+            
+            it('should correctly parse a write operation with an explicit patch strategy', () => {
+                const content = 'diff content';
+                const filePath = 'src/utils.ts';
+                const block = createFileBlock(filePath, content, 'new-unified');
+                const response = LLM_RESPONSE_START + block + LLM_RESPONSE_END(testUuid, [{ edit: filePath }]);
+
+                const parsed = parseLLMResponse(response);
+                expect(parsed).not.toBeNull();
+                const writeOp = parsed?.operations[0];
+                expect(writeOp?.type).toBe('write');
+                if (writeOp?.type === 'write') {
+                    expect(writeOp.patchStrategy).toBe('new-unified');
+                    expect(writeOp.content).toBe(content);
+                }
+            });
+
+            it('should correctly parse a single file delete operation', () => {
+                const filePath = 'src/old-file.ts';
+                const block = createDeleteFileBlock(filePath);
+                const response = "I'm deleting this old file." + block + LLM_RESPONSE_END(testUuid, [{ delete: filePath }]);
+
+                const parsed = parseLLMResponse(response);
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.operations).toHaveLength(1);
+                expect(parsed?.operations[0]).toEqual({
+                    type: 'delete',
+                    path: filePath,
+                });
+            });
+
+            it('should correctly parse multiple mixed operations', () => {
+                const filePath1 = 'src/main.ts';
+                const content1 = 'console.log("main");';
+                const filePath2 = 'src/to-delete.ts';
+                const filePath3 = 'src/new-feature.ts';
+
+                const response = [
+                    "I'll make three changes.",
+                    createFileBlock(filePath1, content1, 'replace'),
+                    "Then delete a file.",
+                    createDeleteFileBlock(filePath2),
+                    "And finally add a new one with a diff.",
+                    createFileBlock(filePath3, 'diff content', 'new-unified'),
+                    LLM_RESPONSE_END(testUuid, [{edit: filePath1}, {delete: filePath2}, {new: filePath3}])
+                ].join('\n');
+
+                const parsed = parseLLMResponse(response);
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.operations).toHaveLength(3);
+                expect(parsed?.operations).toContainEqual({ type: 'write', path: filePath1, content: content1, patchStrategy: 'replace' });
+                expect(parsed?.operations).toContainEqual({ type: 'delete', path: filePath2 });
+                expect(parsed?.operations).toContainEqual({ type: 'write', path: filePath3, content: 'diff content', patchStrategy: 'new-unified' });
+                expect(parsed?.reasoning.join(' ')).toContain("I'll make three changes.");
+            });
+            
+            it('should handle file paths with spaces when quoted', () => {
+                const filePath = 'src/components/a file with spaces.tsx';
+                const content = '<button>Click Me</button>';
+                const block = `
+    \`\`\`typescript // "${filePath}"
+
+    // START
+
+
+    ${content}
+
+
+    // END
+
+    \`\`\`
+
+    `;
+                const response = block + LLM_RESPONSE_END(testUuid, [{ new: filePath }]);
+                const parsed = parseLLMResponse(response);
+                expect(parsed).not.toBeNull();
+                expect(parsed!.operations).toHaveLength(1);
+                expect(parsed!.operations[0]!.path).toBe(filePath);
+            });
+
+            it('should handle empty content in a write operation', () => {
+                const filePath = 'src/empty.ts';
+                const response = createFileBlock(filePath, '') + LLM_RESPONSE_END(testUuid, [{ new: filePath }]);
+                const parsed = parseLLMResponse(response);
+                expect(parsed).not.toBeNull();
+                expect(parsed!.operations).toHaveLength(1);
+                const operation = parsed!.operations[0]!;
+                expect(operation.type).toBe('write');
+                if (operation.type === 'write') {
+                    expect(operation.content).toBe('');
+                }
+            });
+
+            it('should ignore malformed code blocks', () => {
+                const response = `
+    \`\`\`typescript //
+
+    const a = 1;
+
+    \`\`\`
+
+    ${LLM_RESPONSE_END(testUuid, [])}
+                `;
+                expect(parseLLMResponse(response)).toBeNull();
+            });
+
+            it('should correctly extract content even if START/END markers are missing', () => {
+                const filePath = 'src/simple.ts';
+                const content = 'const simple = true;';
+                const response = `
+    \`\`\`typescript // ${filePath}
+
+    ${content}
+
+    \`\`\`
+
+    ${LLM_RESPONSE_END(testUuid, [{edit: filePath}])}
+                `;
+
+                const parsed = parseLLMResponse(response);
+                const operation = parsed?.operations.find(op => op.path === filePath);
+                
+                expect(parsed).not.toBeNull();
+                expect(operation?.type).toBe('write');
+                if(operation?.type === 'write') {
+                    expect(operation.content).toBe(content);
+                }
+            });
+
+            it('should strip START and END markers from parsed content', () => {
+                const filePath = 'src/markers.ts';
+                const content = 'const content = "here";';
+                
+                // The helper adds the markers
+                const block = createFileBlock(filePath, content);
+                
+                // Verify the block has the markers for sanity
+                expect(block).toContain('// START');
+                expect(block).toContain('// END');
+            
+                const response = LLM_RESPONSE_START + block + LLM_RESPONSE_END(testUuid, [{ edit: filePath }]);
+            
+                const parsed = parseLLMResponse(response);
+                const operation = parsed?.operations[0];
+            
+                expect(parsed).not.toBeNull();
+                expect(operation).not.toBeUndefined();
+                expect(operation?.type).toBe('write');
+                if (operation?.type === 'write') {
+                    expect(operation.content).toBe(content);
+                    expect(operation.content).not.toContain('// START');
+                    expect(operation.content).not.toContain('// END');
+                }
+            });
+
+            it('should treat an unknown patch strategy as part of the file path', () => {
+                const filePath = 'src/index.ts';
+                const content = 'console.log("hello");';
+                const block = `
+    \`\`\`typescript // ${filePath} unknown-strategy
+
+    ${content}
+
+    \`\`\`
+                `;
+                const fullPath = `${filePath} unknown-strategy`;
+                const response = block + LLM_RESPONSE_END(uuidv4(), [{ edit: fullPath }]);
+                const parsed = parseLLMResponse(response);
+                expect(parsed).not.toBeNull();
+                expect(parsed!.operations).toHaveLength(1);
+                const op = parsed!.operations[0]!;
+                expect(op.type).toBe('write');
+                if (op.type === 'write' || op.type === 'delete') {
+                    expect(op.path).toBe(fullPath);
+                }
+            });
+
+            it('should not detect multi-search-replace when <<<<<<< SEARCH appears in the middle of content', () => {
+                const filePath = 'src/example.ts';
+                // Content contains the marker as part of a string or comment, not at the start of a line
+                const content = `
+    // This is a code example showing a marker: <<<<<<< SEARCH in a comment
+
+    const example = "This is not a real <<<<<<< SEARCH marker";
+
+    console.log(example);
+                `;
+                const block = createFileBlock(filePath, content);
+                const response = block + LLM_RESPONSE_END(uuidv4(), [{ edit: filePath }]);
+                const parsed = parseLLMResponse(response);
+                
+                expect(parsed).not.toBeNull();
+                expect(parsed!.operations).toHaveLength(1);
+                const op = parsed!.operations[0]!;
+                expect(op.type).toBe('write');
+                if (op.type === 'write') {
+                    expect(op.patchStrategy).toBe('replace'); // Should be 'replace', not 'multi-search-replace'
+                }
+            });
+
+            it('should not detect multi-search-replace when only start marker is present without end marker', () => {
+                const filePath = 'src/partial-marker.ts';
+                // Content has the start marker at the beginning of a line but no end marker
+                const content = `
+    <<<<<<< SEARCH
+
+    This content has the start marker but not the end marker
+
+    So it should be treated as regular content, not multi-search-replace
+                `;
+                const block = createFileBlock(filePath, content);
+                const response = block + LLM_RESPONSE_END(uuidv4(), [{ edit: filePath }]);
+                const parsed = parseLLMResponse(response);
+                
+                expect(parsed).not.toBeNull();
+                expect(parsed!.operations).toHaveLength(1);
+                const op = parsed!.operations[0]!;
+                expect(op.type).toBe('write');
+                if (op.type === 'write') {
+                    expect(op.patchStrategy).toBe('replace'); // Should be 'replace', not 'multi-search-replace'
+                }
+            });
+        });
+
+        describe('from fixtures', () => {
+            const fixturesDir = path.resolve(__dirname, '../fixtures');
+
+            const readFixture = (name: string) => fs.readFile(path.join(fixturesDir, name), 'utf-8');
+
+            it('should correctly parse multi-search-replace.md', async () => {
+                const content = await readFixture('multi-search-replace.md');
+                const parsed = parseLLMResponse(content);
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.control.projectId).toBe('diff-apply');
+                expect(parsed?.control.uuid).toBe('486a43f8-874e-4f16-832f-b2fd3769c36c');
+                expect(parsed?.operations).toHaveLength(1);
+
+                const op = parsed!.operations[0];
+                expect(op.type).toBe('write');
+                if (op.type === 'write') {
+                    expect(op.path).toBe('package.json');
+                    expect(op.patchStrategy).toBe('multi-search-replace');
+                    expect(op.content).toContain('<<<<<<< SEARCH');
+                    expect(op.content).toContain('>>>>>>> REPLACE');
+                    expect(op.content).toContain('"name": "diff-patcher"');
+                }
+                expect(parsed?.reasoning.join(' ')).toContain("I will update the `package.json` file");
+            });
+
+            it('should correctly parse replace-with-markers.md', async () => {
+                const content = await readFixture('replace-with-markers.md');
+                const parsed = parseLLMResponse(content);
+                const expectedContent = `export const newFunction = () => {\n    console.log("new file");\n};`;
+                
+                expect(parsed).not.toBeNull();
+                expect(parsed?.control.uuid).toBe('1c8a41a8-20d7-4663-856e-9ebd03f7a1e1');
+                expect(parsed?.operations).toHaveLength(1);
+
+                const op = parsed!.operations[0];
+                expect(op.type).toBe('write');
+                if (op.type === 'write') {
+                    expect(op.path).toBe('src/new.ts');
+                    expect(op.patchStrategy).toBe('replace');
+                    expect(op.content).toBe(expectedContent);
+                    expect(op.content).not.toContain('// START');
+                    expect(op.content).not.toContain('// END');
+                }
+            });
+
+            it('should correctly parse replace-no-markers.md', async () => {
+                const content = await readFixture('replace-no-markers.md');
+                const parsed = parseLLMResponse(content);
+                const expectedContent = `export const newFunction = () => {\n    console.log("new file");\n};`;
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.operations).toHaveLength(1);
+                const op = parsed!.operations[0];
+                expect(op.type).toBe('write');
+                if (op.type === 'write') {
+                    expect(op.path).toBe('src/new.ts');
+                    expect(op.patchStrategy).toBe('replace');
+                    expect(op.content).toBe(expectedContent);
+                }
+            });
+
+            it('should correctly parse new-unified.md', async () => {
+                const content = await readFixture('new-unified.md');
+                const parsed = parseLLMResponse(content);
+                const expectedContent = `--- a/src/utils.ts\n+++ b/src/utils.ts\n@@ -1,3 +1,3 @@\n-export function greet(name: string) {\n-  return \`Hello, \${name}!\`;\n+export function greet(name: string, enthusiasm: number) {\n+  return \`Hello, \${name}\` + '!'.repeat(enthusiasm);\n }`;
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.operations).toHaveLength(1);
+                const op = parsed!.operations[0];
+                expect(op.type).toBe('write');
+                if (op.type === 'write') {
+                    expect(op.path).toBe('src/utils.ts');
+                    expect(op.patchStrategy).toBe('new-unified');
+                    expect(op.content.trim()).toBe(expectedContent.trim());
+                }
+            });
+
+            it('should correctly parse delete-file.md', async () => {
+                const content = await readFixture('delete-file.md');
+                const parsed = parseLLMResponse(content);
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.operations).toHaveLength(1);
+                const op = parsed!.operations[0];
+                expect(op.type).toBe('delete');
+                if (op.type === 'delete') {
+                    expect(op.path).toBe('src/old-helper.ts');
+                }
+                expect(parsed?.reasoning.join(' ')).toContain("I'm removing the old helper file.");
+            });
+
+            it('should correctly parse path-with-spaces.md', async () => {
+                const content = await readFixture('path-with-spaces.md');
+                const parsed = parseLLMResponse(content);
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.operations).toHaveLength(1);
+                const op = parsed!.operations[0];
+                expect(op.type).toBe('write');
+                if (op.type === 'write') {
+                    expect(op.path).toBe('src/components/My Component.tsx');
+                }
+            });
+            
+            it('should correctly parse multiple-ops.md', async () => {
+                const content = await readFixture('multiple-ops.md');
+                const parsed = parseLLMResponse(content);
+
+                expect(parsed).not.toBeNull();
+                expect(parsed?.control.uuid).toBe('5e1a41d8-64a7-4663-c56e-3ebd03f7a1f5');
+                expect(parsed?.operations).toHaveLength(3);
+
+                expect(parsed?.operations).toContainEqual({
+                    type: 'write',
+                    path: 'src/main.ts',
+                    content: 'console.log("Updated main");',
+                    patchStrategy: 'replace'
+                });
+
+                expect(parsed?.operations).toContainEqual({
+                    type: 'delete',
+                    path: 'src/utils.ts',
+                });
+                
+                const newOp = parsed?.operations.find(op => op.path.includes('New Component'));
+                expect(newOp).toBeDefined();
+                expect(newOp?.type).toBe('write');
+                if (newOp?.type === 'write') {
+                    expect(newOp.patchStrategy).toBe('new-unified');
+                    expect(newOp.path).toBe('src/components/New Component.tsx');
+                }
+            });
+        });
+    });
+  test/e2e/init.test.ts: "import { describe, it, expect, beforeEach, afterEach } from 'bun:test';\r\nimport { promises as fs } from 'fs';\r\nimport path from 'path';\r\nimport { initCommand } from '../../src/commands/init';\r\nimport { setupE2ETest, E2ETestContext, createTestFile } from '../test.util';\r\nimport { CONFIG_FILE_NAME, STATE_DIRECTORY_NAME, GITIGNORE_FILE_NAME } from '../../src/utils/constants';\r\nimport { ConfigSchema } from '../../src/types';\r\nimport { logger } from '../../src/utils/logger';\r\n\r\ndescribe('e2e/init', () => {\r\n    let context: E2ETestContext;\r\n\r\n    beforeEach(async () => {\r\n        context = await setupE2ETest();\r\n    });\r\n\r\n    afterEach(async () => {\r\n        if (context) await context.cleanup();\r\n    });\r\n\r\n    it('should create config file with correct defaults, state directory, and .gitignore', async () => {\r\n        await initCommand(context.testDir.path);\r\n\r\n        // Check for config file\r\n        const configPath = path.join(context.testDir.path, CONFIG_FILE_NAME);\r\n        const configExists = await fs.access(configPath).then(() => true).catch(() => false);\r\n        expect(configExists).toBe(true);\r\n\r\n        const configContent = await fs.readFile(configPath, 'utf-8');\r\n        const config = JSON.parse(configContent);\r\n        \r\n        // Validate against schema to check defaults\r\n        const parsedConfig = ConfigSchema.parse(config);\r\n        expect(parsedConfig.projectId).toBe(path.basename(context.testDir.path));\r\n        expect(parsedConfig.clipboardPollInterval).toBe(2000);\r\n        expect(parsedConfig.approval).toBe('yes');\r\n        expect(parsedConfig.linter).toBe('bun tsc --noEmit');\r\n\r\n        // Check for state directory\r\n        const stateDirPath = path.join(context.testDir.path, STATE_DIRECTORY_NAME);\r\n        const stateDirExists = await fs.stat(stateDirPath).then(s => s.isDirectory()).catch(() => false);\r\n        expect(stateDirExists).toBe(true);\r\n\r\n        // Check for .gitignore\r\n        const gitignorePath = path.join(context.testDir.path, GITIGNORE_FILE_NAME);\r\n        const gitignoreExists = await fs.access(gitignorePath).then(() => true).catch(() => false);\r\n        expect(gitignoreExists).toBe(true);\r\n\r\n        const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');\r\n        expect(gitignoreContent).toContain(`/${STATE_DIRECTORY_NAME}/`);\r\n    });\r\n\r\n    it('should use package.json name for projectId if available', async () => {\r\n        const pkgName = 'my-awesome-project';\r\n        await createTestFile(context.testDir.path, 'package.json', JSON.stringify({ name: pkgName }));\r\n\r\n        await initCommand(context.testDir.path);\r\n\r\n        const configPath = path.join(context.testDir.path, CONFIG_FILE_NAME);\r\n        const configContent = await fs.readFile(configPath, 'utf-8');\r\n        const config = JSON.parse(configContent);\r\n        expect(config.projectId).toBe(pkgName);\r\n    });\r\n\r\n    it('should append to existing .gitignore', async () => {\r\n        const initialContent = '# Existing rules\\nnode_modules/';\r\n        await createTestFile(context.testDir.path, GITIGNORE_FILE_NAME, initialContent);\r\n\r\n        await initCommand(context.testDir.path);\r\n\r\n        const gitignoreContent = await fs.readFile(path.join(context.testDir.path, GITIGNORE_FILE_NAME), 'utf-8');\r\n        expect(gitignoreContent).toContain(initialContent);\r\n        expect(gitignoreContent).toContain(`/${STATE_DIRECTORY_NAME}/`);\r\n    });\r\n\r\n    it('should not add entry to .gitignore if it already exists', async () => {\r\n        const entry = `/${STATE_DIRECTORY_NAME}/`;\r\n        const initialContent = `# Existing rules\\n${entry}`;\r\n        await createTestFile(context.testDir.path, GITIGNORE_FILE_NAME, initialContent);\r\n\r\n        await initCommand(context.testDir.path);\r\n\r\n        const gitignoreContent = await fs.readFile(path.join(context.testDir.path, GITIGNORE_FILE_NAME), 'utf-8');\r\n        const occurrences = (gitignoreContent.match(new RegExp(entry, 'g')) || []).length;\r\n        expect(occurrences).toBe(1);\r\n    });\r\n\r\n    it('should not overwrite an existing relaycode.config.json', async () => {\r\n        const customConfig = { projectId: 'custom', customField: true };\r\n        await createTestFile(context.testDir.path, CONFIG_FILE_NAME, JSON.stringify(customConfig));\r\n\r\n        await initCommand(context.testDir.path);\r\n\r\n        const configContent = await fs.readFile(path.join(context.testDir.path, CONFIG_FILE_NAME), 'utf-8');\r\n        const config = JSON.parse(configContent);\r\n        expect(config.projectId).toBe('custom');\r\n        expect(config.customField).toBe(true);\r\n    });\r\n\r\n    it('should output the system prompt with the correct project ID', async () => {\r\n        const capturedOutput: string[] = [];\r\n        const originalLog = logger.log;\r\n        (logger as any).log = (message: string) => capturedOutput.push(message);\r\n\r\n        const pkgName = 'my-prompt-project';\r\n        await createTestFile(context.testDir.path, 'package.json', JSON.stringify({ name: pkgName }));\r\n\r\n        await initCommand(context.testDir.path);\r\n\r\n        (logger as any).log = originalLog; // Restore\r\n\r\n        const outputString = capturedOutput.join('\\n');\r\n        expect(outputString).toContain(`Project ID: ${pkgName}`);\r\n    });\r\n\r\n    it('should log an error if .gitignore is not writable', async () => {\r\n        const gitignorePath = path.join(context.testDir.path, GITIGNORE_FILE_NAME);\r\n        await createTestFile(context.testDir.path, GITIGNORE_FILE_NAME, '# initial');\r\n        \r\n        const capturedErrors: string[] = [];\r\n        const originalError = logger.error;\r\n        (logger as any).error = (message: string) => capturedErrors.push(message);\r\n\r\n        try {\r\n            await fs.chmod(gitignorePath, 0o444); // Read-only\r\n\r\n            // initCommand doesn't throw, it just logs an error.\r\n            await initCommand(context.testDir.path);\r\n\r\n            const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');\r\n            expect(gitignoreContent).toBe('# initial'); // Should not have changed\r\n            expect(capturedErrors.length).toBe(1);\r\n            expect(capturedErrors[0]).toContain(`Failed to update ${GITIGNORE_FILE_NAME}`);\r\n        } finally {\r\n            // Restore logger\r\n            (logger as any).error = originalError;\r\n            \r\n            // Make writable again for cleanup\r\n            await fs.chmod(gitignorePath, 0o666);\r\n        }\r\n    });\r\n});"
+  test/e2e/patcher.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { processPatch } from '../../src/core/transaction';
+
+    import { parseLLMResponse } from '../../src/core/parser';
+
+    import { setupE2ETest, E2ETestContext, createTestConfig, createTestFile,
+    LLM_RESPONSE_END, createFileBlock } from '../test.util';
+
+
+    // NOTE: This test file uses the actual 'diff-apply' dependency, not a mock.
+
+
+    describe('e2e/patcher', () => {
+        let context: E2ETestContext;
+
+        beforeEach(async () => {
+            context = await setupE2ETest();
+        });
+
+        afterEach(async () => {
+            if (context) await context.cleanup();
+        });
+
+        it('should correctly apply a patch using the multi-search-replace strategy', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const testFile = 'src/config.js';
+            const originalContent = `
+    const config = {
+        port: 3000,
+        host: 'localhost',
+        enableLogging: true,
+    };
+
+    `;
+            await createTestFile(context.testDir.path, testFile, originalContent);
+
+            const diffContent = `
+    <<<<<<< SEARCH
+
+    -------
+        port: 3000,
+    =======
+        port: 8080,
+    >>>>>>> REPLACE
+
+    <<<<<<< SEARCH
+
+    -------
+        enableLogging: true,
+    =======
+        enableLogging: false,
+    >>>>>>> REPLACE
+
+    `;
+            
+            const uuid = uuidv4();
+            const llmResponse = createFileBlock(testFile, diffContent, 'multi-search-replace') + 
+                                LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+
+            const parsedResponse = parseLLMResponse(llmResponse);
+            expect(parsedResponse).not.toBeNull();
+
+            await processPatch(config, parsedResponse!, { cwd: context.testDir.path });
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            
+            const expectedContent = `
+    const config = {
+        port: 8080,
+        host: 'localhost',
+        enableLogging: false,
+    };
+
+    `;
+            expect(finalContent.replace(/\s/g, '')).toBe(expectedContent.replace(/\s/g, ''));
+        });
+
+        it('should correctly apply a patch using the new-unified strategy', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const testFile = 'src/utils.js';
+            const originalContent = `function calculate() {
+        const a = 1;
+        const b = 2;
+        return a + b;
+    }`;
+            await createTestFile(context.testDir.path, testFile, originalContent);
+
+            const diffContent = `--- a/${testFile}
+    +++ b/${testFile}
+
+    @@ -2,4 +2,5 @@
+         const a = 1;
+         const b = 2;
+    -    return a + b;
+
+    +    // A more complex calculation
+
+    +    return (a + b) * 2;
+     }`;
+            
+            const uuid = uuidv4();
+            const llmResponse = createFileBlock(testFile, diffContent, 'new-unified') + 
+                                LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+
+            const parsedResponse = parseLLMResponse(llmResponse);
+            expect(parsedResponse).not.toBeNull();
+
+            await processPatch(config, parsedResponse!, { cwd: context.testDir.path });
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            
+            const expectedContent = `function calculate() {
+        const a = 1;
+        const b = 2;
+        // A more complex calculation
+        return (a + b) * 2;
+    }`;
+            // Normalize line endings for comparison
+            expect(finalContent.replace(/\r\n/g, '\n')).toBe(expectedContent.replace(/\r\n/g, '\n'));
+        });
+
+
+        it('should fail transaction if multi-search-replace content is not found', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const testFile = 'src/index.js';
+            const originalContent = 'const version = 1;';
+            await createTestFile(context.testDir.path, testFile, originalContent);
+
+            const diffContent = `
+    <<<<<<< SEARCH
+
+    -------
+
+    const version = 2; // This content does not exist
+
+    =======
+
+    const version = 3;
+
+    >>>>>>> REPLACE
+
+    `;
+            const uuid = uuidv4();
+            const llmResponse = createFileBlock(testFile, diffContent, 'multi-search-replace') + 
+                                LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+            
+            const parsedResponse = parseLLMResponse(llmResponse)!;
+
+            await processPatch(config, parsedResponse, { cwd: context.testDir.path });
+
+            // The file content should remain unchanged
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            // No state file should have been committed
+            const stateFileExists = await fs.access(path.join(context.testDir.path, '.relaycode', `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+    });
+  test/e2e/transaction.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import yaml from 'js-yaml';
+
+    import { processPatch } from '../../src/core/transaction';
+
+    import { parseLLMResponse } from '../../src/core/parser';
+
+    import { setupE2ETest, E2ETestContext, createTestConfig, createTestFile,
+    LLM_RESPONSE_START, LLM_RESPONSE_END, createFileBlock, createDeleteFileBlock
+    } from '../test.util';
+
+    import { STATE_DIRECTORY_NAME } from '../../src/utils/constants';
+
+
+
+    describe('e2e/transaction', () => {
+        let context: E2ETestContext;
+        const testFile = 'src/index.ts';
+        const originalContent = 'console.log("original");';
+
+        beforeEach(async () => {
+            context = await setupE2ETest({ withTsconfig: true });
+            await createTestFile(context.testDir.path, testFile, originalContent);
+        });
+
+        afterEach(async () => {
+            if (context) await context.cleanup();
+        });
+
+        it('should apply changes, commit, and store correct state in .yml file', async () => {
+            const config = await createTestConfig(context.testDir.path, { 
+                linter: '', // Skip actual linting to avoid timeout
+                approval: 'yes'
+            });
+            const newContent = 'console.log("new content");';
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + 
+                             createFileBlock(testFile, newContent) + 
+                             LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+            
+            const parsedResponse = parseLLMResponse(response);
+            expect(parsedResponse).not.toBeNull();
+
+            await processPatch(config, parsedResponse!, { cwd: context.testDir.path });
+
+            // Add a small delay to ensure file operations have completed
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Check file content
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(newContent);
+
+            // Check state file was committed
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            
+            // Try multiple times with a small delay to check if the file exists
+            let stateFileExists = false;
+            for (let i = 0; i < 5; i++) {
+                stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+                if (stateFileExists) break;
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            expect(stateFileExists).toBe(true);
+
+            // Check state file content
+            const stateFileContent = await fs.readFile(stateFilePath, 'utf-8');
+            const stateData: any = yaml.load(stateFileContent);
+            expect(stateData.uuid).toBe(uuid);
+            expect(stateData.approved).toBe(true);
+            expect(stateData.operations).toHaveLength(1);
+            expect(stateData.operations[0].path).toBe(testFile);
+            expect(stateData.snapshot[testFile]).toBe(originalContent);
+            expect(stateData.reasoning).toEqual(parsedResponse!.reasoning);
+        });
+
+        it('should rollback changes when manually disapproved', async () => {
+            const config = await createTestConfig(context.testDir.path, { approval: 'no' });
+            const newContent = 'console.log("I will be rolled back");';
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + 
+                             createFileBlock(testFile, newContent) + 
+                             LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+
+            const parsedResponse = parseLLMResponse(response);
+            expect(parsedResponse).not.toBeNull();
+
+            const prompter = async () => false; // Disapprove
+            await processPatch(config, parsedResponse!, { prompter, cwd: context.testDir.path });
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should require manual approval if linter errors exceed approvalOnErrorCount', async () => {
+            const config = await createTestConfig(context.testDir.path, { 
+                approval: 'yes',
+                approvalOnErrorCount: 0,
+                linter: `bun tsc`
+            });
+            
+            const badContent = 'const x: string = 123;'; // 1 TS error
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + 
+                            createFileBlock(testFile, badContent) + 
+                            LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+            
+            const parsedResponse = parseLLMResponse(response);
+            expect(parsedResponse).not.toBeNull();
+            
+            // Disapprove when prompted
+            const prompter = async () => false;
+            await processPatch(config, parsedResponse!, { prompter, cwd: context.testDir.path });
+            
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+        });
+
+        it('should skip linter if command is empty and auto-approve', async () => {
+            const config = await createTestConfig(context.testDir.path, { linter: '' });
+            const badContent = 'const x: string = 123;'; // Would fail linter, but it's skipped
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START +
+                createFileBlock(testFile, badContent) +
+                LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+
+            const parsedResponse = parseLLMResponse(response);
+            expect(parsedResponse).not.toBeNull();
+
+            await processPatch(config, parsedResponse!, { cwd: context.testDir.path });
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(badContent);
+        });
+
+        it('should ignore patch with already processed UUID', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const uuid = uuidv4();
+            
+            // 1. Process and commit a patch
+            const response1 = LLM_RESPONSE_START + createFileBlock(testFile, "first change") + LLM_RESPONSE_END(uuid, []);
+            const parsed1 = parseLLMResponse(response1)!;
+            await processPatch(config, parsed1, { cwd: context.testDir.path });
+            
+            // 2. Try to process another patch with the same UUID
+            const response2 = LLM_RESPONSE_START + createFileBlock(testFile, "second change") + LLM_RESPONSE_END(uuid, []);
+            const parsed2 = parseLLMResponse(response2)!;
+            await processPatch(config, parsed2, { cwd: context.testDir.path });
+
+            // Content should be from the first change, not the second
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe("first change");
+        });
+        
+        it('should create nested directories for new files', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const newFilePath = 'src/a/b/c/new-file.ts';
+            const newFileContent = 'hello world';
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START +
+                createFileBlock(newFilePath, newFileContent) +
+                LLM_RESPONSE_END(uuid, [{ new: newFilePath }]);
+
+            const parsed = parseLLMResponse(response)!;
+            await processPatch(config, parsed, { cwd: context.testDir.path });
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, newFilePath), 'utf-8');
+            expect(finalContent).toBe(newFileContent);
+        });
+
+        it('should rollback new file and its new empty parent directory on rejection', async () => {
+            const config = await createTestConfig(context.testDir.path, { approval: 'no' });
+            const newFilePath = 'src/new/dir/file.ts';
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START +
+                createFileBlock(newFilePath, 'content') +
+                LLM_RESPONSE_END(uuid, [{ new: newFilePath }]);
+
+            const parsed = parseLLMResponse(response)!;
+            await processPatch(config, parsed, { prompter: async () => false, cwd: context.testDir.path });
+
+            const fileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(fileExists).toBe(false);
+
+            const dirExists = await fs.access(path.join(context.testDir.path, 'src/new/dir')).then(() => true).catch(() => false);
+            expect(dirExists).toBe(false);
+
+            const midDirExists = await fs.access(path.join(context.testDir.path, 'src/new')).then(() => true).catch(() => false);
+            expect(midDirExists).toBe(false);
+            
+            // src directory should still exist as it contained a file before
+            const srcDirExists = await fs.access(path.join(context.testDir.path, 'src')).then(() => true).catch(() => false);
+            expect(srcDirExists).toBe(true);
+        });
+
+        it('should not delete parent directory on rollback if it was not empty beforehand', async () => {
+            const config = await createTestConfig(context.testDir.path, { approval: 'no' });
+            const existingFilePath = 'src/shared/existing.ts';
+            const newFilePath = 'src/shared/new.ts';
+            const uuid = uuidv4();
+
+            await createTestFile(context.testDir.path, existingFilePath, 'const existing = true;');
+
+            const response = LLM_RESPONSE_START +
+                createFileBlock(newFilePath, 'const brandNew = true;') +
+                LLM_RESPONSE_END(uuid, [{ new: newFilePath }]);
+
+            const parsed = parseLLMResponse(response)!;
+            await processPatch(config, parsed, { prompter: async () => false, cwd: context.testDir.path });
+
+            // New file should be gone
+            const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExists).toBe(false);
+
+            // Existing file and its directory should remain
+            const existingFileExists = await fs.access(path.join(context.testDir.path, existingFilePath)).then(() => true).catch(() => false);
+            expect(existingFileExists).toBe(true);
+
+            const sharedDirExists = await fs.access(path.join(context.testDir.path, 'src/shared')).then(() => true).catch(() => false);
+            expect(sharedDirExists).toBe(true);
+        });
+
+        it('should abort transaction if preCommand fails', async () => {
+            const config = await createTestConfig(context.testDir.path, { preCommand: 'bun -e "process.exit(1)"' });
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + createFileBlock(testFile, "new content") + LLM_RESPONSE_END(uuid, []);
+
+            const parsed = parseLLMResponse(response)!;
+            await processPatch(config, parsed, { cwd: context.testDir.path });
+
+            // File should not have been changed
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            // No state file should have been created
+            const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should automatically roll back if postCommand fails', async () => {
+            const config = await createTestConfig(context.testDir.path, { postCommand: 'bun -e "process.exit(1)"' });
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + createFileBlock(testFile, "new content") + LLM_RESPONSE_END(uuid, []);
+
+            const parsed = parseLLMResponse(response)!;
+            await processPatch(config, parsed, { cwd: context.testDir.path });
+
+            // File should have been rolled back
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            const stateFileExists = await fs.access(path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`)).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should ignore patch with non-matching projectId', async () => {
+            const config = await createTestConfig(context.testDir.path, { projectId: 'correct-project' });
+            const uuid = uuidv4();
+            
+            const responseWithWrongProject =
+    `\`\`\`typescript // {src/index.ts}
+
+    // START
+
+    console.log("should not be applied");
+
+    // END
+
+    \`\`\`
+
+    \`\`\`yaml
+
+    projectId: wrong-project
+
+    uuid: ${uuid}
+
+    changeSummary: []
+
+    \`\`\``;
+            
+            const parsedResponse = parseLLMResponse(responseWithWrongProject);
+            expect(parsedResponse).not.toBeNull();
+            
+            await processPatch(config, parsedResponse!, { cwd: context.testDir.path });
+
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should correctly apply a file deletion operation', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const fileToDelete = 'src/delete-me.ts';
+            const originalDeleteContent = 'delete this content';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+            
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + 
+                             createDeleteFileBlock(fileToDelete) +
+                             LLM_RESPONSE_END(uuid, [{ delete: fileToDelete }]);
+            const parsedResponse = parseLLMResponse(response)!;
+            
+            await processPatch(config, parsedResponse, { cwd: context.testDir.path });
+
+            const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(deletedFileExists).toBe(false);
+            
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            const stateFileContent = await fs.readFile(stateFilePath, 'utf-8');
+            const stateData: any = yaml.load(stateFileContent);
+            expect(stateData.snapshot[fileToDelete]).toBe(originalDeleteContent);
+            expect(stateData.operations[0]).toEqual({ type: 'delete', path: fileToDelete });
+        });
+
+        it('should correctly roll back a file deletion operation', async () => {
+            const config = await createTestConfig(context.testDir.path, { approval: 'no' });
+            const fileToDelete = 'src/delete-me.ts';
+            const originalDeleteContent = 'delete this content';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+            
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + 
+                             createDeleteFileBlock(fileToDelete) +
+                             LLM_RESPONSE_END(uuid, [{ delete: fileToDelete }]);
+
+            const parsedResponse = parseLLMResponse(response)!;
+            
+            await processPatch(config, parsedResponse, { prompter: async () => false, cwd: context.testDir.path });
+
+            const restoredFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(restoredFileExists).toBe(true);
+            const content = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+            expect(content).toBe(originalDeleteContent);
+            
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(false);
+        });
+
+        it('should auto-approve if linter errors are within approvalOnErrorCount', async () => {
+            const config = await createTestConfig(context.testDir.path, {
+                approval: 'yes',
+                approvalOnErrorCount: 1,
+                linter: 'bun tsc'
+            });
+            const badContent = 'const x: string = 123;'; // 1 TS error
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + 
+                            createFileBlock(testFile, badContent) + 
+                            LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+            
+            const parsedResponse = parseLLMResponse(response);
+            expect(parsedResponse).not.toBeNull();
+            
+            await processPatch(config, parsedResponse!, { cwd: context.testDir.path });
+            
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(badContent);
+
+            const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(true);
+        });
+
+        it('should ignore orphaned .pending.yml file and allow reprocessing', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const uuid = uuidv4();
+            const newContent = 'console.log("final content");';
+
+            const stateDir = path.join(context.testDir.path, STATE_DIRECTORY_NAME);
+            await fs.mkdir(stateDir, { recursive: true });
+            const orphanedPendingFile = path.join(stateDir, `${uuid}.pending.yml`);
+            const orphanedState = { uuid, message: 'this is from a crashed run' };
+            await fs.writeFile(orphanedPendingFile, yaml.dump(orphanedState));
+
+            const response = LLM_RESPONSE_START + createFileBlock(testFile, newContent) + LLM_RESPONSE_END(uuid, []);
+            const parsedResponse = parseLLMResponse(response)!;
+            await processPatch(config, parsedResponse, { cwd: context.testDir.path });
+            
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(newContent);
+
+            const finalStateFile = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+            const stateFileExists = await fs.access(finalStateFile).then(() => true).catch(() => false);
+            expect(stateFileExists).toBe(true);
+            
+            const stateFileContent = await fs.readFile(finalStateFile, 'utf-8');
+            const stateData: any = yaml.load(stateFileContent);
+            expect(stateData.projectId).toBe(config.projectId);
+            expect(stateData.approved).toBe(true);
+        });
+
+        it('should successfully run pre and post commands (happy path)', async () => {
+            const preCommandFile = path.join(context.testDir.path, 'pre.txt');
+            const postCommandFile = path.join(context.testDir.path, 'post.txt');
+        
+            // Use node directly as it's more reliable cross-platform
+            const config = await createTestConfig(context.testDir.path, {
+                preCommand: `node -e "require('fs').writeFileSync('${preCommandFile.replace(/\\/g, '\\\\')}', '')"`,
+                postCommand: `node -e "require('fs').writeFileSync('${postCommandFile.replace(/\\/g, '\\\\')}', '')"`,
+            });
+        
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + createFileBlock(testFile, "new content") + LLM_RESPONSE_END(uuid, []);
+            const parsed = parseLLMResponse(response)!;
+        
+            await processPatch(config, parsed, { cwd: context.testDir.path });
+        
+            const preExists = await fs.access(preCommandFile).then(() => true).catch(() => false);
+            expect(preExists).toBe(true);
+        
+            const postExists = await fs.access(postCommandFile).then(() => true).catch(() => false);
+            expect(postExists).toBe(true);
+            
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe("new content");
+        });
+
+        it('should create a pending file during transaction and remove it on rollback', async () => {
+            const config = await createTestConfig(context.testDir.path, { approval: 'no' });
+            const newContent = 'I will be rolled back';
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START + 
+                             createFileBlock(testFile, newContent) + 
+                             LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+        
+            const parsedResponse = parseLLMResponse(response)!;
+        
+            const stateDir = path.join(context.testDir.path, STATE_DIRECTORY_NAME);
+            const pendingPath = path.join(stateDir, `${uuid}.pending.yml`);
+            const committedPath = path.join(stateDir, `${uuid}.yml`);
+        
+            let pendingFileExistedDuringRun = false;
+        
+            const prompter = async (): Promise<boolean> => {
+                // At this point, the pending file should exist before we answer the prompt
+                pendingFileExistedDuringRun = await fs.access(pendingPath).then(() => true).catch(() => false);
+                return false; // Disapprove to trigger rollback
+            };
+        
+            await processPatch(config, parsedResponse, { prompter, cwd: context.testDir.path });
+        
+            expect(pendingFileExistedDuringRun).toBe(true);
+            
+            const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(finalContent).toBe(originalContent);
+        
+            const pendingFileExistsAfter = await fs.access(pendingPath).then(() => true).catch(() => false);
+            expect(pendingFileExistsAfter).toBe(false);
+        
+            const committedFileExists = await fs.access(committedPath).then(() => true).catch(() => false);
+            expect(committedFileExists).toBe(false);
+        });
+
+        it('should fail transaction gracefully if a file is not writable and rollback all changes', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const unwritableFile = 'src/unwritable.ts';
+            const writableFile = 'src/writable.ts';
+            const originalUnwritableContent = 'original unwritable';
+            const originalWritableContent = 'original writable';
+        
+            await createTestFile(context.testDir.path, unwritableFile, originalUnwritableContent);
+            await createTestFile(context.testDir.path, writableFile, originalWritableContent);
+            
+            const unwritableFilePath = path.join(context.testDir.path, unwritableFile);
+
+            try {
+                await fs.chmod(unwritableFilePath, 0o444); // Make read-only
+
+                const uuid = uuidv4();
+                const response = LLM_RESPONSE_START +
+                    createFileBlock(writableFile, "new writable content") +
+                    createFileBlock(unwritableFile, "new unwritable content") +
+                    LLM_RESPONSE_END(uuid, [{ edit: writableFile }, { edit: unwritableFile }]);
+                
+                const parsedResponse = parseLLMResponse(response)!;
+                await processPatch(config, parsedResponse, { cwd: context.testDir.path });
+            
+                // Check file states: both should be rolled back to original content.
+                const finalWritable = await fs.readFile(path.join(context.testDir.path, writableFile), 'utf-8');
+                expect(finalWritable).toBe(originalWritableContent); 
+
+                const finalUnwritable = await fs.readFile(unwritableFilePath, 'utf-8');
+                expect(finalUnwritable).toBe(originalUnwritableContent);
+            
+                // Check that pending and final state files were cleaned up/not created.
+                const pendingStatePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.pending.yml`);
+                const pendingFileExists = await fs.access(pendingStatePath).then(() => true).catch(() => false);
+                expect(pendingFileExists).toBe(false);
+
+                const finalStatePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+                const finalStateExists = await fs.access(finalStatePath).then(() => true).catch(() => false);
+                expect(finalStateExists).toBe(false);
+            } finally {
+                // Ensure file is writable again so afterEach hook can clean up
+                await fs.chmod(unwritableFilePath, 0o666);
+            }
+        });
+
+        it('should rollback gracefully if creating a file in a non-writable directory fails', async () => {
+            const config = await createTestConfig(context.testDir.path);
+            const readonlyDir = 'src/readonly-dir';
+            const newFilePath = path.join(readonlyDir, 'new-file.ts');
+            const readonlyDirPath = path.join(context.testDir.path, readonlyDir);
+        
+            await fs.mkdir(readonlyDirPath, { recursive: true });
+            await fs.chmod(readonlyDirPath, 0o555); // Read and execute only
+        
+            try {
+                const uuid = uuidv4();
+                const response = LLM_RESPONSE_START +
+                    createFileBlock(newFilePath, 'this should not be written') +
+                    LLM_RESPONSE_END(uuid, [{ new: newFilePath }]);
+                
+                const parsedResponse = parseLLMResponse(response)!;
+                await processPatch(config, parsedResponse, { cwd: context.testDir.path });
+        
+                // Check that the new file was not created
+                const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+                expect(newFileExists).toBe(false);
+        
+                // Check that the transaction was rolled back (no final .yml file)
+                const stateFilePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.yml`);
+                const stateFileExists = await fs.access(stateFilePath).then(() => true).catch(() => false);
+                expect(stateFileExists).toBe(false);
+                
+                // Check that pending state file was cleaned up
+                const pendingStatePath = path.join(context.testDir.path, STATE_DIRECTORY_NAME, `${uuid}.pending.yml`);
+                const pendingFileExists = await fs.access(pendingStatePath).then(() => true).catch(() => false);
+                expect(pendingFileExists).toBe(false);
+        
+            } finally {
+                await fs.chmod(readonlyDirPath, 0o777); // Make writable again for cleanup
+            }
+        });
+
+        it('should correctly rollback a complex transaction (modify, delete, create)', async () => {
+            const config = await createTestConfig(context.testDir.path, { approval: 'no' });
+            
+            // Setup initial files
+            const fileToModify = 'src/modify.ts';
+            const originalModifyContent = 'export const a = 1;';
+            await createTestFile(context.testDir.path, fileToModify, originalModifyContent);
+        
+            const fileToDelete = 'src/delete.ts';
+            const originalDeleteContent = 'export const b = 2;';
+            await createTestFile(context.testDir.path, fileToDelete, originalDeleteContent);
+        
+            const newFilePath = 'src/new/component.ts';
+            const newFileContent = 'export const c = 3;';
+        
+            const uuid = uuidv4();
+            const response = LLM_RESPONSE_START +
+                createFileBlock(fileToModify, 'export const a = 100;') +
+                createDeleteFileBlock(fileToDelete) +
+                createFileBlock(newFilePath, newFileContent) +
+                LLM_RESPONSE_END(uuid, [{ edit: fileToModify }, { delete: fileToDelete }, { new: newFilePath }]);
+        
+            const parsed = parseLLMResponse(response)!;
+        
+            // Disapprove the transaction
+            await processPatch(config, parsed, { prompter: async () => false, cwd: context.testDir.path });
+        
+            // Verify rollback
+            const modifiedFileContent = await fs.readFile(path.join(context.testDir.path, fileToModify), 'utf-8');
+            expect(modifiedFileContent).toBe(originalModifyContent);
+        
+            const deletedFileExists = await fs.access(path.join(context.testDir.path, fileToDelete)).then(() => true).catch(() => false);
+            expect(deletedFileExists).toBe(true);
+            const deletedFileContent = await fs.readFile(path.join(context.testDir.path, fileToDelete), 'utf-8');
+            expect(deletedFileContent).toBe(originalDeleteContent);
+        
+            const newFileExists = await fs.access(path.join(context.testDir.path, newFilePath)).then(() => true).catch(() => false);
+            expect(newFileExists).toBe(false);
+        
+            // Verify empty parent directory of new file is also removed
+            const newFileDirExists = await fs.access(path.join(context.testDir.path, 'src/new')).then(() => true).catch(() => false);
+            expect(newFileDirExists).toBe(false);
+        });
+    });
+  test/e2e/watch.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { v4 as uuidv4 } from 'uuid';
+
+    import { createClipboardWatcher } from '../../src/core/clipboard';
+
+    import { parseLLMResponse } from '../../src/core/parser';
+
+    import { processPatch } from '../../src/core/transaction';
+
+    import { findConfig } from '../../src/core/config';
+
+    import { setupE2ETest, E2ETestContext, createTestConfig, createTestFile,
+    createFileBlock, LLM_RESPONSE_END, LLM_RESPONSE_START } from '../test.util';
+
+
+    describe('e2e/watch', () => {
+        let context: E2ETestContext;
+        let watcher: { stop: () => void } | null = null;
+
+        beforeEach(async () => {
+            context = await setupE2ETest();
+        });
+
+        afterEach(async () => {
+            if (watcher) {
+                watcher.stop();
+                watcher = null;
+            }
+            if (context) {
+                await context.cleanup();
+            }
+        });
+
+        it('should ignore invalid patch and process subsequent valid patch', async () => {
+            const pollInterval = 50;
+            await createTestConfig(context.testDir.path, { clipboardPollInterval: pollInterval });
+            const testFile = 'src/index.ts';
+            const originalContent = 'console.log("original");';
+            await createTestFile(context.testDir.path, testFile, originalContent);
+        
+            let fakeClipboardContent = 'this is not a valid patch, just some random text.';
+            const clipboardReader = async () => fakeClipboardContent;
+        
+            const onClipboardChange = async (content: string) => {
+                console.log('Clipboard change detected:', content.substring(0, 50) + '...');
+                const currentConfig = await findConfig(context.testDir.path);
+                const parsedResponse = parseLLMResponse(content);
+                console.log('Parsed response:', parsedResponse ? 'valid' : 'invalid');
+                if (!currentConfig || !parsedResponse) {
+                    console.log('Config or parsed response missing, skipping');
+                    return;
+                }
+                console.log('Processing patch...');
+                await processPatch(currentConfig, parsedResponse, { cwd: context.testDir.path });
+                console.log('Patch processed');
+            };
+        
+            watcher = createClipboardWatcher(pollInterval, onClipboardChange, clipboardReader);
+        
+            // Wait for a couple of poll cycles to ensure the invalid patch is read and ignored
+            await new Promise(resolve => setTimeout(resolve, pollInterval * 3));
+        
+            const contentAfterInvalid = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(contentAfterInvalid).toBe(originalContent);
+        
+            // Now, provide a valid patch
+            const newContent = 'console.log("new content");';
+            const uuid = uuidv4();
+            const validPatch = LLM_RESPONSE_START + 
+                               createFileBlock(testFile, newContent) + 
+                               LLM_RESPONSE_END(uuid, [{ edit: testFile }]);
+            fakeClipboardContent = validPatch;
+
+            // Directly trigger the callback with the valid patch
+            console.log('Manually triggering onClipboardChange with valid patch');
+            await onClipboardChange(validPatch);
+
+            // Also wait for the polling to potentially pick it up (just in case)
+            await new Promise(resolve => setTimeout(resolve, pollInterval * 5));
+        
+            const contentAfterValid = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+            expect(contentAfterValid).toBe(newContent);
+        });
+    });
+approved: true

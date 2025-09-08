@@ -1,0 +1,142 @@
+uuid: a69b0933-c283-4a1d-a0b8-c3e06173004d
+projectId: relaycode
+createdAt: '2025-09-04T16:22:23.868Z'
+linesAdded: 5
+linesRemoved: 1
+gitCommitMsg: 'chore(deps): use local workspace version of apply-multi-diff'
+promptSummary: >-
+  Update relaycode-core to use the local apply-multi-diff package instead of the
+  published version.
+reasoning:
+  - >-
+    aight, bet. linking up local packages in a monorepo is the way to go for
+    rapid iteration. we'll switch `relaycode-core` to use the local
+    `apply-multi-diff` source directly. this means tweaking `package.json` to
+    point to the local workspace package and updating `tsconfig.json` so
+    TypeScript knows where to find the types and source code.
+  - >-
+    first, let's update `relaycode-core`'s `package.json` to use the workspace
+    version of `apply-multi-diff`.
+  - >-
+    now, let's tell typescript where to find the source for `apply-multi-diff`
+    by updating the `tsconfig.json` in `relaycode-core`. this will make imports
+    work seamlessly in your editor and during builds.
+  - >-
+    after these changes, run `bun install` at the root of your project to link
+    everything up. dev experience should be much smoother now. happy coding.
+operations:
+  - type: write
+    path: packages/relaycode-core/package.json
+    content: |-
+      <<<<<<< SEARCH
+          "apply-multi-diff": "^0.1.0",
+      =======
+          "apply-multi-diff": "workspace:*",
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: packages/relaycode-core/tsconfig.json
+    content: |-
+      --- packages/relaycode-core/tsconfig.json
+      +++ packages/relaycode-core/tsconfig.json
+      @@ -12,6 +12,11 @@
+           "allowImportingTsExtensions": true,
+           "verbatimModuleSyntax": true,
+           "noEmit": true,
+      +    "baseUrl": ".",
+      +    "paths": {
+      +      "apply-multi-diff": ["../apply-multi-diff/src/index.ts"]
+      +    },
+       
+           // Best practices
+           "strict": true,
+           "skipLibCheck": true,
+    patchStrategy: new-unified
+snapshot:
+  packages/relaycode-core/package.json: |
+    {
+      "name": "relaycode-core",
+      "version": "0.1.0",
+      "description": "The shared engine behind RelayCode and Noca.pro – a zero-friction, AI-native patch engine that turns your clipboard into a surgical code-editing laser.",
+      "author": "Noca.pro",
+      "license": "MIT",
+      "homepage": "https://github.com/nocapro/relaycode-core",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/nocapro/relaycode-core.git"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "patch",
+        "diff",
+        "codemod",
+        "automation",
+        "typescript"
+      ],
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.mjs",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.mjs",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "prepublishOnly": "bun run build"
+      },
+      "dependencies": {
+        "apply-multi-diff": "^0.1.0",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "tsup": "^8.2.3",
+        "typescript": "^5.8.3"
+      },
+      "peerDependencies": {
+        "typescript": "^5"
+      }
+    }
+  packages/relaycode-core/tsconfig.json: |
+    {
+      "compilerOptions": {
+        // Environment setup & latest features
+        "lib": ["ESNext"],
+        "target": "ESNext",
+        "module": "Preserve",
+        "moduleDetection": "force",
+        "jsx": "react-jsx",
+        "allowJs": true,
+
+        // Bundler mode
+        "moduleResolution": "bundler",
+        "allowImportingTsExtensions": true,
+        "verbatimModuleSyntax": true,
+        "noEmit": true,
+
+        // Best practices
+        "strict": true,
+        "skipLibCheck": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+
+        // Some stricter flags (disabled by default)
+        "noUnusedLocals": false,
+        "noUnusedParameters": false,
+        "noPropertyAccessFromIndexSignature": false
+      },
+      "include": ["src"]
+    }
+approved: true

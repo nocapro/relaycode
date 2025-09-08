@@ -1,0 +1,1387 @@
+uuid: a631fca6-16d1-419b-ad2d-2099351df779
+projectId: relaycode
+createdAt: '2025-06-27T03:56:24.546Z'
+gitCommitMsg: 'feat: Add configurable min/max file change limits'
+promptSummary: >-
+  The user wants to add a feature to configure the minimum and maximum number of
+  file changes allowed in a single transaction. This requires updating the
+  config schema, the transaction processing logic, the system prompt for the
+  LLM, and improving the default config file generation.
+reasoning:
+  - >-
+    Excellent! This is a great feature to add more control over the patch
+    process. I will implement the changes to allow configuring minimum and
+    maximum file changes per transaction.
+  - 'Here is my plan:'
+  - >-
+    1.  **Update `src/types.ts`**: I'll add `minFileChanges` and
+    `maxFileChanges` to the `PatchConfigSchema` to make them officially part of
+    the configuration.
+  - >-
+    2.  **Update `src/core/config.ts`**: I will enhance the `createConfig`
+    function. When `relay init` is run, it will now generate a more detailed
+    configuration file, including the new file change settings, making them more
+    discoverable for users.
+  - >-
+    3.  **Update `src/core/transaction.ts`**: I'll add logic to the
+    `processPatch` function to check the number of file operations in a new
+    patch against the configured limits before applying it.
+  - >-
+    4.  **Update `src/commands/watch.ts`**: Finally, I'll modify the
+    `getSystemPrompt` function to dynamically include the file change limits in
+    the system prompt given to the user, ensuring the LLM is aware of these
+    constraints.
+  - Let's get started.
+  - >-
+    First, I'll update the configuration schema in `src/types.ts` to include the
+    new settings.
+  - >-
+    Next, I'll improve the `createConfig` function in `src/core/config.ts` to
+    generate a richer default configuration file for new projects.
+  - >-
+    Now I'll add the validation logic to `src/core/transaction.ts` to enforce
+    these new limits.
+  - >-
+    Finally, I'll update the system prompt generation in `src/commands/watch.ts`
+    to inform the LLM about the file change constraints.
+  - >-
+    This completes the implementation. The new feature is now integrated,
+    configurable, and communicated to the AI.
+operations:
+  - type: write
+    path: src/types.ts
+    content: |-
+      <<<<<<< SEARCH
+      const PatchConfigSchema = z.object({
+        approvalMode: z.enum(['auto', 'manual']).default('auto'),
+        approvalOnErrorCount: z.number().int().min(0).default(0),
+        linter: z.string().default('bun tsc --noEmit'),
+        preCommand: z.string().default(''),
+        postCommand: z.string().default(''),
+      });
+      =======
+      const PatchConfigSchema = z.object({
+        approvalMode: z.enum(['auto', 'manual']).default('auto'),
+        approvalOnErrorCount: z.number().int().min(0).default(0),
+        linter: z.string().default('bun tsc --noEmit'),
+        preCommand: z.string().default(''),
+        postCommand: z.string().default(''),
+        minFileChanges: z.number().int().min(0).default(0),
+        maxFileChanges: z.number().int().min(1).optional(),
+      });
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/config.ts
+    content: >-
+      <<<<<<< SEARCH
+
+      export const createConfig = async (projectId: string, cwd: string =
+      process.cwd()): Promise<Config> => {
+        const config: RelayCodeConfigInput = { projectId };
+
+        // Ensure the schema defaults are applied for nested objects
+        const validatedConfig = ConfigSchema.parse(config);
+
+        const tsConfigContent = `import { defineConfig } from 'relaycode';
+
+      export default defineConfig(${JSON.stringify({ projectId }, null, 2)});
+
+      `;
+
+        const configPath = path.join(cwd, CONFIG_FILE_NAME_TS);
+        await fs.writeFile(configPath, tsConfigContent);
+
+        return validatedConfig;
+      };
+
+      =======
+
+      export const createConfig = async (projectId: string, cwd: string =
+      process.cwd()): Promise<Config> => {
+        const config: RelayCodeConfigInput = { projectId };
+
+        // Ensure the schema defaults are applied for nested objects
+        const validatedConfig = ConfigSchema.parse(config);
+
+        const defaultConfig = ConfigSchema.parse({ projectId });
+
+        const tsConfigContent = `import { defineConfig } from 'relaycode';
+
+      export default defineConfig({
+        projectId: '${projectId}',
+        core: {
+          logLevel: '${defaultConfig.core.logLevel}',
+          enableNotifications: ${defaultConfig.core.enableNotifications},
+          watchConfig: ${defaultConfig.core.watchConfig},
+        },
+        watcher: {
+          clipboardPollInterval: ${defaultConfig.watcher.clipboardPollInterval},
+          preferredStrategy: '${defaultConfig.watcher.preferredStrategy}',
+        },
+        patch: {
+          approvalMode: '${defaultConfig.patch.approvalMode}',
+          approvalOnErrorCount: ${defaultConfig.patch.approvalOnErrorCount},
+          linter: '${defaultConfig.patch.linter}',
+          preCommand: '${defaultConfig.patch.preCommand}',
+          postCommand: '${defaultConfig.patch.postCommand}',
+          minFileChanges: ${defaultConfig.patch.minFileChanges}, // 0 means no minimum
+          // maxFileChanges: 20, // Uncomment to set a maximum
+        },
+        git: {
+          autoGitBranch: ${defaultConfig.git.autoGitBranch},
+          gitBranchPrefix: '${defaultConfig.git.gitBranchPrefix}',
+          gitBranchTemplate: '${defaultConfig.git.gitBranchTemplate}',
+        },
+      });
+
+      `;
+
+        const configPath = path.join(cwd, CONFIG_FILE_NAME_TS);
+        await fs.writeFile(configPath, tsConfigContent);
+
+        return validatedConfig;
+      };
+
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -194,6 +194,19 @@
+               return;
+           }
+       
+      +    const { minFileChanges, maxFileChanges } = config.patch;
+
+      +    const operationCount = operations.length;
+
+      +    if (minFileChanges > 0 && operationCount < minFileChanges) {
+
+      +        logger.warn(`Skipping patch: Not enough file changes (expected at
+      least ${minFileChanges}, got ${operationCount}).`);
+
+      +        return;
+
+      +    }
+
+      +    if (maxFileChanges && operationCount > maxFileChanges) {
+
+      +        logger.warn(`Skipping patch: Too many file changes (expected at
+      most ${maxFileChanges}, got ${operationCount}).`);
+
+      +        return;
+
+      +    }
+
+      +
+           // Notify if coming from watch mode, now that we know it's a new patch.
+           if (notifyOnStart) {
+               notifyPatchDetected(config.projectId, config.core.enableNotifications);
+    patchStrategy: new-unified
+  - type: write
+    path: src/commands/watch.ts
+    content: >-
+      --- src/commands/watch.ts
+
+      +++ src/commands/watch.ts
+
+      @@ -4,8 +4,12 @@
+       import { logger } from '../utils/logger';
+       import { Config } from '../types';
+       import fs from 'fs';
+       import path from 'path';
+       
+      -const getSystemPrompt = (projectId: string, preferredStrategy:
+      Config['watcher']['preferredStrategy']): string => {
+
+      +const getSystemPrompt = (
+
+      +    projectId: string,
+
+      +    preferredStrategy: Config['watcher']['preferredStrategy'],
+
+      +    patchConfig: Config['patch'],
+
+      +): string => {
+           const header = `
+       ✅ relaycode is watching for changes.
+       
+      @@ -118,27 +122,38 @@
+           }
+           \`\`\`
+       `;
+       
+      -    const finalSteps = `---
+
+      -
+
+      -### Final Steps
+
+      -
+
+      -1.  Add your step-by-step reasoning in plain text before each code block.
+
+      -2.  ALWAYS add the following YAML block at the very end of your response.
+      Use the exact projectId shown here. Generate a new random uuid for each
+      response.
+
+      -
+
+      -    \`\`\`yaml
+
+      -    projectId: ${projectId}
+
+      -    uuid: (generate a random uuid)
+
+      -    changeSummary:
+
+      -      - edit: src/main.ts
+
+      -      - new: src/components/Button.tsx
+
+      -      - delete: src/utils/old-helper.ts
+
+      -    promptSummary: "A brief summary of my request."
+
+      -    gitCommitMsg: "feat: A concise, imperative git commit message."
+
+      -    \`\`\`
+
+      -`;
+
+      +    const finalSteps_rules = [];
+
+      +    if (patchConfig.minFileChanges > 0) {
+
+      +        finalSteps_rules.push(`You must modify at least
+      ${patchConfig.minFileChanges} file(s) in this transaction.`);
+
+      +    }
+
+      +    if (patchConfig.maxFileChanges) {
+
+      +        finalSteps_rules.push(`You must not modify more than
+      ${patchConfig.maxFileChanges} file(s) in this transaction.`);
+
+      +    }
+
+      +
+
+      +    const finalSteps_list = [
+
+      +        'Add your step-by-step reasoning in plain text before each code
+      block.',
+
+      +    ];
+
+      +    if (finalSteps_rules.length > 0) {
+
+      +        finalSteps_list.push(`Adhere to file limits:
+      ${finalSteps_rules.join(' ')}`);
+
+      +    }
+
+      +    finalSteps_list.push('ALWAYS add the following YAML block at the very
+      end of your response. Use the exact projectId shown here. Generate a new
+      random uuid for each response.');
+
+      +
+
+      +    const finalSteps_list_string = finalSteps_list.map((item, index) =>
+      `${index + 1}.  ${item}`).join('\n');
+
+      +
+
+      +    const finalSteps = `---
+
+      +
+
+      +### Final Steps
+
+      +
+
+      +${finalSteps_list_string}
+
+      +
+
+      +    \`\`\`yaml
+
+      +    projectId: ${projectId}
+
+      +    uuid: (generate a random uuid)
+
+      +    changeSummary:
+
+      +      - edit: src/main.ts
+
+      +      - new: src/components/Button.tsx
+
+      +      - delete: src/utils/old-helper.ts
+
+      +    promptSummary: "A brief summary of my request."
+
+      +    gitCommitMsg: "feat: A concise, imperative git commit message."
+
+      +    \`\`\`
+
+      +`;
+           
+           const footer = `---------------------------------------------------------------------------`;
+       
+      @@ -171,8 +186,8 @@
+           logger.setLevel(config.core.logLevel);
+           logger.debug(`Log level set to: ${config.core.logLevel}`);
+           logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+       
+      -    logger.log(getSystemPrompt(config.projectId,
+      config.watcher.preferredStrategy));
+
+      +    logger.log(getSystemPrompt(config.projectId,
+      config.watcher.preferredStrategy, config.patch));
+       
+           clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+             logger.info('New clipboard content detected. Attempting to parse...');
+    patchStrategy: new-unified
+snapshot:
+  src/core/config.ts: >
+    import { z } from 'zod';
+
+    import path from 'path';
+
+    import { promises as fs } from 'fs';
+
+    import { build } from 'esbuild';
+
+    import os from 'os';
+
+    import { createRequire } from 'module';
+
+    import { Config, ConfigSchema, RelayCodeConfigInput } from '../types';
+
+    import { CONFIG_FILE_NAMES, STATE_DIRECTORY_NAME, CONFIG_FILE_NAME_TS,
+    TRANSACTIONS_DIRECTORY_NAME } from '../utils/constants';
+
+    import { logger, isEnoentError } from '../utils/logger';
+
+    import chalk from 'chalk';
+
+
+    export const findConfigPath = async (cwd: string = process.cwd()):
+    Promise<string | null> => {
+      for (const fileName of CONFIG_FILE_NAMES) {
+        const configPath = path.join(cwd, fileName);
+        try {
+          await fs.access(configPath);
+          return configPath;
+        } catch (error) {
+          if (!isEnoentError(error)) {
+            // ignore other errors for now to keep searching
+          }
+        }
+      }
+      return null;
+    };
+
+
+    interface ConfigModule {
+      default: RelayCodeConfigInput;
+    }
+
+
+    const loadModuleConfig = async (configPath: string):
+    Promise<RelayCodeConfigInput> => {
+      let importPath = configPath;
+      let tempDir: string | null = null;
+
+      if (configPath.endsWith('.ts')) {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'relaycode-'));
+        const tempFile = path.join(tempDir, 'relay.config.mjs');
+
+        const buildOptions: Parameters<typeof build>[0] = {
+          entryPoints: [configPath],
+          outfile: tempFile,
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+        };
+
+        // To handle `import { ... } from 'relaycode'` in user configs, we need to tell esbuild where to find it.
+        // When running in dev, we point it to our local `src/index.ts`.
+        // When running as an installed package, we use `require.resolve` to find the installed package's entry point.
+        // This ensures esbuild bundles our library into the temporary config file, making it self-contained.
+        if (import.meta.url.includes('/src/')) {
+            buildOptions.alias = {
+                'relaycode': path.resolve(process.cwd(), 'src/index.ts')
+            }
+        } else {
+            const require = createRequire(import.meta.url);
+            try {
+                const resolvedPath = require.resolve('relaycode');
+                buildOptions.alias = { 'relaycode': resolvedPath };
+            } catch (e) {
+                // This is a fallback in case resolution fails. With the package.json `exports` fix,
+                // this is much less likely to be hit. We are removing the `external` option to prevent a crash.
+                // If the user's config *does* import from 'relaycode', esbuild will now fail with a
+                // clearer error message instead of the cryptic runtime error.
+                logger.warn(`Could not resolve the 'relaycode' package. The config file may fail to load if it uses relaycode imports.`);
+            }
+        }
+        
+        await build(buildOptions);
+        importPath = tempFile;
+      }
+
+      try {
+        // Dynamically import the module. The cache-busting `?t=` is important for reloads.
+        const module: ConfigModule = await import(`${importPath}?t=${Date.now()}`);
+        return module.default;
+      } finally {
+        if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+
+
+    export const findConfig = async (cwd: string = process.cwd()):
+    Promise<Config | null> => {
+      const configPath = await findConfigPath(cwd);
+      if (!configPath) {
+        return null;
+      }
+      try {
+        let configJson: RelayCodeConfigInput;
+        if (configPath.endsWith('.json')) { // Handle JSON config
+          const fileContent = await fs.readFile(configPath, 'utf-8');
+          configJson = JSON.parse(fileContent);
+        } else { // Handle .ts or .js config
+          configJson = await loadModuleConfig(configPath);
+        }
+        return ConfigSchema.parse(configJson);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return null;
+        }
+        if (error instanceof z.ZodError) {
+          throw new Error(`Invalid configuration in ${path.basename(configPath)}: ${error.message}`);
+        }
+        throw error;
+      }
+    };
+
+
+    export const loadConfigOrExit = async (cwd: string = process.cwd()):
+    Promise<Config> => {
+      const config = await findConfig(cwd);
+      if (!config) {
+        logger.error(`Configuration file ('${chalk.cyan(CONFIG_FILE_NAME_TS)}', '.js', or '.json') not found.`);
+        logger.info(`Please run ${chalk.magenta("'relay init'")} to create one.`);
+        process.exit(1);
+      }
+      return config;
+    };
+
+
+    export const createConfig = async (projectId: string, cwd: string =
+    process.cwd()): Promise<Config> => {
+      const config: RelayCodeConfigInput = { projectId };
+
+      // Ensure the schema defaults are applied for nested objects
+      const validatedConfig = ConfigSchema.parse(config);
+
+      const tsConfigContent = `import { defineConfig } from 'relaycode';
+
+    export default defineConfig(${JSON.stringify({ projectId }, null, 2)});
+
+    `;
+
+      const configPath = path.join(cwd, CONFIG_FILE_NAME_TS);
+      await fs.writeFile(configPath, tsConfigContent);
+
+      return validatedConfig;
+    };
+
+
+    export const ensureStateDirExists = async (cwd: string = process.cwd()):
+    Promise<void> => {
+      const stateDirPath = path.join(cwd, STATE_DIRECTORY_NAME);
+      await fs.mkdir(stateDirPath, { recursive: true });
+      
+      // Also create the transactions subdirectory
+      const transactionsDirPath = path.join(stateDirPath, TRANSACTIONS_DIRECTORY_NAME);
+      await fs.mkdir(transactionsDirPath, { recursive: true });
+    };
+
+
+    export const getProjectId = async (cwd: string = process.cwd()):
+    Promise<string> => {
+      try {
+        const pkgJsonPath = path.join(cwd, 'package.json');
+        const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');
+        const pkgJson = JSON.parse(fileContent);
+        if (pkgJson.name && typeof pkgJson.name === 'string') {
+          return pkgJson.name;
+        }
+      } catch (e) {
+        // Ignore if package.json doesn't exist or is invalid
+      }
+      return path.basename(cwd);
+    };
+  src/commands/watch.ts: >-
+    import { findConfig, loadConfigOrExit, findConfigPath } from
+    '../core/config';
+
+    import { createClipboardWatcher } from '../core/clipboard';
+
+    import { parseLLMResponse } from '../core/parser';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { Config } from '../types';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+
+    const getSystemPrompt = (projectId: string, preferredStrategy:
+    Config['watcher']['preferredStrategy']): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+        const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+        const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`new-unified\`,
+    \`multi-search-replace\`. If omitted, the entire file is replaced (this is
+    the \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" new-unified
+
+    ...
+
+    \`\`\``;
+
+        const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+        const syntaxNewUnified = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath new-unified
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`new-unified\` patch strategy for all modifications.`;
+
+        const syntaxMultiSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath multi-search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`multi-search-replace\` patch strategy for all
+    modifications.`;
+
+        const sectionNewUnified = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`new-unified\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+        const sectionMultiSearchReplace = `---
+
+    ### Strategy 2: Multi-Search-Replace (\`multi-search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+        const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+        const finalSteps = `---
+
+    ### Final Steps
+
+
+    1.  Add your step-by-step reasoning in plain text before each code block.
+
+    2.  ALWAYS add the following YAML block at the very end of your response.
+    Use the exact projectId shown here. Generate a new random uuid for each
+    response.
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary:
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: "A brief summary of my request."
+        gitCommitMsg: "feat: A concise, imperative git commit message."
+        \`\`\`
+    `;
+        
+        const footer = `---------------------------------------------------------------------------`;
+
+        const strategyInfo = {
+            auto: { syntax: syntaxAuto, details: `${sectionNewUnified}\n${sectionMultiSearchReplace}` },
+            replace: { syntax: syntaxReplace, details: '' },
+            'new-unified': { syntax: syntaxNewUnified, details: sectionNewUnified },
+            'multi-search-replace': { syntax: syntaxMultiSearchReplace, details: sectionMultiSearchReplace },
+        };
+
+        const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
+        const syntax = preferred.syntax;
+        const strategyDetails = preferred.details;
+
+        return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    };
+
+
+    export const watchCommand = async (options: { yes?: boolean } = {}, cwd:
+    string = process.cwd()): Promise<{ stop: () => void }> => {
+      let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+      let configWatcher: fs.FSWatcher | null = null;
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.core.logLevel);
+        logger.debug(`Log level set to: ${config.core.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.watcher.preferredStrategy));
+
+        clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+          logger.info('New clipboard content detected. Attempting to parse...');
+          const parsedResponse = parseLLMResponse(content);
+
+          if (!parsedResponse) {
+            logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
+            return;
+          }
+
+          // Check project ID before notifying and processing.
+          if (parsedResponse.control.projectId !== config.projectId) {
+            logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+            return;
+          }
+
+          await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+          logger.info('--------------------------------------------------');
+          logger.info('Watching for next patch...');
+        });
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`Configuration file is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      const configPath = await findConfigPath(cwd);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      if (initialConfig.core.watchConfig && configPath) {
+        logger.info(`Configuration file watching is enabled for ${path.basename(configPath)}.`);
+        configWatcher = fs.watch(configPath, handleConfigChange);
+      } else {
+        logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');
+      }
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+  src/types.ts: >-
+    import { z } from 'zod';
+
+
+    export const LogLevelNameSchema = z.enum(['silent', 'error', 'warn', 'info',
+    'debug']).default('info');
+
+    export type LogLevelName = z.infer<typeof LogLevelNameSchema>;
+
+
+    // Schema for relaycode.config.json
+
+    const CoreConfigSchema = z.object({
+      logLevel: LogLevelNameSchema,
+      enableNotifications: z.boolean().default(true),
+      watchConfig: z.boolean().default(true),
+    });
+
+
+    const WatcherConfigSchema = z.object({
+      clipboardPollInterval: z.number().int().positive().default(2000),
+      preferredStrategy: z.enum(['auto', 'replace', 'new-unified', 'multi-search-replace']).default('auto'),
+    });
+
+
+    const PatchConfigSchema = z.object({
+      approvalMode: z.enum(['auto', 'manual']).default('auto'),
+      approvalOnErrorCount: z.number().int().min(0).default(0),
+      linter: z.string().default('bun tsc --noEmit'),
+      preCommand: z.string().default(''),
+      postCommand: z.string().default(''),
+    });
+
+
+    const GitConfigSchema = z.object({
+      autoGitBranch: z.boolean().default(false),
+      gitBranchPrefix: z.string().default('relay/'),
+      gitBranchTemplate: z.enum(['uuid', 'gitCommitMsg']).default('gitCommitMsg'),
+    });
+
+
+    export const ConfigSchema = z.object({
+      projectId: z.string().min(1),
+      core: CoreConfigSchema.default({}),
+      watcher: WatcherConfigSchema.default({}),
+      patch: PatchConfigSchema.default({}),
+      git: GitConfigSchema.default({}),
+    });
+
+    export type Config = z.infer<typeof ConfigSchema>;
+
+
+    export type RelayCodeConfigInput = z.input<typeof ConfigSchema>;
+
+    export const defineConfig = (config: RelayCodeConfigInput):
+    RelayCodeConfigInput => config;
+
+
+    export const PatchStrategySchema = z.enum([
+      'replace',
+      'new-unified',
+      'multi-search-replace',
+      'unified',
+    ]).default('replace');
+
+    export type PatchStrategy = z.infer<typeof PatchStrategySchema>;
+
+
+    // Schema for operations parsed from code blocks
+
+    export const FileOperationSchema = z.union([
+      z.object({
+        type: z.literal('write'),
+        path: z.string(),
+        content: z.string(),
+        patchStrategy: PatchStrategySchema,
+      }),
+      z.object({
+        type: z.literal('delete'),
+        path: z.string(),
+      }),
+      z.object({
+        type: z.literal('rename'),
+        from: z.string(),
+        to: z.string(),
+      }),
+    ]);
+
+    export type FileOperation = z.infer<typeof FileOperationSchema>;
+
+
+    // Schema for the control YAML block at the end of the LLM response
+
+    export const ControlYamlSchema = z.object({
+      projectId: z.string(),
+      uuid: z.string().uuid(),
+      changeSummary: z.array(z.record(z.string(), z.string())).optional(), // Not strictly used, but good to parse
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+    });
+
+    export type ControlYaml = z.infer<typeof ControlYamlSchema>;
+
+
+    // The fully parsed response from the clipboard
+
+    export const ParsedLLMResponseSchema = z.object({
+      control: ControlYamlSchema,
+      operations: z.array(FileOperationSchema),
+      reasoning: z.array(z.string()),
+    });
+
+    export type ParsedLLMResponse = z.infer<typeof ParsedLLMResponseSchema>;
+
+
+    // Schema for the snapshot of original files
+
+    export const FileSnapshotSchema = z.record(z.string(),
+    z.string().nullable()); // path -> content | null (if file didn't exist)
+
+    export type FileSnapshot = z.infer<typeof FileSnapshotSchema>;
+
+
+    // Schema for the state file (.relaycode/{uuid}.yml or .pending.yml)
+
+    export const StateFileSchema = z.object({
+      uuid: z.string().uuid(),
+      projectId: z.string(),
+      createdAt: z.string().datetime(),
+      linesAdded: z.number().int().optional(),
+      linesRemoved: z.number().int().optional(),
+      gitCommitMsg: z.string().optional(),
+      promptSummary: z.string().optional(),
+      reasoning: z.array(z.string()),
+      operations: z.array(FileOperationSchema),
+      snapshot: FileSnapshotSchema,
+      approved: z.boolean(),
+    });
+
+    export type StateFile = z.infer<typeof StateFileSchema>;
+
+
+    // Shell command execution result
+
+    export const ShellCommandResultSchema = z.object({
+        stdout: z.string(),
+        stderr: z.string(),
+        exitCode: z.number().nullable(),
+    });
+
+    export type ShellCommandResult = z.infer<typeof ShellCommandResultSchema>;
+  src/core/transaction.ts: >
+    import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation }
+    from '../types';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { createSnapshot, restoreSnapshot, applyOperations } from
+    './executor';
+
+    import chalk from 'chalk';
+
+    import { hasBeenProcessed, writePendingState, commitState,
+    deletePendingState } from './state';
+
+    import { getConfirmation } from '../utils/prompt'
+
+    import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+    notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+        yes?: boolean;
+    };
+
+
+    // Space-optimized LCS length calculation to determine line changes
+    accurately.
+
+    const calculateLcsLength = (a: string[], b: string[]): number => {
+        let s1 = a;
+        let s2 = b;
+        // s2 should be the shorter string to optimize space for the DP table.
+        if (s1.length < s2.length) {
+            [s1, s2] = [s2, s1];
+        }
+        const m = s1.length;
+        const n = s2.length;
+        
+        const dp = Array(n + 1).fill(0);
+
+        for (let i = 1; i <= m; i++) {
+            let prev = 0; // stores dp[i-1][j-1]
+            for (let j = 1; j <= n; j++) {
+                const temp = dp[j]; // stores dp[i-1][j]
+                if (s1[i - 1] === s2[j - 1]) {
+                    dp[j] = prev + 1;
+                } else {
+                    dp[j] = Math.max(dp[j], dp[j - 1]);
+                }
+                prev = temp;
+            }
+        }
+        return dp[n];
+    };
+
+
+    const calculateLineChanges = (
+        op: FileOperation,
+        snapshot: FileSnapshot,
+        newContents: Map<string, string>
+    ): { added: number; removed: number } => {
+        if (op.type === 'rename') {
+            return { added: 0, removed: 0 };
+        }
+        const oldContent = snapshot[op.path] ?? null;
+
+        if (op.type === 'delete') {
+            const oldLines = oldContent ? oldContent.split('\n') : [];
+            return { added: 0, removed: oldLines.length };
+        }
+        
+        const newContent = newContents.get(op.path) ?? null;
+
+        if (oldContent === newContent) return { added: 0, removed: 0 };
+
+        const oldLines = oldContent?.split('\n') ?? [];
+        const newLines = newContent?.split('\n') ?? [];
+
+        if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };
+        if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };
+        
+        // Use LCS to get a more accurate line diff count.
+        const lcsLength = calculateLcsLength(oldLines, newLines);
+        return {
+            added: newLines.length - lcsLength,
+            removed: oldLines.length - lcsLength,
+        };
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true, isError:
+    boolean = true): Promise<void> => {
+        if (isError) {
+            logger.warn(`Rolling back changes: ${reason}`);
+        }
+
+        let rollbackSuccessful = false;
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+            rollbackSuccessful = true;
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            notifyRollbackFailure(uuid, enableNotifications);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                if (isError && rollbackSuccessful) {
+                    notifyFailure(uuid, enableNotifications);
+                }
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    type ApprovalOptions = {
+        config: Config;
+        cwd: string;
+        prompter: Prompter;
+        skipConfirmation: boolean;
+    }
+
+
+    const handleApproval = async ({ config, cwd, prompter, skipConfirmation }:
+    ApprovalOptions): Promise<boolean> => {
+        const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+        logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+        
+        const getManualApproval = async (reason: string): Promise<boolean> => {
+            logger.warn(reason);
+            
+            const notificationResult = await requestApprovalWithNotification(config.projectId, config.core.enableNotifications);
+
+            if (notificationResult === 'approved') {
+                logger.info('Approved via notification.');
+                return true;
+            }
+            if (notificationResult === 'rejected') {
+                logger.info('Rejected via notification.');
+                return false;
+            }
+
+            if (notificationResult === 'timeout') {
+                logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');
+            }
+
+            return await prompter('Changes applied. Do you want to approve and commit them? (y/N)');
+        };
+
+        if (skipConfirmation) {
+            logger.success('  - Changes approved via -y/--yes flag.');
+            return true;
+        }
+        if (config.patch.approvalMode === 'manual') {
+            return await getManualApproval('Manual approval required because "approvalMode" is set to "manual".');
+        }
+        // auto mode
+        const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+        if (canAutoApprove) {
+            logger.success('  - Changes automatically approved based on your configuration.');
+            return true;
+        }
+        return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);
+    };
+
+
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const prompter = options?.prompter || getConfirmation;
+        const skipConfirmation = options?.yes === true;
+        const notifyOnStart = options?.notifyOnStart ?? false;
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newContents = await applyOperations(operations, cwd);
+            logger.success('  - File operations complete.');
+
+            const opStats = operations.map(op => {
+                const stats = calculateLineChanges(op, snapshot, newContents);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+                return stats;
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            const checksDuration = performance.now() - startTime;
+            const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
+            const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
+
+            logger.log(chalk.bold('\nPre-flight summary:'));
+            logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);
+            logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
+
+            const isApproved = await handleApproval({ config, cwd, prompter, skipConfirmation });
+
+            if (isApproved) {
+                stateFile.approved = true;
+                (stateFile as any).linesAdded = totalAdded;
+                (stateFile as any).linesRemoved = totalRemoved;
+                await writePendingState(cwd, stateFile); // Update state with approved: true before commit
+                await commitState(cwd, uuid);
+                logCompletionSummary(uuid, startTime, operations);
+                notifySuccess(uuid, config.core.enableNotifications);
+                await handleAutoGitBranch(config, stateFile, cwd);
+            } else {
+                logger.warn('Operation cancelled by user. Rolling back changes...');
+                await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        }
+    };
+
+
+    const handleAutoGitBranch = async (config: Config, stateFile: StateFile,
+    cwd: string): Promise<void> => {
+        if (!config.git.autoGitBranch) return;
+
+        let branchNameSegment = '';
+        if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+            branchNameSegment = stateFile.gitCommitMsg;
+        } else {
+            branchNameSegment = stateFile.uuid;
+        }
+
+        const sanitizedSegment = branchNameSegment
+            .trim()
+            .toLowerCase()
+            .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+            .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+            .replace(/-+/g, '-') // Collapse consecutive hyphens
+            .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+            .slice(0, 70); // Truncate
+
+        if (sanitizedSegment) {
+            const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+            logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+            const command = `git checkout -b "${branchName}"`;
+            const result = await executeShellCommand(command, cwd);
+            if (result.exitCode === 0) {
+                logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+            } else {
+                // Exit code 128 from `git checkout -b` often means the branch already exists.
+                if (result.exitCode === 128 && result.stderr.includes('already exists')) {
+                    logger.warn(`Could not create branch '${chalk.magenta(branchName)}' because it already exists.`);
+                } else {
+                    logger.warn(`Could not create git branch '${chalk.magenta(branchName)}'.`);
+                }
+                logger.debug(`'${command}' failed with: ${result.stderr}`);
+            }
+        } else {
+            logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+        }
+    };
+approved: true

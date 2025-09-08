@@ -1,0 +1,67 @@
+{
+  "name": "relaycode",
+  "version": "1.0.1",
+  "description": "A developer assistant that automates applying code changes from LLMs.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "relay": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "fallbacks"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsup",
+    "test": "bun test",
+    "dev": "bun run src/cli.ts",
+    "prepublishOnly": "bun run build",
+    "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+    "commit": "bun run src/cli.ts git commit -y && git push"
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
+    "@types/uuid": "^10.0.0",
+    "chalk": "^5.4.1",
+    "clipboardy": "^4.0.0",
+    "commander": "^12.1.0",
+    "relaycode-core": "0.1.1",
+    "esbuild": "0.25.6",
+    "js-yaml": "^4.1.0",
+    "konro": "^0.1.16",
+    "toasted-notifier": "^10.1.0",
+    "typescript": "^5.8.3",
+    "uuid": "^11.1.0",
+    "zod": "^3.25.67"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "automation",
+    "codegen",
+    "developer-tool",
+    "cli"
+  ],
+  "author": "Noca.pro",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nocapro/relaycode.git"
+  },
+  "homepage": "https://relay.noca.pro"
+}

@@ -1,0 +1,266 @@
+uuid: 442d87e0-c65d-4f1b-bb3b-f542c2d27464
+projectId: relaycode
+createdAt: '2025-09-03T03:15:43.478Z'
+linesAdded: 9
+linesRemoved: 3
+gitCommitMsg: 'chore: use local packages for development'
+promptSummary: >-
+  Configure packages to use local source dependencies via tsconfig paths and
+  file protocol.
+reasoning:
+  - >-
+    aight, switching to local deps. using file protocol for package manager and
+    tsconfig paths for the compiler/ide. this lets us work directly against
+    source without constant rebuilds.
+  - >-
+    first, I'll update the root `package.json` to use the local `relaycode-core`
+    package.
+  - >-
+    next, I'll point the root `tsconfig.json` to the source files for both local
+    packages. this ensures the build process for the main app can resolve them.
+  - >-
+    now, let's do the same for `relaycode-core`'s dependency on
+    `apply-multi-diff`. first, `package.json`.
+  - >-
+    and finally, update `relaycode-core`'s `tsconfig.json` to resolve
+    `apply-multi-diff` from source. this helps with IDE support within that
+    package.
+  - should be good to go. `bun install` will link everything up.
+operations:
+  - type: write
+    path: package.json
+    content: |-
+      <<<<<<< SEARCH
+      "dependencies": {
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "relaycode-core": "0.1.0",
+        "esbuild": "0.25.6",
+        "js-yaml": "^4.1.0",
+        "konro": "^0.1.15",
+        "toasted-notifier": "^10.1.0",
+        "typescript": "^5.8.3",
+        "uuid": "^11.1.0",
+        "zod": "^3.25.67"
+      },
+      =======
+      "dependencies": {
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "relaycode-core": "file:packages/relaycode-core",
+        "esbuild": "0.25.6",
+        "js-yaml": "^4.1.0",
+        "konro": "^0.1.15",
+        "toasted-notifier": "^10.1.0",
+        "typescript": "^5.8.3",
+        "uuid": "^11.1.0",
+        "zod": "^3.25.67"
+      },
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: tsconfig.json
+    content: |-
+      --- tsconfig.json
+      +++ tsconfig.json
+      @@ -19,7 +19,9 @@
+           "resolveJsonModule": true,
+           "isolatedModules": true,
+           "paths": {
+      -      "@/*": ["./src/*"]
+      +      "@/*": ["./src/*"],
+      +      "relaycode-core": ["./packages/relaycode-core/src/index.ts"],
+      +      "apply-multi-diff": ["./packages/apply-multi-diff/src/index.ts"]
+           }
+         },
+         "include": ["src/**/*.ts", "test/**/*.ts"],
+    patchStrategy: new-unified
+  - type: write
+    path: packages/relaycode-core/package.json
+    content: |-
+      <<<<<<< SEARCH
+      "dependencies": {
+        "apply-multi-diff": "0.1.0",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      =======
+      "dependencies": {
+        "apply-multi-diff": "file:../apply-multi-diff",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      >>>>>>> REPLACE
+    patchStrategy: multi-search-replace
+  - type: write
+    path: packages/relaycode-core/tsconfig.json
+    content: |-
+      --- packages/relaycode-core/tsconfig.json
+      +++ packages/relaycode-core/tsconfig.json
+      @@ -16,6 +16,10 @@
+           "noUncheckedIndexedAccess": true,
+           "noImplicitOverride": true,
+       
+      +    "paths": {
+      +      "apply-multi-diff": ["../apply-multi-diff/src/index.ts"]
+      +    },
+      +
+           // Some stricter flags (disabled by default)
+           "noUnusedLocals": false,
+           "noUnusedParameters": false,
+    patchStrategy: new-unified
+snapshot:
+  package.json: |
+    {
+      "name": "relaycode",
+      "version": "1.0.38",
+      "description": "A developer assistant that automates applying code changes from LLMs.",
+      "type": "module",
+      "main": "./dist/index.js",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "bin": {
+        "relay": "./dist/cli.js"
+      },
+      "files": [
+        "dist",
+        "fallbacks"
+      ],
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+      },
+      "scripts": {
+        "clean": "rm -rf dist",
+        "build": "bun run clean && bun build ./src/index.ts ./src/cli.ts --outdir ./dist --target node",
+        "test": "bun test",
+        "dev": "bun run src/cli.ts",
+        "prepublishOnly": "bun run build",
+        "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+        "commit": "bun run src/cli.ts git commit -y && git push"
+      },
+      "dependencies": {
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "relaycode-core": "0.1.0",
+        "esbuild": "0.25.6",
+        "js-yaml": "^4.1.0",
+        "konro": "^0.1.15",
+        "toasted-notifier": "^10.1.0",
+        "typescript": "^5.8.3",
+        "uuid": "^11.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/uuid": "^10.0.0"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "automation",
+        "codegen",
+        "developer-tool",
+        "cli"
+      ],
+      "author": "Relay Code",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/relaycoder/relaycode.git"
+      },
+      "homepage": "https://relay.code"
+    }
+  tsconfig.json: |-
+    {
+      "compilerOptions": {
+        "target": "ESNext",
+        "module": "ESNext",
+        "lib": ["ESNext"],
+        "moduleDetection": "force",
+        "moduleResolution": "bundler",
+        "strict": true,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
+        "outDir": "./dist",
+        "noImplicitAny": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "noUncheckedIndexedAccess": true,
+        "allowJs": true,
+        "checkJs": false,
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "paths": {
+          "@/*": ["./src/*"]
+        }
+      },
+      "include": ["src/**/*.ts", "test/**/*.ts"],
+      "exclude": ["node_modules", "dist"]
+    }
+  packages/relaycode-core/package.json: |
+    {
+      "name": "relaycode-core",
+      "version": "0.1.0",
+      "type": "module",
+      "module": "src/index.ts",
+      "main": "src/index.ts",
+      "types": "src/index.ts",
+      "dependencies": {
+        "apply-multi-diff": "0.1.0",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "typescript": "^5.8.3"
+      },
+      "peerDependencies": {
+        "typescript": "^5"
+      }
+    }
+  packages/relaycode-core/tsconfig.json: |
+    {
+      "compilerOptions": {
+        // Environment setup & latest features
+        "lib": ["ESNext"],
+        "target": "ESNext",
+        "module": "Preserve",
+        "moduleDetection": "force",
+        "jsx": "react-jsx",
+        "allowJs": true,
+
+        // Bundler mode
+        "moduleResolution": "bundler",
+        "allowImportingTsExtensions": true,
+        "verbatimModuleSyntax": false,
+        "noEmit": true,
+
+        // Best practices
+        "strict": true,
+        "skipLibCheck": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+
+        // Some stricter flags (disabled by default)
+        "noUnusedLocals": false,
+        "noUnusedParameters": false,
+        "noPropertyAccessFromIndexSignature": false
+      },
+      "include": ["src"]
+    }
+approved: true

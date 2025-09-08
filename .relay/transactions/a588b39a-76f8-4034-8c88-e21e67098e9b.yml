@@ -1,0 +1,492 @@
+uuid: a588b39a-76f8-4034-8c88-e21e67098e9b
+projectId: relaycode
+createdAt: '2025-09-03T12:47:00.070Z'
+linesAdded: 86
+linesRemoved: 260
+gitCommitMsg: 'refactor(testing): overhaul e2e tests to use yaml fixtures'
+promptSummary: >-
+  Refactor the E2E tests to use a data-driven approach with YAML fixtures,
+  similar to the pattern in the apply-multi-diff package.
+reasoning:
+  - >-
+    yoooo, check it. you were using markdown files for e2e tests, which is kinda
+    clunky. the `apply-multi-diff` package has a way better pattern using yaml
+    fixtures for data-driven tests. i'm refactoring your e2e tests to follow
+    that slicker pattern.
+  - >-
+    i'm nuking the old `.md` fixture files and replacing them with a single,
+    comprehensive `patcher.yml` that defines all the test cases—initial state,
+    expected state, the whole nine yards.
+  - >-
+    then i'm completely rewriting `test/e2e/patcher.test.ts` to be a fixture
+    runner that loads that yaml file and spins up a test for each case. it's way
+    more maintainable and easier to add new tests now. gg.
+  - First, I'll create the new YAML fixture file.
+  - Now, deleting the old markdown fixtures.
+  - And finally, here's the shiny new test runner.
+operations:
+  - type: write
+    path: test/fixtures/e2e/patcher.yml
+    content: console.log("Updated main");
+    patchStrategy: replace
+  - type: delete
+    path: test/fixtures/delete-file.md
+  - type: delete
+    path: test/fixtures/multiple-ops.md
+  - type: delete
+    path: test/fixtures/path-with-spaces.md
+  - type: delete
+    path: test/fixtures/replace-no-markers.md
+  - type: delete
+    path: test/fixtures/replace-with-markers.md
+  - type: delete
+    path: test/fixtures/search-replace.md
+  - type: delete
+    path: test/fixtures/standard-diff.md
+  - type: write
+    path: test/e2e/patcher.test.ts
+    content: >-
+      import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+      import { promises as fs } from 'fs';
+
+      import path from 'path';
+
+      import yaml from 'js-yaml';
+
+      import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+      from '../test.util';
+
+      import { parseLLMResponse, LLMResponse } from 'relaycode-core';
+
+
+      interface FileState {
+        path: string;
+        content?: string;
+        exists?: boolean;
+      }
+
+
+      interface E2ETestCase {
+        name: string;
+        description: string;
+        markdown_content: string;
+        initial_state: FileState[];
+        expected_state?: FileState[];
+        expected_outcome?: 'success' | 'failure';
+      }
+
+
+      interface TestFixtures {
+        e2e_patch_tests: E2ETestCase[];
+      }
+
+
+      const fixturePath = path.join(__dirname, '../fixtures/e2e/patcher.yml');
+
+      const fixtures = yaml.load(fs.readFileSync(fixturePath, 'utf-8')) as
+      TestFixtures;
+
+
+      describe('e2e/patcher (from fixtures)', () => {
+        let context: E2ETestContext;
+
+        beforeEach(async () => {
+          context = await setupE2ETest();
+        });
+
+        afterEach(async () => {
+          if (context) await context.cleanup();
+        });
+
+        fixtures.e2e_patch_tests.forEach(testCase => {
+          it(testCase.description, async () => {
+            // 1. Set up initial state
+            for (const file of testCase.initial_state) {
+              await createTestFile(context.testDir.path, file.path, file.content ?? '');
+            }
+
+            // 2. Parse the markdown to get operations
+            const parsedResponse = parseLLMResponse(testCase.markdown_content);
+            expect(parsedResponse.success).toBe(true);
+            const operations = (parsedResponse as { success: true; data: LLMResponse }).data.operations;
+
+            // 3. Run the patch process
+            const { uuid, success } = await runProcessPatch(
+              context,
+              {},
+              operations,
+              { responseOverrides: { reasoning: [] } } // Don't care about reasoning
+            );
+
+            const expectedSuccess = testCase.expected_outcome !== 'failure';
+            expect(success).toBe(expectedSuccess);
+
+            // 4. Verify the final state
+            if (expectedSuccess) {
+              expect(uuid).not.toBeNull();
+              const stateFileExists = await fs
+                .access(path.join(context.testDir.path, '.relaycode', `${uuid}.yml`))
+                .then(() => true)
+                .catch(() => false);
+              expect(stateFileExists).toBe(true);
+
+              const stateToVerify = testCase.expected_state ?? testCase.initial_state;
+
+              for (const file of stateToVerify) {
+                const filePath = path.join(context.testDir.path, file.path);
+                const fileExists = await fs
+                  .access(filePath)
+                  .then(() => true)
+                  .catch(() => false);
+
+                if (file.exists === false) {
+                  expect(fileExists).toBe(false);
+                } else {
+                  expect(fileExists).toBe(true);
+                  const finalContent = await fs.readFile(filePath, 'utf-8');
+                  const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+                  expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+                }
+              }
+            } else {
+              // Expected failure
+              if (uuid) {
+                  const stateFileExists = await fs
+                    .access(path.join(context.testDir.path, '.relaycode', `${uuid}.yml`))
+                    .then(() => true)
+                    .catch(() => false);
+                  expect(stateFileExists).toBe(false);
+              }
+
+              // Verify that initial state is unchanged
+              for (const file of testCase.initial_state) {
+                const filePath = path.join(context.testDir.path, file.path);
+                const finalContent = await fs.readFile(filePath, 'utf-8');
+                const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+                expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+              }
+            }
+          });
+        });
+      });
+    patchStrategy: replace
+snapshot:
+  test/fixtures/e2e/patcher.yml: null
+  test/fixtures/delete-file.md: |-
+    I'm removing the old helper file. It is no longer needed.
+
+    ```typescript // src/old-helper.ts
+    //TODO: delete this file
+    ```
+
+    ```yaml
+    projectId: my-project
+    uuid: 3c9a41b8-42e7-4663-a56e-1ebd03f7a1f3
+    changeSummary:
+      - delete: src/old-helper.ts
+    ```
+  test/fixtures/multiple-ops.md: |-
+    I'm performing a few operations.
+
+    First, editing `main.ts`.
+    ```typescript // src/main.ts
+    // START
+    console.log("Updated main");
+    // END
+    ```
+
+    Second, deleting `utils.ts`.
+    ```typescript // src/utils.ts
+    //TODO: delete this file
+    ```
+
+    Finally, adding a new component.
+    ```typescript // "src/components/New Component.tsx" standard-diff
+    --- a/src/components/New Component.tsx
+    +++ b/src/components/New Component.tsx
+    @@ -0,0 +1,3 @@
+    +export const NewComponent = () => {
+    +  return <div>New!</div>;
+    +};
+    ```
+
+    ```yaml
+    projectId: my-project
+    uuid: 5e1a41d8-64a7-4663-c56e-3ebd03f7a1f5
+    changeSummary:
+      - edit: src/main.ts
+      - delete: src/utils.ts
+      - new: src/components/New Component.tsx
+    ```
+  test/fixtures/path-with-spaces.md: |-
+    Creating a new component with a space in its name.
+
+    ```typescript // "src/components/My Component.tsx"
+    export const MyComponent = () => <div>Hello</div>;
+    ```
+
+    ```yaml
+    projectId: my-project
+    uuid: 4d0a41c8-53f7-4663-b56e-2ebd03f7a1f4
+    changeSummary:
+      - new: src/components/My Component.tsx
+    ```
+  test/fixtures/replace-no-markers.md: |-
+    Here are the changes to create a new file `src/new.ts`.
+
+    ```typescript // src/new.ts
+    export const newFunction = () => {
+        console.log("new file");
+    };
+    ```
+
+    ```yaml
+    projectId: my-project
+    uuid: 1c8a41a8-20d7-4663-856e-9ebd03f7a1e1
+    changeSummary:
+      - new: src/new.ts
+    ```
+  test/fixtures/replace-with-markers.md: |-
+    Here are the changes to create a new file `src/new.ts`.
+
+    ```typescript // src/new.ts
+    // START
+    export const newFunction = () => {
+        console.log("new file");
+    };
+    // END
+    ```
+
+    ```yaml
+    projectId: my-project
+    uuid: 1c8a41a8-20d7-4663-856e-9ebd03f7a1e1
+    changeSummary:
+      - new: src/new.ts
+    ```
+  test/fixtures/search-replace.md: >-
+
+    I will update the `package.json` file to change the project name from
+    `diff-apply` to `diff-patcher`. I'll update the `name`, the `keywords`, and
+    the repository `url`.
+
+
+    ```json // package.json search-replace
+
+    <<<<<<< SEARCH
+
+    -------
+      "name": "diff-apply",
+      "version": "1.0.6",
+      "description": "A utility for applying file diffs programmatically",
+    =======
+      "name": "diff-patcher",
+      "version": "1.0.6",
+      "description": "A utility for applying file diffs programmatically",
+    >>>>>>> REPLACE
+
+    <<<<<<< SEARCH
+
+    -------
+      "keywords": [
+        "diff",
+        "patch",
+        "file",
+        "text",
+        "diff-apply"
+      ],
+    =======
+      "keywords": [
+        "diff",
+        "patch",
+        "file",
+        "text",
+        "diff-patcher"
+      ],
+    >>>>>>> REPLACE
+
+    <<<<<<< SEARCH
+
+
+    >>>>>>> REPLACE
+
+    ```
+
+
+    ```yaml
+
+    projectId: diff-apply
+
+    uuid: 486a43f8-874e-4f16-832f-b2fd3769c36c
+
+    changeSummary:
+      - edit: package.json
+    ```
+  test/e2e/patcher.test.ts: >
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+    from '../test.util';
+
+
+    // NOTE: This test file uses the actual 'diff-apply' dependency, not a mock.
+
+
+    describe('e2e/patcher', () => {
+      let context: E2ETestContext;
+
+      beforeEach(async () => {
+        context = await setupE2ETest();
+      });
+
+      afterEach(async () => {
+        if (context) await context.cleanup();
+      });
+
+      it('should correctly apply a patch using the search-replace strategy', async () => {
+        const testFile = 'src/config.js';
+        const originalContent = `
+    const config = {
+        port: 3000,
+        host: 'localhost',
+        enableLogging: true,
+    };
+
+    `;
+        await createTestFile(context.testDir.path, testFile, originalContent);
+
+        const diffContent = `
+    <<<<<<< SEARCH
+        port: 3000,
+    =======
+        port: 8080,
+    >>>>>>> REPLACE
+
+    <<<<<<< SEARCH
+        enableLogging: true,
+    =======
+        enableLogging: false,
+    >>>>>>> REPLACE
+
+    `;
+
+        await runProcessPatch(
+          context,
+          {},
+          [{ type: 'edit', path: testFile, content: diffContent, strategy: 'search-replace' }],
+          { responseOverrides: { reasoning: [] } } // Don't care about reasoning in this test
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+
+        const expectedContent = `
+    const config = {
+        port: 8080,
+        host: 'localhost',
+        enableLogging: false,
+    };
+
+    `;
+        expect(finalContent.replace(/\s/g, '')).toBe(expectedContent.replace(/\s/g, ''));
+      });
+
+      it('should correctly apply a patch using the standard-diff strategy', async () => {
+        const testFile = 'src/utils.js';
+        const originalContent = `function calculate() {
+        const a = 1;
+        const b = 2;
+        return a + b;
+    }`;
+        await createTestFile(context.testDir.path, testFile, originalContent);
+
+        const diffContent = `--- a/${testFile}
+    +++ b/${testFile}
+
+    @@ -2,4 +2,5 @@
+         const a = 1;
+         const b = 2;
+    -    return a + b;
+
+    +    // A more complex calculation
+
+    +    return (a + b) * 2;
+     }`;
+
+        await runProcessPatch(
+          context,
+          {},
+          [{ type: 'edit', path: testFile, content: diffContent, strategy: 'standard-diff' }],
+          { responseOverrides: { reasoning: [] } } // Don't care about reasoning
+        );
+
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+
+        const expectedContent = `function calculate() {
+        const a = 1;
+        const b = 2;
+        // A more complex calculation
+        return (a + b) * 2;
+    }`;
+        // Normalize line endings for comparison
+        expect(finalContent.replace(/\r\n/g, '\n')).toBe(expectedContent.replace(/\r\n/g, '\n'));
+      });
+
+
+      it('should fail transaction if search-replace content is not found', async () => {
+        const testFile = 'src/index.js';
+        const originalContent = 'const version = 1;';
+        await createTestFile(context.testDir.path, testFile, originalContent);
+
+        const diffContent = `
+    <<<<<<< SEARCH
+
+    const version = 2; // This content does not exist
+
+    =======
+
+    const version = 3;
+
+    >>>>>>> REPLACE
+
+    `;
+        const { uuid } = await runProcessPatch(
+          context,
+          {},
+          [{ type: 'edit', path: testFile, content: diffContent, strategy: 'search-replace' }],
+          { responseOverrides: { reasoning: [] } }
+        );
+
+        // The file content should remain unchanged
+        const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+        expect(finalContent).toBe(originalContent);
+
+        // No state file should have been committed
+        const stateFileExists = await fs.access(path.join(context.testDir.path, '.relaycode', `${uuid}.yml`)).then(() => true).catch(() => false);
+        expect(stateFileExists).toBe(false);
+      });
+    });
+  test/fixtures/standard-diff.md: |-
+    I will update `src/utils.ts` to add a new parameter.
+
+    ```diff // src/utils.ts standard-diff
+    --- a/src/utils.ts
+    +++ b/src/utils.ts
+    @@ -1,3 +1,3 @@
+    -export function greet(name: string) {
+    -  return `Hello, ${name}!`;
+    +export function greet(name: string, enthusiasm: number) {
+    +  return `Hello, ${name}` + '!'.repeat(enthusiasm);
+     }
+    ```
+
+    ```yaml
+    projectId: my-project
+    uuid: 2b8f41e8-31d7-4663-956e-0ebd03f7a1f2
+    changeSummary:
+      - edit: src/utils.ts
+    ```
+approved: true

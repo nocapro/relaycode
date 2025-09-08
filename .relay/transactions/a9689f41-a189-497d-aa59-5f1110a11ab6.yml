@@ -1,0 +1,215 @@
+uuid: a9689f41-a189-497d-aa59-5f1110a11ab6
+projectId: relaycode
+createdAt: '2025-09-03T13:05:29.870Z'
+linesAdded: 19
+linesRemoved: 7
+gitCommitMsg: 'fix(tests): align operation types in patcher e2e test'
+promptSummary: Fix TypeScript error in e2e test file.
+reasoning:
+  - >-
+    aight, got a TS error in the e2e tests. looks like the test helper
+    `runProcessPatch` is expecting a slightly different type for file operations
+    than what the core `parseLLMResponse` function returns. Classic case of test
+    utils getting out of sync with the main codebase.
+  - >-
+    specifically, the test helper wants `type: 'edit'` or `type: 'new'` for file
+    writes, instead of just `type: 'write'`. it also seems to expect the
+    `patchStrategy` property to be named `strategy`.
+  - >-
+    i'll map the operations from the parser to what the test helper wants. easy
+    peasy.
+operations:
+  - type: write
+    path: test/e2e/patcher.test.ts
+    content: >-
+      --- test/e2e/patcher.test.ts
+
+      +++ test/e2e/patcher.test.ts
+
+      @@ -47,15 +47,27 @@
+             const parsedResponse = parseLLMResponse(testCase.markdown_content);
+             expect(parsedResponse).not.toBeNull();
+             if (!parsedResponse) throw new Error('Test case markdown failed to parse');
+      -      const operations = parsedResponse.operations;
+
+      +
+
+      +      // Map FileOperation from core to the TestOperation type expected
+      by the test utility.
+
+      +      // This is needed because the test utility has a different 'type'
+      for write operations ('edit'/'new')
+
+      +      // and uses 'strategy' instead of 'patchStrategy'.
+
+      +      const initialFilePaths = new Set(testCase.initial_state.map(file =>
+      file.path));
+
+      +      const operations = parsedResponse.operations.map(op => {
+
+      +        if (op.type === 'write') {
+
+      +          return {
+
+      +            type: initialFilePaths.has(op.path) ? ('edit' as const) :
+      ('new' as const),
+
+      +            path: op.path,
+
+      +            content: op.content,
+
+      +            strategy: op.patchStrategy,
+
+      +          };
+
+      +        }
+
+      +        return op;
+
+      +      });
+       
+             // 3. Run the patch process
+             // We can't destructure `success` as it's not returned. We determine success by checking the state file later.
+      -      const { uuid } = await runProcessPatch(
+
+      -        context,
+
+      -        {},
+
+      -        operations,
+
+      -        { responseOverrides: { reasoning: [] } } // Don't care about
+      reasoning
+
+      -      );
+
+      +      const { uuid } = await runProcessPatch(context, {}, operations, {
+
+      +        responseOverrides: { reasoning: [] },
+
+      +      });
+       
+             const expectedSuccess = testCase.expected_outcome !== 'failure';
+             const committedState = await readStateFile(context.testDir.path, uuid);
+    patchStrategy: new-unified
+snapshot:
+  test/e2e/patcher.test.ts: >-
+    import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+    import { promises as fs } from 'fs';
+
+    import fsSync from 'fs';
+
+    import path from 'path';
+
+    import yaml from 'js-yaml';
+
+    import { setupE2ETest, E2ETestContext, createTestFile, runProcessPatch }
+    from '../test.util';
+
+    import { parseLLMResponse } from 'relaycode-core';
+
+    import { readStateFile } from '../../src';
+
+
+    interface FileState {
+      path: string;
+      content?: string;
+      exists?: boolean;
+    }
+
+
+    interface E2ETestCase {
+      name: string;
+      description: string;
+      markdown_content: string;
+      initial_state: FileState[];
+      expected_state?: FileState[];
+      expected_outcome?: 'success' | 'failure';
+    }
+
+
+    interface TestFixtures {
+      e2e_patch_tests: E2ETestCase[];
+    }
+
+
+    const fixturePath = path.join(__dirname, '../fixtures/e2e/patcher.yml');
+
+    const fixtures = yaml.load(fsSync.readFileSync(fixturePath, 'utf-8')) as
+    TestFixtures;
+
+
+    describe('e2e/patcher (from fixtures)', () => {
+      let context: E2ETestContext;
+
+      beforeEach(async () => {
+        context = await setupE2ETest();
+      });
+
+      afterEach(async () => {
+        if (context) await context.cleanup();
+      });
+
+      fixtures.e2e_patch_tests.forEach(testCase => {
+        it(testCase.description, async () => {
+          // 1. Set up initial state
+          for (const file of testCase.initial_state) {
+            await createTestFile(context.testDir.path, file.path, file.content ?? '');
+          }
+
+          // 2. Parse the markdown to get operations
+          const parsedResponse = parseLLMResponse(testCase.markdown_content);
+          expect(parsedResponse).not.toBeNull();
+          if (!parsedResponse) throw new Error('Test case markdown failed to parse');
+          const operations = parsedResponse.operations;
+
+          // 3. Run the patch process
+          // We can't destructure `success` as it's not returned. We determine success by checking the state file later.
+          const { uuid } = await runProcessPatch(
+            context,
+            {},
+            operations,
+            { responseOverrides: { reasoning: [] } } // Don't care about reasoning
+          );
+
+          const expectedSuccess = testCase.expected_outcome !== 'failure';
+          const committedState = await readStateFile(context.testDir.path, uuid);
+          const success = !!committedState;
+          expect(success).toBe(expectedSuccess);
+
+          // 4. Verify the final state
+          if (expectedSuccess) {
+            const stateToVerify = testCase.expected_state ?? testCase.initial_state;
+
+            for (const file of stateToVerify) {
+              const filePath = path.join(context.testDir.path, file.path);
+              const fileExists = await fs
+                .access(filePath)
+                .then(() => true)
+                .catch(() => false);
+
+              if (file.exists === false) {
+                expect(fileExists).toBe(false);
+              } else {
+                expect(fileExists).toBe(true);
+                const finalContent = await fs.readFile(filePath, 'utf-8');
+                const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+                expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+              }
+            }
+          } else {
+            // Expected failure
+
+            // Verify that initial state is unchanged
+            for (const file of testCase.initial_state) {
+              const filePath = path.join(context.testDir.path, file.path);
+              const finalContent = await fs.readFile(filePath, 'utf-8');
+              const normalize = (str: string) => str.replace(/\r\n/g, '\n');
+              expect(normalize(finalContent)).toBe(normalize(file.content ?? ''));
+            }
+          }
+        });
+      });
+    });
+approved: true

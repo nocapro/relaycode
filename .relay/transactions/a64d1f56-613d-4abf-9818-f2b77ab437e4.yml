@@ -1,0 +1,117 @@
+uuid: a64d1f56-613d-4abf-9818-f2b77ab437e4
+projectId: relaycode
+createdAt: '2025-09-04T16:28:46.270Z'
+linesAdded: 2
+linesRemoved: 2
+gitCommitMsg: 'fix(core): correct module paths in package.json to fix bundling issue'
+promptSummary: >-
+  Fix e2e test failures when using published version of `apply-multi-diff` by
+  correcting module paths in `relaycode-core`'s `package.json`.
+reasoning:
+  - >-
+    yo, what's up. It looks like you've got a classic module resolution
+    headache. Your tests pass when using local path mapping in `tsconfig.json`,
+    but fail when using the published package. This is a huge clue that
+    something's wrong with how the packages are built and linked.
+  - >-
+    The failing tests are all related to `standard-diff` and `search-replace`,
+    which come from your `apply-multi-diff` package and are bundled into
+    `relaycode-core`. This points to an issue with `relaycode-core`'s build
+    artifacts.
+  - >-
+    After checking your configs, I found the culprit in
+    `packages/relaycode-core/package.json`. You've got `"type": "module"` in
+    there, which tells `tsup` to output `.js` files for ESM builds. However,
+    your `package.json` is pointing to `.mjs` files for `module` and
+    `exports.import`. This mismatch is probably causing `bun test` to load a
+    broken or incorrect version of the module when it resolves through
+    `node_modules`, leading to those weird test failures.
+  - >-
+    The fix is to align `packages/relaycode-core/package.json` with the expected
+    `tsup` output by changing `.mjs` to `.js`. This will make sure everything
+    resolves correctly when consumed as a package.
+  - 'Here''s the patch for `packages/relaycode-core/package.json`:'
+  - >-
+    This should sort out the module resolution and get your tests passing again.
+    Let's ship it.
+operations:
+  - type: write
+    path: packages/relaycode-core/package.json
+    content: |-
+      --- packages/relaycode-core/package.json
+      +++ packages/relaycode-core/package.json
+      @@ -19,13 +19,13 @@
+         ],
+         "type": "module",
+         "main": "./dist/index.cjs",
+      -  "module": "./dist/index.mjs",
+      +  "module": "./dist/index.js",
+         "types": "./dist/index.d.ts",
+         "exports": {
+           ".": {
+             "types": "./dist/index.d.ts",
+      -      "import": "./dist/index.mjs",
+      +      "import": "./dist/index.js",
+             "require": "./dist/index.cjs"
+           }
+         },
+         "files": [
+    patchStrategy: new-unified
+snapshot:
+  packages/relaycode-core/package.json: |
+    {
+      "name": "relaycode-core",
+      "version": "0.1.0",
+      "description": "The shared engine behind RelayCode and Noca.pro – a zero-friction, AI-native patch engine that turns your clipboard into a surgical code-editing laser.",
+      "author": "Noca.pro",
+      "license": "MIT",
+      "homepage": "https://github.com/nocapro/relaycode-core",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/nocapro/relaycode-core.git"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "patch",
+        "diff",
+        "codemod",
+        "automation",
+        "typescript"
+      ],
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.mjs",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.mjs",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "prepublishOnly": "bun run build"
+      },
+      "dependencies": {
+      "apply-multi-diff": "^0.1.0",
+        // "apply-multi-diff": "workspace:*",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "tsup": "^8.2.3",
+        "typescript": "^5.8.3"
+      },
+      "peerDependencies": {
+        "typescript": "^5"
+      }
+    }
+approved: true

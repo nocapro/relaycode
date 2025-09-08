@@ -1,0 +1,62 @@
+uuid: d0d061ea-f19b-4654-bebb-d8e7b93a0280
+projectId: relaycode
+createdAt: '2025-09-03T03:16:45.689Z'
+linesAdded: 1
+linesRemoved: 0
+gitCommitMsg: 'fix(tsconfig): add noEmit to apply-multi-diff tsconfig'
+promptSummary: >-
+  Fix TypeScript error 'Option 'allowImportingTsExtensions' can only be used
+  when either 'noEmit' or 'emitDeclarationOnly' is set.'
+reasoning:
+  - >-
+    Right, that tsconfig error. `allowImportingTsExtensions` needs `noEmit` if
+    you're not just emitting declarations. The `apply-multi-diff` package uses
+    `tsup` for builds, so its `tsconfig` is just for type-checking. Setting
+    `noEmit` there fixes the error for IDEs without breaking the build.
+operations:
+  - type: write
+    path: packages/apply-multi-diff/tsconfig.json
+    content: |-
+      --- packages/apply-multi-diff/tsconfig.json
+      +++ packages/apply-multi-diff/tsconfig.json
+      @@ -15,6 +15,7 @@
+           "moduleResolution": "bundler",
+           "moduleDetection": "force",
+           "allowImportingTsExtensions": true,
+      +    "noEmit": true,
+           "strict": true,
+           "downlevelIteration": true,
+           "skipLibCheck": true,
+    patchStrategy: new-unified
+snapshot:
+  packages/apply-multi-diff/tsconfig.json: |
+    {
+      "include": [
+        "src"
+      ],
+      "exclude": [
+        "node_modules",
+        "dist",
+        "test",
+        "debug.ts"
+      ],
+      "compilerOptions": {
+        "lib": ["ESNext"],
+        "module": "esnext",
+        "target": "esnext",
+        "moduleResolution": "bundler",
+        "moduleDetection": "force",
+        "allowImportingTsExtensions": true,
+        "strict": true,
+        "downlevelIteration": true,
+        "skipLibCheck": true,
+        "jsx": "preserve",
+        "allowSyntheticDefaultImports": true,
+        "forceConsistentCasingInFileNames": true,
+        "allowJs": true,
+        "types": [
+          "bun-types" // add Bun global
+        ]
+      }
+    }
+approved: true

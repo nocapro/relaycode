@@ -1,0 +1,439 @@
+uuid: a1e10222-349f-4318-b2ef-374c431d1022
+projectId: relaycode
+createdAt: '2025-07-09T03:51:55.104Z'
+linesAdded: 144
+linesRemoved: 150
+gitCommitMsg: 'refactor: Consolidate transaction logic and remove executor'
+promptSummary: >-
+  make the codebase radically DRY without regression for 50% less code no
+  redundancy
+reasoning:
+  - >-
+    I've analyzed your codebase with the goal of making it "radically DRY" and
+    significantly reducing redundancy. While a 50% code reduction is ambitious
+    without changing functionality, I've identified key areas where we can
+    consolidate logic, eliminate a file, and remove inefficient patterns.
+  - 'Here''s my plan:'
+  - >-
+    1.  **Consolidate Transaction Logic**: The `src/core/executor.ts` file
+    contains functions (`applyOperations`, `createSnapshot`, `restoreSnapshot`)
+    that are exclusively used by `src/core/transaction.ts`. I will merge the
+    contents of `executor.ts` into `transaction.ts` and delete the former. This
+    places all transaction execution and state-change logic in a single,
+    authoritative file, reducing file overhead and making the conceptual model
+    cleaner.
+  - >-
+    2.  **Optimize State Processing**: In `src/core/state.ts`, the
+    `getRevertedTransactionUuid` function was inefficiently calling
+    `isRevertTransaction`, causing it to iterate over the same data twice. I've
+    removed this redundant check, which makes the logic DRYer and more
+    performant.
+  - >-
+    These changes make the codebase more streamlined and conceptually sound,
+    directly addressing your request for a less redundant and more "DRY"
+    architecture.
+  - '### 1. Merge `executor.ts` into `transaction.ts`'
+  - >-
+    First, I'll move all the logic for applying file operations from
+    `executor.ts` directly into `transaction.ts`.
+  - '### 2. Delete `executor.ts`'
+  - With its contents merged, `src/core/executor.ts` is no longer needed.
+  - '### 3. Streamline State Processing'
+  - >-
+    I'll refactor `getRevertedTransactionUuid` in `src/core/state.ts` to remove
+    its dependency on `isRevertTransaction`, thus avoiding a redundant
+    iteration.
+  - '### 4. Update `index.ts` Exports'
+  - >-
+    Finally, I'll update `src/index.ts` to export the merged functions from
+    their new location in `transaction.ts`.
+  - >-
+    These changes consolidate the codebase logically, remove a redundant file,
+    and fix an inefficiency, all of which contribute to a "radically DRY" and
+    more maintainable system.
+operations:
+  - type: write
+    path: src/core/transaction.ts
+    content: >-
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -1,8 +1,11 @@
+       import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation } from '../types';
+       import { logger, getErrorMessage } from '../utils/logger';
+       import { getErrorCount, executeShellCommand } from '../utils/shell';
+      -import { createSnapshot, restoreSnapshot, applyOperations } from
+      './executor';
+
+      +import { newUnifiedDiffStrategyService, multiSearchReplaceService,
+      unifiedDiffService } from 'diff-apply';
+
+      +import { deleteFile, readFileContent, removeEmptyParentDirectories,
+      renameFile, writeFileContent } from '../utils/fs';
+
+      +import path from 'path';
+       import chalk from 'chalk';
+      +
+       import { hasBeenProcessed, writePendingState, commitState, deletePendingState } from './state';
+       import { getConfirmation } from '../utils/prompt'
+       import { requestApprovalWithNotification, notifyFailure, notifySuccess, notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';
+      @@ -15,6 +18,124 @@
+           notifyOnStart?: boolean;
+           yes?: boolean;
+       };
+      +
+
+      +const patchStrategies = {
+
+      +  'new-unified': (p: { originalContent: string; diffContent: string; })
+      => {
+
+      +    const service =
+      newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);
+
+      +    return service.applyDiff(p);
+
+      +  },
+
+      +  'multi-search-replace': (p: { originalContent: string; diffContent:
+      string; }) => {
+
+      +    return
+      multiSearchReplaceService.multiSearchReplaceService.applyDiff(p);
+
+      +  },
+
+      +  'unified': (p: { originalContent: string; diffContent: string; }) => {
+
+      +    return
+      unifiedDiffService.unifiedDiffService.applyDiff(p.originalContent,
+      p.diffContent);
+
+      +  },
+
+      +};
+
+      +
+
+      +export const createSnapshot = async (filePaths: string[], cwd: string =
+      process.cwd()): Promise<FileSnapshot> => {
+
+      +  const snapshot: FileSnapshot = {};
+
+      +  await Promise.all(
+
+      +    filePaths.map(async (filePath) => {
+
+      +      snapshot[filePath] = await readFileContent(filePath, cwd);
+
+      +    })
+
+      +  );
+
+      +  return snapshot;
+
+      +};
+
+      +
+
+      +export const applyOperations = async (operations: FileOperation[], cwd:
+      string = process.cwd()): Promise<Map<string, string>> => {
+
+      +  const fileStates = new Map<string, string | null>();
+
+      +  const newContents = new Map<string, string>();
+
+      +
+
+      +  const getFileContent = async (filePath: string): Promise<string | null>
+      => {
+
+      +    if (fileStates.has(filePath)) {
+
+      +      return fileStates.get(filePath) ?? null;
+
+      +    }
+
+      +    const content = await readFileContent(filePath, cwd);
+
+      +    fileStates.set(filePath, content);
+
+      +    return content;
+
+      +  };
+
+      +
+
+      +  // Operations must be applied sequentially to ensure that if one fails,
+
+      +  // we can roll back from a known state.
+
+      +  for (const op of operations) {
+
+      +    if (op.type === 'delete') {
+
+      +      await deleteFile(op.path, cwd);
+
+      +      fileStates.set(op.path, null);
+
+      +      continue;
+
+      +    }
+
+      +    if (op.type === 'rename') {
+
+      +      const content = await getFileContent(op.from);
+
+      +      await renameFile(op.from, op.to, cwd);
+
+      +      fileStates.set(op.from, null);
+
+      +      if (content !== null) {
+
+      +        fileStates.set(op.to, content);
+
+      +      }
+
+      +      // Propagate the change to newContents map if the source file was
+      modified in this transaction
+
+      +      if (newContents.has(op.from)) {
+
+      +        newContents.set(op.to, newContents.get(op.from)!);
+
+      +        newContents.delete(op.from);
+
+      +      }
+
+      +      continue;
+
+      +    }
+
+      +    
+
+      +    let finalContent: string;
+
+      +    const currentContent = await getFileContent(op.path);
+
+      +
+
+      +    if (op.patchStrategy === 'replace') {
+
+      +      finalContent = op.content;
+
+      +    } else {
+
+      +      if (currentContent === null && op.patchStrategy ===
+      'multi-search-replace') {
+
+      +        throw new Error(`Cannot use 'multi-search-replace' on a new file:
+      ${op.path}`);
+
+      +      }
+
+      +
+
+      +      try {
+
+      +        const diffParams = {
+
+      +          originalContent: currentContent ?? '',
+
+      +          diffContent: op.content,
+
+      +        };
+
+      +        
+
+      +        const patcher = patchStrategies[op.patchStrategy as keyof typeof
+      patchStrategies];
+
+      +        if (!patcher) {
+
+      +          throw new Error(`Unknown patch strategy:
+      '${op.patchStrategy}'`);
+
+      +        }
+
+      +        
+
+      +        const result = await patcher(diffParams);
+
+      +        if (result.success) {
+
+      +          finalContent = result.content;
+
+      +        } else {
+
+      +          throw new Error(`Patch failed for ${op.path}:
+      ${result.error}`);
+
+      +        }
+
+      +      } catch (e) {
+
+      +        throw new Error(`Error applying patch for ${op.path} with
+      strategy '${op.patchStrategy}': ${getErrorMessage(e)}`);
+
+      +      }
+
+      +    }
+
+      +    
+
+      +    await writeFileContent(op.path, finalContent, cwd);
+
+      +    fileStates.set(op.path, finalContent);
+
+      +    newContents.set(op.path, finalContent);
+
+      +  }
+
+      +  return newContents;
+
+      +};
+
+      +
+
+      +export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string
+      = process.cwd()): Promise<void> => {
+
+      +  const projectRoot = path.resolve(cwd);
+
+      +  const entries = Object.entries(snapshot);
+
+      +  const directoriesToClean = new Set<string>();
+
+      +  const restoreErrors: { path: string, error: unknown }[] = [];
+
+      +
+
+      +  // Attempt to restore all files in parallel, collecting errors.
+
+      +  await Promise.all(entries.map(async ([filePath, content]) => {
+
+      +      const fullPath = path.resolve(cwd, filePath);
+
+      +      try {
+
+      +        if (content === null) {
+
+      +          // If the file didn't exist in the snapshot, make sure it
+      doesn't exist after restore.
+
+      +          await deleteFile(filePath, cwd);
+
+      +          directoriesToClean.add(path.dirname(fullPath));
+
+      +        } else {
+
+      +          // Create directory structure if needed and write the original
+      content back.
+
+      +          await writeFileContent(filePath, content, cwd);
+
+      +        }
+
+      +      } catch (error) {
+
+      +        restoreErrors.push({ path: filePath, error });
+
+      +      }
+
+      +  }));
+
+      +  
+
+      +  // After all files are processed, clean up empty directories
+
+      +  // Sort directories by depth (deepest first) to clean up nested empty
+      dirs properly
+
+      +  const sortedDirs = Array.from(directoriesToClean)
+
+      +    .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+
+      +  
+
+      +  // Process each directory that had files deleted
+
+      +  for (const dir of sortedDirs) {
+
+      +    await removeEmptyParentDirectories(dir, projectRoot);
+
+      +  }
+
+      +
+
+      +  if (restoreErrors.length > 0) {
+
+      +    const errorSummary = restoreErrors
+
+      +      .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)
+
+      +      .join('\n');
+
+      +    throw new Error(`Rollback failed for ${restoreErrors.length}
+      file(s):\n${errorSummary}`);
+
+      +  }
+
+      +};
+       
+       // Space-optimized LCS length calculation to determine line changes accurately.
+       const calculateLcsLength = (a: string[], b: string[]): number => {
+    patchStrategy: new-unified
+  - type: delete
+    path: src/core/executor.ts
+  - type: write
+    path: src/core/state.ts
+    content: |-
+      --- src/core/state.ts
+      +++ src/core/state.ts
+      @@ -8,9 +8,6 @@
+       }
+       
+       export const getRevertedTransactionUuid = (state: StateFile): string | null => {
+      -    if (!isRevertTransaction(state)) {
+      -        return null;
+      -    }
+           for (const r of state.reasoning) {
+               const match = r.match(/^Reverting transaction ([\w-]+)\./);
+               if (match && match[1]) {
+    patchStrategy: new-unified
+  - type: write
+    path: src/index.ts
+    content: >-
+      --- src/index.ts
+
+      +++ src/index.ts
+
+      @@ -2,8 +2,6 @@
+       // Core logic
+       export { createClipboardWatcher } from './core/clipboard';
+       export { findConfig, createConfig, getProjectId, ensureStateDirExists, loadConfigOrExit, findConfigPath, getStateFilePath, getUndoneStateFilePath } from './core/config';
+      -export { applyOperations, createSnapshot, restoreSnapshot } from
+      './core/executor';
+       export { parseLLMResponse } from './core/parser';
+       export {
+           commitState,
+      @@ -14,7 +12,7 @@
+           readStateFile,
+           readAllStateFiles,
+           writePendingState
+       } from './core/state';
+      -export { processPatch } from './core/transaction';
+
+      +export { processPatch, applyOperations, createSnapshot, restoreSnapshot }
+      from './core/transaction';
+       
+       // Commands
+       export { initCommand } from './commands/init';
+    patchStrategy: new-unified
+snapshot:
+  src/core/state.ts: "import { promises as fs } from 'fs';\r\nimport yaml from 'js-yaml';\r\nimport { StateFile, StateFileSchema } from '../types';\r\nimport { COMMITTED_STATE_FILE_SUFFIX, PENDING_STATE_FILE_SUFFIX } from '../utils/constants';\r\nimport { logger, isEnoentError } from '../utils/logger';\r\nimport { fileExists, safeRename } from '../utils/fs';\r\n\rimport { ensureStateDirExists, getStateFilePath, getTransactionsDirectory, getUndoneStateFilePath } from './config';\r\n\r\nexport const isRevertTransaction = (state: StateFile): boolean => {\r\n    return state.reasoning.some(r => r.startsWith('Reverting transaction'));\r\n}\r\n\r\nexport const getRevertedTransactionUuid = (state: StateFile): string | null => {\r\n    if (!isRevertTransaction(state)) {\r\n        return null;\r\n    }\r\n    for (const r of state.reasoning) {\r\n        const match = r.match(/^Reverting transaction ([\\w-]+)\\./);\r\n        if (match && match[1]) {\r\n            return match[1];\r\n        }\r\n    }\r\n    return null;\r\n}\r\n\r\nconst getUuidFromFileName = (fileName: string): string => {\r\n  return fileName.replace(COMMITTED_STATE_FILE_SUFFIX, '');\r\n};\r\n\r\nconst isUUID = (str: string): boolean => {\r\n  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);\r\n};\r\n\r\n// Helper to get all committed transaction file names.\r\nconst getCommittedTransactionFiles = async (cwd: string): Promise<{ stateDir: string; files: string[] } | null> => {\r\n    const transactionsDir = getTransactionsDirectory(cwd);\r\n    try {\r\n        await fs.access(transactionsDir);\r\n    } catch (e) {\r\n        return null;\r\n    }\r\n    const files = await fs.readdir(transactionsDir);\r\n    const transactionFiles = files.filter(f => f.endsWith(COMMITTED_STATE_FILE_SUFFIX) && !f.endsWith(PENDING_STATE_FILE_SUFFIX));\r\n    return { stateDir: transactionsDir, files: transactionFiles };\r\n};\r\n\r\nconst sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt: string | Date }) => {\r\n    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();\r\n};\r\n\r\nexport const hasBeenProcessed = async (cwd: string, uuid: string): Promise<boolean> => {\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  const undonePath = getUndoneStateFilePath(cwd, uuid);\r\n  // Check if a transaction has been committed or undone.\r\n  // This allows re-processing a transaction that failed and left an orphaned .pending.yml\r\n  // because we don't check for `.pending.yml` files.\r\n  return (await fileExists(committedPath)) || (await fileExists(undonePath));\r\n};\r\n\r\nexport const writePendingState = async (cwd: string, state: StateFile): Promise<void> => {\r\n  const validatedState = StateFileSchema.parse(state);\r\n  const yamlString = yaml.dump(validatedState);\r\n  const filePath = getStateFilePath(cwd, state.uuid, true);\r\n  \rawait ensureStateDirExists(cwd);\n  await fs.writeFile(filePath, yamlString, 'utf-8');\r\n};\r\n\r\nexport const commitState = async (cwd: string, uuid: string): Promise<void> => {\r\n  const pendingPath = getStateFilePath(cwd, uuid, true);\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  await safeRename(pendingPath, committedPath);\r\n};\r\n\r\nexport const deletePendingState = async (cwd: string, uuid: string): Promise<void> => {\r\n  const pendingPath = getStateFilePath(cwd, uuid, true);\r\n  try {\r\n    await fs.unlink(pendingPath);\r\n  } catch (error) {\r\n    if (isEnoentError(error)) {\r\n      // Already gone, that's fine.\r\n      return;\r\n    }\r\n    throw error;\r\n  }\r\n};\r\n\r\nexport const readStateFile = async (cwd: string, uuid: string): Promise<StateFile | null> => {\r\n  const committedPath = getStateFilePath(cwd, uuid, false);\r\n  try {\r\n    const fileContent = await fs.readFile(committedPath, 'utf-8');\r\n    const yamlContent = yaml.load(fileContent);\r\n    const parsed = StateFileSchema.safeParse(yamlContent);\r\n    if (parsed.success) {\r\n      return parsed.data;\r\n    }\r\n    logger.debug(`Could not parse state file ${committedPath}: ${parsed.error.message}`);\r\n    return null;\r\n  } catch (error) {\r\n    // Can be file not found or YAML parsing error.\r\n    // In any case, we can't get the state file.\r\n    return null;\r\n  }\r\n};\r\n\r\ninterface ReadStateFilesOptions {\r\n    skipReverts?: boolean;\r\n}\r\n\r\nexport const readAllStateFiles = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile[] | null> => {\r\n    const transactionFileInfo = await getCommittedTransactionFiles(cwd);\r\n    if (!transactionFileInfo) {\r\n        return null;\r\n    }\r\n    const { files: transactionFiles } = transactionFileInfo;\r\n    \r\n    const promises = transactionFiles.map(async (file) => {\r\n        const stateFile = await readStateFile(cwd, getUuidFromFileName(file));\r\n        if (!stateFile) {\r\n            logger.warn(`Could not read or parse state file ${file}. Skipping.`);\r\n        }\r\n        return stateFile;\r\n    });\r\n\r\n    const results = await Promise.all(promises);\r\n    let validResults = results.filter((sf): sf is StateFile => !!sf);\r\n\r\n    if (options.skipReverts) {\r\n        const revertedUuids = new Set<string>();\r\n        validResults.forEach(sf => {\r\n            const revertedUuid = getRevertedTransactionUuid(sf);\r\n            if (revertedUuid) {\r\n                revertedUuids.add(revertedUuid);\r\n            }\r\n        });\r\n\r\n        validResults = validResults.filter(sf => \r\n            !isRevertTransaction(sf) && !revertedUuids.has(sf.uuid)\r\n        );\r\n    }\r\n\r\n    // Sort transactions by date, most recent first\r\n    validResults.sort(sortByDateDesc);\r\n\r\n    return validResults;\r\n}\r\n\r\nexport const findLatestStateFile = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {\r\n    // This is a case where using readAllStateFiles is simpler and the performance\r\n    // difference is negligible for finding just the latest.\r\n    // The optimization in the original `findLatestStateFile` is complex and this simplifies logic.\r\n    const allFiles = await readAllStateFiles(cwd, options);\r\n    return allFiles?.[0] ?? null;\r\n};\r\n\r\nexport const findStateFileByIdentifier = async (cwd: string, identifier: string, options: ReadStateFilesOptions = {}): Promise<StateFile | null> => {\r\n    if (isUUID(identifier)) {\r\n        // When fetching by UUID, we always return it, regardless of whether it's a revert or not.\r\n        // The user is being explicit.\r\n        return readStateFile(cwd, identifier);\r\n    }\r\n    \r\n    if (/^-?\\d+$/.test(identifier)) {\r\n        const index = Math.abs(parseInt(identifier, 10));\r\n        if (isNaN(index) || index <= 0) {\r\n            return null;\r\n        }\r\n\r\n        const transactions = await readAllStateFiles(cwd, options);\r\n        if (transactions && transactions.length >= index) {\r\n            return transactions[index - 1] ?? null;\r\n        }\r\n        return null;\r\n    }\r\n\r\n    return null;\r\n};"
+  src/core/executor.ts: "import path from 'path';\r\nimport { FileOperation, FileSnapshot } from '../types';\r\nimport { newUnifiedDiffStrategyService, multiSearchReplaceService, unifiedDiffService } from 'diff-apply';\r\nimport { getErrorMessage } from '../utils/logger';\r\nimport { deleteFile, readFileContent, removeEmptyParentDirectories, renameFile, writeFileContent } from '../utils/fs';\r\n\r\nconst patchStrategies = {\r\n  'new-unified': (p: { originalContent: string; diffContent: string; }) => {\r\n    const service = newUnifiedDiffStrategyService.newUnifiedDiffStrategyService.create(0.95);\r\n    return service.applyDiff(p);\r\n  },\r\n  'multi-search-replace': (p: { originalContent: string; diffContent: string; }) => {\r\n    return multiSearchReplaceService.multiSearchReplaceService.applyDiff(p);\r\n  },\r\n  'unified': (p: { originalContent: string; diffContent: string; }) => {\r\n    return unifiedDiffService.unifiedDiffService.applyDiff(p.originalContent, p.diffContent);\r\n  },\r\n};\r\n\r\nexport const createSnapshot = async (filePaths: string[], cwd: string = process.cwd()): Promise<FileSnapshot> => {\r\n  const snapshot: FileSnapshot = {};\r\n  await Promise.all(\r\n    filePaths.map(async (filePath) => {\r\n      snapshot[filePath] = await readFileContent(filePath, cwd);\r\n    })\r\n  );\r\n  return snapshot;\r\n};\r\n\r\nexport const applyOperations = async (operations: FileOperation[], cwd: string = process.cwd()): Promise<Map<string, string>> => {\r\n  const fileStates = new Map<string, string | null>();\r\n  const newContents = new Map<string, string>();\r\n\r\n  const getFileContent = async (filePath: string): Promise<string | null> => {\r\n    if (fileStates.has(filePath)) {\r\n      return fileStates.get(filePath) ?? null;\r\n    }\r\n    const content = await readFileContent(filePath, cwd);\r\n    fileStates.set(filePath, content);\r\n    return content;\r\n  };\r\n\r\n  // Operations must be applied sequentially to ensure that if one fails,\r\n  // we can roll back from a known state.\r\n  for (const op of operations) {\r\n    if (op.type === 'delete') {\r\n      await deleteFile(op.path, cwd);\r\n      fileStates.set(op.path, null);\r\n      continue;\r\n    }\r\n    if (op.type === 'rename') {\r\n      const content = await getFileContent(op.from);\r\n      await renameFile(op.from, op.to, cwd);\r\n      fileStates.set(op.from, null);\r\n      if (content !== null) {\r\n        fileStates.set(op.to, content);\r\n      }\r\n      // Propagate the change to newContents map if the source file was modified in this transaction\r\n      if (newContents.has(op.from)) {\r\n        newContents.set(op.to, newContents.get(op.from)!);\r\n        newContents.delete(op.from);\r\n      }\r\n      continue;\r\n    }\r\n    \r\n    let finalContent: string;\r\n    const currentContent = await getFileContent(op.path);\r\n\r\n    if (op.patchStrategy === 'replace') {\r\n      finalContent = op.content;\r\n    } else {\r\n      if (currentContent === null && op.patchStrategy === 'multi-search-replace') {\r\n        throw new Error(`Cannot use 'multi-search-replace' on a new file: ${op.path}`);\r\n      }\r\n\r\n      try {\r\n        const diffParams = {\r\n          originalContent: currentContent ?? '',\r\n          diffContent: op.content,\r\n        };\r\n        \r\n        const patcher = patchStrategies[op.patchStrategy as keyof typeof patchStrategies];\r\n        if (!patcher) {\r\n          throw new Error(`Unknown patch strategy: '${op.patchStrategy}'`);\r\n        }\r\n        \r\n        const result = await patcher(diffParams);\r\n        if (result.success) {\r\n          finalContent = result.content;\r\n        } else {\r\n          throw new Error(`Patch failed for ${op.path}: ${result.error}`);\r\n        }\r\n      } catch (e) {\r\n        throw new Error(`Error applying patch for ${op.path} with strategy '${op.patchStrategy}': ${getErrorMessage(e)}`);\r\n      }\r\n    }\r\n    \r\n    await writeFileContent(op.path, finalContent, cwd);\r\n    fileStates.set(op.path, finalContent);\r\n    newContents.set(op.path, finalContent);\r\n  }\r\n  return newContents;\r\n};\r\n\r\nexport const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string = process.cwd()): Promise<void> => {\r\n  const projectRoot = path.resolve(cwd);\r\n  const entries = Object.entries(snapshot);\r\n  const directoriesToClean = new Set<string>();\r\n  const restoreErrors: { path: string, error: unknown }[] = [];\r\n\r\n  // Attempt to restore all files in parallel, collecting errors.\r\n  await Promise.all(entries.map(async ([filePath, content]) => {\r\n      const fullPath = path.resolve(cwd, filePath);\r\n      try {\r\n        if (content === null) {\r\n          // If the file didn't exist in the snapshot, make sure it doesn't exist after restore.\r\n          await deleteFile(filePath, cwd);\r\n          directoriesToClean.add(path.dirname(fullPath));\r\n        } else {\r\n          // Create directory structure if needed and write the original content back.\r\n          await writeFileContent(filePath, content, cwd);\r\n        }\r\n      } catch (error) {\r\n        restoreErrors.push({ path: filePath, error });\r\n      }\r\n  }));\r\n  \r\n  // After all files are processed, clean up empty directories\r\n  // Sort directories by depth (deepest first) to clean up nested empty dirs properly\r\n  const sortedDirs = Array.from(directoriesToClean)\r\n    .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);\r\n  \r\n  // Process each directory that had files deleted\r\n  for (const dir of sortedDirs) {\r\n    await removeEmptyParentDirectories(dir, projectRoot);\r\n  }\r\n\r\n  if (restoreErrors.length > 0) {\r\n    const errorSummary = restoreErrors\r\n      .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)\r\n      .join('\\n');\r\n    throw new Error(`Rollback failed for ${restoreErrors.length} file(s):\\n${errorSummary}`);\r\n  }\r\n};"
+  src/core/transaction.ts: "import { Config, ParsedLLMResponse, StateFile, FileSnapshot, FileOperation } from '../types';\r\nimport { logger, getErrorMessage } from '../utils/logger';\r\nimport { getErrorCount, executeShellCommand } from '../utils/shell';\r\nimport { createSnapshot, restoreSnapshot, applyOperations } from './executor';\r\nimport chalk from 'chalk';\r\nimport { hasBeenProcessed, writePendingState, commitState, deletePendingState } from './state';\r\nimport { getConfirmation } from '../utils/prompt'\r\nimport { requestApprovalWithNotification, notifyFailure, notifySuccess, notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';\r\n\r\ntype Prompter = (question: string) => Promise<boolean>;\r\n\r\ntype ProcessPatchOptions = {\r\n    prompter?: Prompter;\r\n    cwd?: string;\r\n    notifyOnStart?: boolean;\r\n    yes?: boolean;\r\n};\r\n\r\n// Space-optimized LCS length calculation to determine line changes accurately.\r\nconst calculateLcsLength = (a: string[], b: string[]): number => {\r\n    let s1 = a;\r\n    let s2 = b;\r\n    // s2 should be the shorter string to optimize space for the DP table.\r\n    if (s1.length < s2.length) {\r\n        [s1, s2] = [s2, s1];\r\n    }\r\n    const m = s1.length;\r\n    const n = s2.length;\r\n    \r\n    const dp = Array(n + 1).fill(0);\r\n\r\n    for (let i = 1; i <= m; i++) {\r\n        let prev = 0; // stores dp[i-1][j-1]\r\n        for (let j = 1; j <= n; j++) {\r\n            const temp = dp[j]; // stores dp[i-1][j]\r\n            if (s1[i - 1] === s2[j - 1]) {\r\n                dp[j] = prev + 1;\r\n            } else {\r\n                dp[j] = Math.max(dp[j], dp[j - 1]);\r\n            }\r\n            prev = temp;\r\n        }\r\n    }\r\n    return dp[n];\r\n};\r\n\r\nconst calculateLineChanges = (\r\n    op: FileOperation,\r\n    snapshot: FileSnapshot,\r\n    newContents: Map<string, string>\r\n): { added: number; removed: number } => {\r\n    if (op.type === 'rename') {\r\n        return { added: 0, removed: 0 };\r\n    }\r\n    const oldContent = snapshot[op.path] ?? null;\r\n\r\n    if (op.type === 'delete') {\r\n        const oldLines = oldContent ? oldContent.split('\\n') : [];\r\n        return { added: 0, removed: oldLines.length };\r\n    }\r\n    \r\n    const newContent = newContents.get(op.path) ?? null;\r\n\r\n    if (oldContent === newContent) return { added: 0, removed: 0 };\r\n\r\n    const oldLines = oldContent?.split('\\n') ?? [];\r\n    const newLines = newContent?.split('\\n') ?? [];\r\n\r\n    if (oldContent === null || oldContent === '') return { added: newLines.length, removed: 0 };\r\n    if (newContent === null || newContent === '') return { added: 0, removed: oldLines.length };\r\n    \r\n    // Use LCS to get a more accurate line diff count.\r\n    const lcsLength = calculateLcsLength(oldLines, newLines);\r\n    return {\r\n        added: newLines.length - lcsLength,\r\n        removed: oldLines.length - lcsLength,\r\n    };\r\n};\r\n\r\nconst logCompletionSummary = (\r\n    uuid: string,\r\n    startTime: number,\r\n    operations: FileOperation[]\r\n) => {\r\n    const duration = performance.now() - startTime;\r\n\r\n    logger.log(chalk.bold('\\nSummary:'));\r\n    logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);\r\n    logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);\r\n    logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);\r\n};\r\n\r\nconst rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnapshot, reason: string, enableNotifications: boolean = true, isError: boolean = true): Promise<void> => {\r\n    if (isError) {\r\n        logger.warn(`Rolling back changes: ${reason}`);\r\n    }\r\n\r\n    let rollbackSuccessful = false;\r\n    try {\r\n        await restoreSnapshot(snapshot, cwd);\r\n        logger.success('  - Files restored to original state.');\r\n        rollbackSuccessful = true;\r\n    } catch (error) {\r\n        logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);\r\n        notifyRollbackFailure(uuid, enableNotifications);\r\n        // Do not rethrow; we're already in a final error handling state.\r\n    } finally {\r\n        try {\r\n            await deletePendingState(cwd, uuid);\r\n            logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);\r\n            if (isError && rollbackSuccessful) {\r\n                notifyFailure(uuid, enableNotifications);\r\n            }\r\n        } catch (cleanupError) {\r\n            logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);\r\n        }\r\n    }\r\n};\r\n\r\ntype ApprovalOptions = {\r\n    config: Config;\r\n    cwd: string;\r\n    prompter: Prompter;\r\n    skipConfirmation: boolean;\r\n}\r\n\r\nconst handleApproval = async ({ config, cwd, prompter, skipConfirmation }: ApprovalOptions): Promise<boolean> => {\r\n    const finalErrorCount = await getErrorCount(config.patch.linter, cwd);\r\n    logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);\r\n    \r\n    const getManualApproval = async (reason: string): Promise<boolean> => {\r\n        logger.warn(reason);\r\n        \r\n        const notificationResult = await requestApprovalWithNotification(config.projectId, config.core.enableNotifications);\r\n\r\n        if (notificationResult === 'approved') {\r\n            logger.info('Approved via notification.');\r\n            return true;\r\n        }\r\n        if (notificationResult === 'rejected') {\r\n            logger.info('Rejected via notification.');\r\n            return false;\r\n        }\r\n\r\n        if (notificationResult === 'timeout') {\r\n            logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');\r\n        }\r\n\r\n        return await prompter('Changes applied. Do you want to approve and commit them? (y/N)');\r\n    };\r\n\r\n    if (skipConfirmation) {\r\n        logger.success('  - Changes approved via -y/--yes flag.');\r\n        return true;\r\n    }\r\n    if (config.patch.approvalMode === 'manual') {\r\n        return await getManualApproval('Manual approval required because \"approvalMode\" is set to \"manual\".');\r\n    }\r\n    // auto mode\r\n    const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;\r\n    if (canAutoApprove) {\r\n        logger.success('  - Changes automatically approved based on your configuration.');\r\n        return true;\r\n    }\r\n    return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);\r\n};\r\n\r\nexport const processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {\r\n    const cwd = options?.cwd || process.cwd();\r\n    const prompter = options?.prompter || getConfirmation;\r\n    const skipConfirmation = options?.yes === true;\r\n    const notifyOnStart = options?.notifyOnStart ?? false;\r\n    const { control, operations, reasoning } = parsedResponse;\r\n    const { uuid, projectId } = control;\r\n    const startTime = performance.now();\r\n\r\n    // 1. Validation\r\n    if (projectId !== config.projectId) {\r\n        logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);\r\n        return;\r\n    }\r\n    if (await hasBeenProcessed(cwd, uuid)) {\r\n        logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);\r\n        return;\r\n    }\r\n\r\n    const { minFileChanges, maxFileChanges } = config.patch;\r\n    const operationCount = operations.length;\r\n    if (minFileChanges > 0 && operationCount < minFileChanges) {\r\n        logger.warn(`Skipping patch: Not enough file changes (expected at least ${minFileChanges}, got ${operationCount}).`);\r\n        return;\r\n    }\r\n    if (maxFileChanges && operationCount > maxFileChanges) {\r\n        logger.warn(`Skipping patch: Too many file changes (expected at most ${maxFileChanges}, got ${operationCount}).`);\r\n        return;\r\n    }\r\n\r\n    // Notify if coming from watch mode, now that we know it's a new patch.\r\n    if (notifyOnStart) {\r\n        notifyPatchDetected(config.projectId, config.core.enableNotifications);\r\n        logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);\r\n    }\r\n\r\n    // 2. Pre-flight checks\r\n    if (config.patch.preCommand) {\r\n        logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);\r\n        const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);\r\n        if (exitCode !== 0) {\r\n            logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);\r\n            if (stderr) logger.error(`Stderr: ${stderr}`);\r\n            return;\r\n        }\r\n    }\r\n\r\n    logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);\r\n    logger.log(`${chalk.bold('Reasoning:')}\\n  ${reasoning.join('\\n  ')}`);\r\n\r\n    const affectedFilePaths = operations.reduce<string[]>((acc, op) => {\r\n        if (op.type === 'rename') {\r\n            acc.push(op.from, op.to);\r\n        } else {\r\n            acc.push(op.path);\r\n        }\r\n        return acc;\r\n    }, []);\r\n    const snapshot = await createSnapshot(affectedFilePaths, cwd);\r\n    \r\n    const stateFile: StateFile = {\r\n        uuid,\r\n        projectId,\r\n        createdAt: new Date().toISOString(),\r\n        gitCommitMsg: control.gitCommitMsg,\r\n        promptSummary: control.promptSummary,\r\n        reasoning,\r\n        operations,\r\n        snapshot,\r\n        approved: false,\r\n    };\r\n\r\n    try {\r\n        await writePendingState(cwd, stateFile);\r\n        logger.success('  - Staged changes to .pending.yml file.');\r\n\r\n        // Apply changes\r\n        logger.log('  - Applying file operations...');\r\n        const newContents = await applyOperations(operations, cwd);\r\n        logger.success('  - File operations complete.');\r\n\r\n        const opStats = operations.map(op => {\r\n            const stats = calculateLineChanges(op, snapshot, newContents);\r\n            if (op.type === 'write') {\r\n                logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);\r\n            } else if (op.type === 'delete') {\r\n                logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);\r\n            } else if (op.type === 'rename') {\r\n                logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);\r\n            }\r\n            return stats;\r\n        });\r\n\r\n        // Run post-command\r\n        if (config.patch.postCommand) {\r\n            logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);\r\n            const postResult = await executeShellCommand(config.patch.postCommand, cwd);\r\n            if (postResult.exitCode !== 0) {\r\n                logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);\r\n                if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);\r\n                throw new Error('Post-command failed, forcing rollback.');\r\n            }\r\n        }\r\n\r\n        // Log summary before asking for approval\r\n        const checksDuration = performance.now() - startTime;\r\n        const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);\r\n        const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);\r\n\r\n        logger.log(chalk.bold('\\nPre-flight summary:'));\r\n        logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)}`);\r\n        logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);\r\n\r\n        const isApproved = await handleApproval({ config, cwd, prompter, skipConfirmation });\r\n\r\n        if (isApproved) {\r\n            stateFile.approved = true;\r\n            (stateFile as any).linesAdded = totalAdded;\r\n            (stateFile as any).linesRemoved = totalRemoved;\r\n            await writePendingState(cwd, stateFile); // Update state with approved: true before commit\r\n            await commitState(cwd, uuid);\r\n            logCompletionSummary(uuid, startTime, operations);\r\n            notifySuccess(uuid, config.core.enableNotifications);\r\n            await handleAutoGitBranch(config, stateFile, cwd);\r\n        } else {\r\n            logger.warn('Operation cancelled by user. Rolling back changes...');\r\n            await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);\r\n        }\r\n    } catch (error) {\r\n        const reason = getErrorMessage(error);\r\n        await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);\r\n    }\r\n};\r\n\r\nconst handleAutoGitBranch = async (config: Config, stateFile: StateFile, cwd: string): Promise<void> => {\r\n    if (!config.git.autoGitBranch) return;\r\n\r\n    let branchNameSegment = '';\r\n    if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {\r\n        branchNameSegment = stateFile.gitCommitMsg;\r\n    } else {\r\n        branchNameSegment = stateFile.uuid;\r\n    }\r\n\r\n    const sanitizedSegment = branchNameSegment\r\n        .trim()\r\n        .toLowerCase()\r\n        .replace(/[^\\w\\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars\r\n        .replace(/[\\s_]+/g, '-') // Replace spaces and underscores with a single hyphen\r\n        .replace(/-+/g, '-') // Collapse consecutive hyphens\r\n        .replace(/^-|-$/g, '') // Trim leading/trailing hyphens\r\n        .slice(0, 70); // Truncate\r\n\r\n    if (sanitizedSegment) {\r\n        const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;\r\n        logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);\r\n        const command = `git checkout -b \"${branchName}\"`;\r\n        const result = await executeShellCommand(command, cwd);\r\n        if (result.exitCode === 0) {\r\n            logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);\r\n        } else {\r\n            // Exit code 128 from `git checkout -b` often means the branch already exists.\r\n            if (result.exitCode === 128 && result.stderr.includes('already exists')) {\r\n                logger.warn(`Could not create branch '${chalk.magenta(branchName)}' because it already exists.`);\r\n            } else {\r\n                logger.warn(`Could not create git branch '${chalk.magenta(branchName)}'.`);\r\n            }\r\n            logger.debug(`'${command}' failed with: ${result.stderr}`);\r\n        }\r\n    } else {\r\n        logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');\r\n    }\r\n};\r\n"
+  src/index.ts: "// Core logic\r\nexport { createClipboardWatcher } from './core/clipboard';\r\nexport { findConfig, createConfig, getProjectId, ensureStateDirExists, loadConfigOrExit, findConfigPath, getStateFilePath, getUndoneStateFilePath } from './core/config';\r\nexport { applyOperations, createSnapshot, restoreSnapshot } from './core/executor';\r\nexport { parseLLMResponse } from './core/parser';\r\nexport {\r\n    commitState,\r\n    deletePendingState,\r\n    hasBeenProcessed,\r\n    findLatestStateFile,\r\n    findStateFileByIdentifier,\r\n    readStateFile,\r\n    readAllStateFiles,\r\n    writePendingState\n} from './core/state';\r\nexport { processPatch } from './core/transaction';\r\n\r\n// Commands\r\nexport { initCommand } from './commands/init';\r\nexport { watchCommand } from './commands/watch';\r\nexport { logCommand } from './commands/log';\r\nexport { revertCommand } from './commands/revert';\r\nexport { applyCommand } from './commands/apply';\r\nexport { gitCommitCommand } from './commands/git-commit';\r\n\r\n// Types\r\nexport * from './types';\r\n\r\n// Utils\r\nexport { executeShellCommand, getErrorCount } from './utils/shell';\r\nexport { getTypeScriptErrorCount } from './utils/typescript';\r\nexport {\r\n    deleteFile,\r\n    readFileContent,\r\n    writeFileContent,\r\n    fileExists,\r\n    renameFile,\r\n    safeRename,\r\n} from './utils/fs';\r\nexport { logger, getErrorMessage, isEnoentError } from './utils/logger';\r\nexport { getConfirmation } from './utils/prompt';\r\nexport { formatTransactionDetails } from './utils/formatters';\r\nexport {\r\n    createNotifier,\r\n    notifyPatchDetected,\r\n    notifyApprovalRequired,\r\n    requestApprovalWithNotification,\r\n    notifySuccess,\r\n    notifyFailure,\r\n    notifyRollbackFailure,\r\n} from './utils/notifier';\r\nexport { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';"
+approved: true

@@ -1,0 +1,410 @@
+uuid: a3846663-7e44-4860-9363-228795905d23
+projectId: relaycode
+createdAt: '2025-09-04T02:34:10.871Z'
+linesAdded: 239
+linesRemoved: 14
+gitCommitMsg: 'feat(cli): enhance git-commit to merge multiple transactions'
+promptSummary: >-
+  The user wants to enhance the `relay git commit` command. Instead of
+  committing only the latest transaction, it should find all transactions
+  created since the last git commit, merge their commit messages into a single
+  message, and then create a git commit with that merged message. This should
+  also include adding new test cases to cover this functionality.
+reasoning:
+  - yo, what's up. i'm anton. let's get this done.
+  - >-
+    i've updated the `git-commit` command to be way more useful. instead of just
+    committing the last transaction, it now finds all transactions since your
+    last git commit, bundles up their commit messages, and lets you commit them
+    all in one go. this is sick for when you're on a roll and stack up a few
+    changes from your AI pair.
+  - 'here''s the breakdown:'
+  - >-
+    1.  **Modify `src/commands/git-commit.ts`**: Ripped out the old logic and
+    replaced it. It now uses `git log` to find the last commit's timestamp,
+    grabs all newer `relay` transactions, and merges their commit messages.
+    It'll show you the combined message before it does anything.
+  - >-
+    2.  **New Test File `test/e2e/git-commit.test.ts`**: Added a new end-to-end
+    test suite for this. It spins up a temporary git repo and tests all the new
+    scenarios: merging multiple commits, handling a fresh repo, making sure it
+    only grabs new transactions, and gracefully exiting when there's nothing to
+    do.
+  - let's get to the code.
+  - First, I'll update the `git-commit` command logic.
+  - Next, here are the new tests to make sure this all works as expected.
+  - peace out.
+operations:
+  - type: write
+    path: src/commands/git-commit.ts
+    content: >-
+      import { readAllStateFiles } from '../core/state';
+
+      import { logger } from '../utils/logger';
+
+      import { executeShellCommand } from '../utils/shell';
+
+      import { createConfirmationHandler, Prompter } from '../utils/prompt';
+
+      import { formatTransactionDetails } from '../utils/formatters';
+
+      import chalk from 'chalk';
+
+
+      export const gitCommitCommand = async (options: { yes?: boolean } = {},
+      cwd: string = process.cwd(), prompter?: Prompter): Promise<void> => {
+          const getConfirmation = createConfirmationHandler(options, prompter);
+
+          logger.info('Looking for new transactions to commit...');
+
+          // 1. Check if it's a git repository
+          const gitCheck = await executeShellCommand('git rev-parse --is-inside-work-tree', cwd);
+          if (gitCheck.exitCode !== 0) {
+              logger.error('This does not appear to be a git repository. Aborting commit.');
+              return;
+          }
+
+          // 2. Get the timestamp of the last commit
+          const lastCommitTimeResult = await executeShellCommand('git log -1 --format=%ct', cwd);
+          const lastCommitTimestamp = lastCommitTimeResult.exitCode === 0 ? parseInt(lastCommitTimeResult.stdout, 10) * 1000 : 0;
+          
+          // 3. Find all transactions newer than the last commit
+          const allTransactions = await readAllStateFiles(cwd) ?? [];
+          const newTransactions = allTransactions
+              .filter(tx => new Date(tx.createdAt).getTime() > lastCommitTimestamp)
+              .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()); // Sort oldest to newest
+
+          if (newTransactions.length === 0) {
+              logger.info('No new transactions to commit since the last git commit.');
+              return;
+          }
+
+          const commitMessages = newTransactions.map(tx => tx.gitCommitMsg).filter((msg): msg is string => !!msg);
+
+          if (commitMessages.length === 0) {
+              logger.warn('No new transactions with git commit messages found.');
+              return;
+          }
+
+          // 4. Merge commit messages
+          const mergedCommitMessage = commitMessages.join('\n\n');
+
+          logger.log('Found new transactions to commit:');
+          newTransactions.forEach(tx => {
+              formatTransactionDetails(tx).forEach(line => logger.log(line));
+          });
+
+          const commitMessagePreview = mergedCommitMessage.split('\n').map(line => `    ${line}`).join('\n');
+          const confirmed = await getConfirmation(`\nDo you want to run 'git add .' and commit with the following message?\n\n${chalk.yellow(commitMessagePreview)}\n\n(y/N)`);
+
+          if (!confirmed) {
+              logger.info('Commit operation cancelled.');
+              return;
+          }
+
+          // 5. Execute git commands
+          logger.info(`Running ${chalk.magenta("'git add .'")}...`);
+          const addResult = await executeShellCommand('git add .', cwd);
+          if (addResult.exitCode !== 0) {
+              logger.error(`${chalk.magenta("'git add .'")} failed with exit code ${chalk.red(addResult.exitCode)}.`);
+              logger.error(addResult.stderr);
+              return;
+          }
+          logger.success(`${chalk.magenta("'git add .'")} completed successfully.`);
+
+          const commitCmd = `git commit -m "${mergedCommitMessage}"`;
+          logger.info(`Running commit command...`);
+          const commitResult = await executeShellCommand(commitCmd, cwd);
+
+          if (commitResult.exitCode !== 0) {
+              logger.error(`${chalk.magenta("'git commit'")} failed with exit code ${chalk.red(commitResult.exitCode)}.`);
+              logger.error(commitResult.stderr);
+              if (commitResult.stdout) logger.log(commitResult.stdout);
+              logger.warn('You may need to resolve commit issues manually.');
+              return;
+          }
+          
+          logger.success('✅ Git commit successful!');
+          logger.log(commitResult.stdout);
+      };
+    patchStrategy: replace
+  - type: write
+    path: test/e2e/git-commit.test.ts
+    content: >-
+      import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+      import { E2ETestContext, runProcessPatch, setupE2ETest } from
+      '../test.util';
+
+      import { gitCommitCommand } from '../../src/commands/git-commit';
+
+      import { executeShellCommand } from '../../src/utils/shell';
+
+      import { logger } from '../../src/utils/logger';
+
+
+      describe('e2e/git-commit', () => {
+          let context: E2ETestContext;
+
+          beforeEach(async () => {
+              context = await setupE2ETest();
+              await executeShellCommand('git init', context.testDir.path);
+              await executeShellCommand('git config user.email "test@example.com"', context.testDir.path);
+              await executeShellCommand('git config user.name "Test User"', context.testDir.path);
+          });
+
+          afterEach(async () => {
+              if (context) await context.cleanup();
+          });
+
+          const prompter = async () => true; // Always approve prompts
+
+          it('should do nothing if there are no new transactions since last commit', async () => {
+              // Create one transaction
+              await runProcessPatch(
+                  context,
+                  {},
+                  [{ type: 'new', path: 'file1.ts', content: 'content1' }],
+                  { responseOverrides: { gitCommitMsg: 'feat: first commit' } }
+              );
+
+              // Commit it
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+              
+              // Try to commit again
+              // Capture output to check for "No new transactions..." message
+              const output: string[] = [];
+              const originalInfo = (logger as any).info;
+              (logger as any).info = (msg: string) => output.push(msg);
+              
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+              
+              (logger as any).info = originalInfo;
+              
+              const logOutput = output.join('\n');
+              expect(logOutput).toContain('No new transactions to commit since the last git commit.');
+
+              const { stdout } = await executeShellCommand('git rev-list --count HEAD', context.testDir.path);
+              expect(stdout.trim()).toBe('1');
+          });
+
+          it('should combine multiple transaction messages into one commit', async () => {
+              // Transaction 1
+              await runProcessPatch(
+                  context,
+                  {},
+                  [{ type: 'new', path: 'file1.ts', content: 'content1' }],
+                  { responseOverrides: { gitCommitMsg: 'feat: add file1' } }
+              );
+              // Wait a bit to ensure different timestamps
+              await new Promise(r => setTimeout(r, 10));
+
+              // Transaction 2
+              await runProcessPatch(
+                  context,
+                  {},
+                  [{ type: 'new', path: 'file2.ts', content: 'content2' }],
+                  { responseOverrides: { gitCommitMsg: 'fix: add file2' } }
+              );
+              await new Promise(r => setTimeout(r, 10));
+              
+              // Transaction 3
+              await runProcessPatch(
+                  context,
+                  {},
+                  [{ type: 'new', path: 'file3.ts', content: 'content3' }],
+                  { responseOverrides: { gitCommitMsg: 'refactor: add file3' } }
+              );
+
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+
+              const { stdout } = await executeShellCommand('git log -1 --pretty=%B', context.testDir.path);
+              const commitMessage = stdout.trim();
+
+              const expectedMessage = `feat: add file1\n\nfix: add file2\n\nrefactor: add file3`;
+              expect(commitMessage).toBe(expectedMessage);
+          });
+          
+          it('should commit all transactions in a new repository', async () => {
+              // Transaction 1
+              await runProcessPatch(
+                  context,
+                  {},
+                  [{ type: 'new', path: 'file1.ts', content: 'content1' }],
+                  { responseOverrides: { gitCommitMsg: 'feat: add file1' } }
+              );
+              await new Promise(r => setTimeout(r, 10));
+              
+              // Transaction 2
+              await runProcessPatch(
+                  context,
+                  {},
+                  [{ type: 'new', path: 'file2.ts', content: 'content2' }],
+                  { responseOverrides: { gitCommitMsg: 'fix: add file2' } }
+              );
+              
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+
+              const { stdout } = await executeShellCommand('git log -1 --pretty=%B', context.testDir.path);
+              const commitMessage = stdout.trim();
+
+              const expectedMessage = `feat: add file1\n\nfix: add file2`;
+              expect(commitMessage).toBe(expectedMessage);
+              
+              const { stdout: commitCount } = await executeShellCommand('git rev-list --count HEAD', context.testDir.path);
+              expect(commitCount.trim()).toBe('1');
+          });
+
+          it('should only commit transactions newer than the last git commit', async () => {
+              // Transaction 1 & 2
+              await runProcessPatch(
+                  context, {}, [{ type: 'new', path: 'file1.ts', content: 'content1' }],
+                  { responseOverrides: { gitCommitMsg: 'feat: add file1' } }
+              );
+              await new Promise(r => setTimeout(r, 10));
+              await runProcessPatch(
+                  context, {}, [{ type: 'new', path: 'file2.ts', content: 'content2' }],
+                  { responseOverrides: { gitCommitMsg: 'fix: add file2' } }
+              );
+
+              // Commit them
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+
+              const { stdout: firstCommitMsg } = await executeShellCommand('git log -1 --pretty=%B', context.testDir.path);
+              expect(firstCommitMsg.trim()).toBe('feat: add file1\n\nfix: add file2');
+
+              // Allow some time to pass to ensure the next transaction is definitely newer.
+              // Filesystem timestamps can have low resolution.
+              await new Promise(r => setTimeout(r, 1000));
+
+              // Transaction 3
+              await runProcessPatch(
+                  context, {}, [{ type: 'new', path: 'file3.ts', content: 'content3' }],
+                  { responseOverrides: { gitCommitMsg: 'refactor: add file3' } }
+              );
+
+              // Commit again
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+
+              const { stdout: secondCommitMsg } = await executeShellCommand('git log -1 --pretty=%B', context.testDir.path);
+              expect(secondCommitMsg.trim()).toBe('refactor: add file3');
+
+              const { stdout: commitCount } = await executeShellCommand('git rev-list --count HEAD', context.testDir.path);
+              expect(commitCount.trim()).toBe('2');
+          });
+          
+          it('should ignore transactions without commit messages', async () => {
+              // Transaction 1 with message
+              await runProcessPatch(
+                  context, {}, [{ type: 'new', path: 'file1.ts', content: 'content1' }],
+                  { responseOverrides: { gitCommitMsg: 'feat: add file1' } }
+              );
+              await new Promise(r => setTimeout(r, 10));
+              
+              // Transaction 2 without message
+              await runProcessPatch(
+                  context, {}, [{ type: 'new', path: 'file2.ts', content: 'content2' }],
+                  { responseOverrides: { gitCommitMsg: undefined } }
+              );
+              
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+
+              const { stdout } = await executeShellCommand('git log -1 --pretty=%B', context.testDir.path);
+              const commitMessage = stdout.trim();
+
+              expect(commitMessage).toBe('feat: add file1');
+          });
+
+          it('should abort if there are new transactions but none have commit messages', async () => {
+              // All transactions have no message
+              await runProcessPatch(
+                  context, {}, [{ type: 'new', path: 'file1.ts', content: 'content1' }],
+                  { responseOverrides: { gitCommitMsg: undefined } }
+              );
+              
+              const output: string[] = [];
+              const originalWarn = (logger as any).warn;
+              (logger as any).warn = (msg: string) => output.push(msg);
+              
+              await gitCommitCommand({ yes: true }, context.testDir.path, prompter);
+              
+              (logger as any).warn = originalWarn;
+
+              const logOutput = output.join('\n');
+              expect(logOutput).toContain('No new transactions with git commit messages found');
+              
+              // No commit should have been made
+              const { exitCode } = await executeShellCommand('git rev-parse HEAD', context.testDir.path);
+              expect(exitCode).not.toBe(0);
+          });
+      });
+    patchStrategy: replace
+snapshot:
+  test/e2e/git-commit.test.ts: null
+  src/commands/git-commit.ts: >-
+    import { findLatestStateFile } from '../core/state';
+
+    import { logger } from '../utils/logger';
+
+    import { executeShellCommand } from '../utils/shell';
+
+    import { createConfirmationHandler, Prompter } from '../utils/prompt';
+
+    import { formatTransactionDetails } from '../utils/formatters';
+
+    import chalk from 'chalk';
+
+
+    export const gitCommitCommand = async (options: { yes?: boolean } = {}, cwd:
+    string = process.cwd(), prompter?: Prompter): Promise<void> => {
+        const getConfirmation = createConfirmationHandler(options, prompter);
+
+        logger.info('Looking for the last transaction to commit...');
+        const latestTransaction = await findLatestStateFile(cwd);
+
+        if (!latestTransaction) {
+            logger.warn('No committed transactions found.');
+            return;
+        }
+
+        if (!latestTransaction.gitCommitMsg) {
+            logger.warn('The latest transaction does not have a git commit message.');
+            logger.log('Transaction details:');
+            formatTransactionDetails(latestTransaction, { showSpacing: true }).forEach(line => logger.log(line));
+            return;
+        }
+
+        logger.log('Found latest transaction with commit message:');
+        formatTransactionDetails(latestTransaction).forEach(line => logger.log(line));
+
+        const confirmed = await getConfirmation(`\nDo you want to run ${chalk.magenta("'git add .'")} and ${chalk.magenta(`'git commit -m "${latestTransaction.gitCommitMsg}"'`)}? (y/N)`);
+        if (!confirmed) {
+            logger.info('Commit operation cancelled.');
+            return;
+        }
+
+        logger.info(`Running ${chalk.magenta("'git add .'")}...`);
+        const addResult = await executeShellCommand('git add .', cwd);
+        if (addResult.exitCode !== 0) {
+            logger.error(`${chalk.magenta("'git add .'")} failed with exit code ${chalk.red(addResult.exitCode)}.`);
+            logger.error(addResult.stderr);
+            return;
+        }
+        logger.success(`${chalk.magenta("'git add .'")} completed successfully.`);
+
+        const commitCmd = `git commit -m "${latestTransaction.gitCommitMsg}"`;
+        logger.info(`Running ${chalk.magenta(`'${commitCmd}'`)}...`);
+        const commitResult = await executeShellCommand(commitCmd, cwd);
+
+        if (commitResult.exitCode !== 0) {
+            logger.error(`${chalk.magenta("'git commit'")} failed with exit code ${chalk.red(commitResult.exitCode)}.`);
+            logger.error(commitResult.stderr);
+            if (commitResult.stdout) logger.log(commitResult.stdout);
+            logger.warn('You may need to resolve commit issues manually.');
+            return;
+        }
+        
+        logger.success('✅ Git commit successful!');
+        logger.log(commitResult.stdout);
+    };
+approved: true
