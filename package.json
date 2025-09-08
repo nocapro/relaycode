@@ -1,13 +1,13 @@
 {
   "name": "relaycode",
-  "version": "1.0.1",
+  "version": "1.1.1",
   "description": "A developer assistant that automates applying code changes from LLMs.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "relay": "./dist/cli.js"
+    "relay": "./dist/cli.cjs"
   },
   "files": [
     "dist",
