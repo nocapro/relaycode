@@ -64,11 +64,11 @@ export const ensureStateDirExists = async (cwd: string = process.cwd()): Promise
 };
 
 export const createConfig = async (projectId: string, cwd: string = process.cwd()): Promise<Config> => {
-  
+
   const defaultConfig = ConfigSchema.parse({ projectId });
 
   const configContent = {
-    $schema: "https://relay-code.dev/schema.json",
+    $schema: "https://relay.noca.pro/schema.json",
     ...defaultConfig
   };
 

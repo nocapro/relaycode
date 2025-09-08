@@ -20,6 +20,10 @@ Use Repomix to pack your entire repo into one AI-friendly file, then let Relayco
 
 ---
 
+[![Demo Video](https://raw.githubusercontent.com/nocapro/relaycode/refs/heads/main/yt.png)](https://www.youtube.com/watch?v=Io9HT3D5wgU "Demo Video")
+
+---
+
 ## FAQ
 
 Why not an agentic AI loop?
