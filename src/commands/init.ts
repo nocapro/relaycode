@@ -25,49 +25,49 @@ ${chalk.gray('3.')} Copy the system prompt provided by ${chalk.magenta("'relay w
 
 
 const updateGitignore = async (cwd: string): Promise<void> => {
-    const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
-    const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
+  const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+  const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
 
-    try {
-        let content = await fs.readFile(gitignorePath, 'utf-8');
-        if (!content.includes(STATE_DIRECTORY_NAME)) {
-            content += entry;
-            await fs.writeFile(gitignorePath, content);
-            logger.info(`Updated ${chalk.cyan(GITIGNORE_FILE_NAME)} to ignore ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
-        }
-    } catch (error) {
-        if (isEnoentError(error)) {
-            await fs.writeFile(gitignorePath, entry.trim());
-            logger.info(`Created ${chalk.cyan(GITIGNORE_FILE_NAME)} and added ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
-        } else {
-            logger.error(`Failed to update ${chalk.cyan(GITIGNORE_FILE_NAME)}: ${getErrorMessage(error)}`);
-        }
+  try {
+    let content = await fs.readFile(gitignorePath, 'utf-8');
+    if (!content.includes(STATE_DIRECTORY_NAME)) {
+      content += entry;
+      await fs.writeFile(gitignorePath, content);
+      logger.info(`Updated ${chalk.cyan(GITIGNORE_FILE_NAME)} to ignore ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
     }
+  } catch (error) {
+    if (isEnoentError(error)) {
+      await fs.writeFile(gitignorePath, entry.trim());
+      logger.info(`Created ${chalk.cyan(GITIGNORE_FILE_NAME)} and added ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
+    } else {
+      logger.error(`Failed to update ${chalk.cyan(GITIGNORE_FILE_NAME)}: ${getErrorMessage(error)}`);
+    }
+  }
 };
 
 export const initCommand = async (cwd: string = process.cwd()): Promise<void> => {
-    logger.info('Initializing relaycode in this project...');
+  logger.info('Initializing relaycode in this project...');
 
-    const config = await findConfig(cwd);
-    if (config) {
-        logger.warn(`Configuration file already exists. Initialization skipped.`);
-        logger.log(`
+  const config = await findConfig(cwd);
+  if (config) {
+    logger.warn(`Configuration file already exists. Initialization skipped.`);
+    logger.log(`
 To use relaycode, please run ${chalk.magenta("'relay watch'")}.
 It will display a system prompt to copy into your LLM assistant.
 You can review your configuration in your existing config file.
 `);
-        return;
-    }
-    
-    const projectId = await getProjectId(cwd);
-    await createConfig(projectId, cwd);
-    logger.success(`Created configuration file: ${chalk.cyan(CONFIG_FILE_NAME_JSON)}`);
-    
-    // Explicitly create the db directory so `log` command doesn't fail on a fresh init
-    await fs.mkdir(path.join(getStateDirectory(cwd), 'db'), { recursive: true });
-    logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+    return;
+  }
 
-    await updateGitignore(cwd);
+  const projectId = await getProjectId(cwd);
+  await createConfig(projectId, cwd);
+  logger.success(`Created configuration file: ${chalk.cyan(CONFIG_FILE_NAME_JSON)}`);
 
-    logger.log(getInitMessage(projectId));
+  // Explicitly create the transaction directory so `log` command doesn't fail on a fresh init
+  await fs.mkdir(path.join(getStateDirectory(cwd), 'transaction'), { recursive: true });
+  logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+
+  await updateGitignore(cwd);
+
+  logger.log(getInitMessage(projectId));
 };

@@ -4,7 +4,9 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { setupE2ETest, createTestFile, runProcessPatch } from '../test.util';
 import type { E2ETestContext } from '../test.util';
-import { readStateFile } from '../../src/core/state';
+import { writePendingState, readStateFile } from '../../src/core/state';
+import { getDb } from '../../src/core/db';
+import type { StateFile } from 'relaycode-core';
 
 describe('e2e/transaction', () => {
   let context: E2ETestContext;
@@ -20,7 +22,7 @@ describe('e2e/transaction', () => {
     if (context) await context.cleanup();
   });
 
-  it('should apply changes, commit, and store correct state in the database', async () => {
+  it('should apply changes, commit, and store state in a yaml file in the transaction dir', async () => {
     const newContent = 'console.log("new content");';
     const { uuid } = await runProcessPatch(
       context,
@@ -33,6 +35,12 @@ describe('e2e/transaction', () => {
     // Check file content
     const finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
     expect(finalContent).toBe(newContent);
+
+    // Check that the transaction file exists at the correct path with a .yaml extension
+    const transactionDir = path.join(context.testDir.path, '.relay', 'transactions', 'transactions');
+    const files = await fs.readdir(transactionDir);
+    const transactionFile = files.find(f => f.endsWith('.yaml'));
+    expect(transactionFile).toBeDefined();
 
     const stateData = await readStateFile(context.testDir.path, uuid);
 
@@ -64,6 +72,31 @@ describe('e2e/transaction', () => {
 
     const stateData = await readStateFile(context.testDir.path, uuid);
     expect(stateData).toBeNull();
+  });
+
+  it('should not re-apply a rolled back (undone) transaction', async () => {
+    const { uuid } = await runProcessPatch(
+      context,
+      { approvalMode: 'manual' },
+      [{ type: 'edit', path: testFile, content: 'this change will be rolled back' }],
+      { prompter: async () => false } // Disapprove
+    );
+
+    // File should be rolled back
+    let finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+    expect(finalContent).toBe(originalContent);
+
+    // Attempt to process the patch again, it should be skipped because its status is 'undone'
+    await runProcessPatch(
+      context,
+      {}, // config doesn't matter as it should be skipped before processing
+      [{ type: 'edit', path: testFile, content: 'this change will NOT be applied' }],
+      { responseOverrides: { uuid } } // Use same UUID
+    );
+
+    // File should still have original content, proving the second patch was ignored
+    finalContent = await fs.readFile(path.join(context.testDir.path, testFile), 'utf-8');
+    expect(finalContent).toBe(originalContent);
   });
 
   it('should fallback to shell execution for non-tsc linters and require approval on failure', async () => {
@@ -320,20 +353,21 @@ describe('e2e/transaction', () => {
   it('should overwrite an orphaned pending transaction and allow reprocessing', async () => {
     const uuid = uuidv4();
     const newContent = 'console.log("final content");';
+    
+    // 1. Manually create a pending state to simulate a crash during a previous run.
+    const orphanedState: StateFile = {
+      uuid,
+      projectId: 'test-project',
+      createdAt: new Date().toISOString(),
+      reasoning: ['orphaned transaction'],
+      operations: [{ type: 'write', path: testFile, content: "this won't be applied", strategy: 'replace' }],
+      snapshot: { [testFile]: originalContent },
+      approved: false,
+    };
+    await writePendingState(context.testDir.path, orphanedState);
 
-    // Create an orphaned pending transaction by running a patch and not approving it.
-    // We'll use a trick: have the prompter throw an error to simulate a crash after the pending state is written.
-    try {
-      await runProcessPatch(
-        context,
-        { approvalMode: 'manual' },
-        [{ type: 'edit', path: testFile, content: "this won't be applied" }],
-        { responseOverrides: { uuid }, prompter: async () => { throw new Error('Simulated crash'); } }
-      );
-    } catch (e: any) {
-      expect(e.message).toBe('Simulated crash');
-    }
-
+    // 2. Run processPatch again with the same UUID. It should detect the orphaned pending state,
+    // delete it, and process the new patch successfully.
     await runProcessPatch(
       context,
       {},
@@ -384,21 +418,14 @@ describe('e2e/transaction', () => {
     expect(finalContent).toBe('new content');
   });
 
-  it('should create a pending record during transaction and mark as undone on rollback', async () => {
+ it('should create a pending record during transaction and mark as undone on rollback', async () => {
     const uuid = uuidv4();
-
-    // We can't easily check the DB *during* the transaction.
-    // Instead, we will check that no committed record exists after rollback.
-    // The state transition is pending -> undone.
-    // We don't have a way to check for 'undone' records with the current state API,
-    // but we can check that it's not 'committed'.
-
-    // Check if the pending file exists during the transaction
-    // This part is no longer testable in the same way with an in-process DB.
-    // let pendingFileExistedDuringRun = false;
+    let pendingFileExistedDuringRun = false;
 
     const prompter = async (): Promise<boolean> => {
-      // pendingFileExistedDuringRun = (await getDb(context.testDir.path).query().from('transactions').where({ uuid, status: 'pending' }).first()) != null;
+      const db = getDb(context.testDir.path);
+      const pendingRecord = await db.query().from('transactions').where({ uuid, status: 'pending' }).first();
+      pendingFileExistedDuringRun = !!pendingRecord;
       return false; // Disapprove to trigger rollback
     };
 
@@ -409,9 +436,16 @@ describe('e2e/transaction', () => {
       { prompter, responseOverrides: { uuid } }
     );
 
+    expect(pendingFileExistedDuringRun).toBe(true);
+
     // No committed file should exist
     const committedState = await readStateFile(context.testDir.path, uuid);
     expect(committedState).toBeNull();
+
+    // A record with status 'undone' should exist
+    const db = getDb(context.testDir.path);
+    const undoneRecord = await db.query().from('transactions').where({ uuid, status: 'undone' }).first();
+    expect(undoneRecord).not.toBeNull();
   });
 
   it('should fail transaction gracefully if a file is not writable and rollback all changes', async () => {

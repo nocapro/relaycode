@@ -30,14 +30,16 @@ const sortByDateDesc = (a: { createdAt: string | Date }, b: { createdAt: string 
 export const hasBeenProcessed = async (cwd: string, uuid: string): Promise<boolean> => {
   const db = getDb(cwd);
   const record = await db.query().from('transactions').where({ uuid }).first();
-  // Only 'committed' transactions are considered final. 'undone' or 'pending' ones can be re-processed.
-  return !!record && record.status === 'committed';
+  // 'committed' and 'undone' transactions are considered final.
+  // 'pending' can be re-processed to handle orphaned transactions from crashes.
+  return !!record && (record.status === 'committed' || record.status === 'undone');
 };
 
 export const writePendingState = async (cwd: string, state: StateFile): Promise<void> => {
   const db = getDb(cwd);
-  // First, remove any orphaned pending or undone transaction with the same UUID to prevent unique constraint errors.
-  await db.delete('transactions').where((r) => r.uuid === state.uuid && (r.status === 'pending' || r.status === 'undone'));
+  // First, remove any orphaned pending transaction with the same UUID to prevent unique constraint errors.
+  // This allows reprocessing of transactions that were interrupted or crashed.
+  await db.delete('transactions').where((r) => r.uuid === state.uuid && r.status === 'pending');
 
   // Now, insert the new pending transaction.
   const data = { ...fromStateFile(state), status: 'pending' };
@@ -94,7 +96,7 @@ interface ReadStateFilesOptions {
 }
 
 export const readAllStateFiles = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile[] | null> => {
-    const dbDir = path.join(getStateDirectory(cwd), 'db');
+    const dbDir = path.join(getStateDirectory(cwd), 'transactions');
     try {
         await fs.access(dbDir);
     } catch {

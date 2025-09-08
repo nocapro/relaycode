@@ -1,3 +1,44 @@
+lib user reporting this, so please fix the problem also guardrail with e2e test cases. give me transaction in two phase. now give me the first phase
+
+
+Pre-flight summary:
+Lines changed: +25, -0 (25 total)
+Checks completed in 111.28ms
+  - Final linter error count: 0
+Manual approval mode is enabled.
+Notification timed out or was dismissed. Please use the terminal to respond.
+Changes applied. Do you want to approve and commit them? (y/N)
+y
+Rolling back changes: ENOENT: no such file or directory, rename '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json.1757341782787.tmp' -> '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json'
+Rolling back changes: ENOENT: no such file or directory, rename '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json.1757341782787.tmp' -> '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json'
+  - Files restored to original state.
+  - Files restored to original state.
+Rolling back changes: ENOENT: no such file or directory, rename '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json.1757341782805.tmp' -> '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json'
+Fatal: Could not clean up pending state for e6d1c44e-128f-4edc-b6a2-61d0f8ff5d56: ENOENT: no such file or directory, rename '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json.1757341782805.tmp' -> '/home/realme-book/Project/code/relaycode/.relay/db/transactions/_meta.json'
+--------------------------------------------------
+Watching for next patch...
+  - Files restored to original state.
+↩️ Transaction a6972e42-7360-449e-b2d2-8255df93a623 rolled back.
+--------------------------------------------------
+Watching for next patch...
+↩️ Transaction d1965a39-2d1e-450f-a316-f682f939330a rolled back.
+--------------------------------------------------
+Watching for next patch...
+
+===
+
+1. bug: after rolled back transaction, stopping the relay watch, then start relay watch again, the same transaction from clipboard got applied again
+
+rolled back transaction should be marked as rolled back in status
+
+2. default db format should be yaml, not json.
+3. the correct transaction path should be .relay/transaction not .relay/db/transaction
+4. you should guardrails above behaviours using e2e test cases
+
+give me transaction in three phase. now give me the first phase
+
+===
+
 create path sanitizer feature, example
 
 packages/relaycode-core/src/patch.ts:131:64 - error TS2339: Property 'error' does not exist on type 'never'.
