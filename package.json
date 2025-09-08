@@ -1,6 +1,6 @@
 {
   "name": "relaycode",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "A developer assistant that automates applying code changes from LLMs.",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,8 +30,7 @@
     "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
     "commit": "bun run src/cli.ts git commit -y && git push"
   },
-  "dependencies": {
-  },
+  "dependencies": {},
   "devDependencies": {
     "tsup": "^8.5.0",
     "@types/bun": "latest",
