@@ -29,11 +29,6 @@ export const logCommand = async (cwd: string = process.cwd(), outputCapture?: st
     log(chalk.bold('Committed Transactions (most recent first):'));
     log(chalk.gray('-------------------------------------------'));
 
-    if (transactions.length === 0) {
-        log(`${chalk.blue('info')}: No valid transactions found.`);
-        return;
-    }
-
     transactions.forEach(tx => {
         formatTransactionDetails(tx, { showOperations: true, showSpacing: true, showReasoning: false }).forEach(line => log(line));
     });

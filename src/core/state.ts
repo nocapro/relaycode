@@ -96,11 +96,11 @@ interface ReadStateFilesOptions {
 }
 
 export const readAllStateFiles = async (cwd: string = process.cwd(), options: ReadStateFilesOptions = {}): Promise<StateFile[] | null> => {
-    const dbDir = path.join(getStateDirectory(cwd), 'transactions');
+    const stateDir = getStateDirectory(cwd);
     try {
-        await fs.access(dbDir);
+        await fs.access(stateDir);
     } catch {
-        return null; // DB directory does not exist, so not initialized
+        return null; // State directory does not exist, so not initialized
     }
 
     const db = getDb(cwd);
