@@ -13,6 +13,11 @@ export const applyCommand = async (filePath: string, options: { yes?: boolean } 
     let content: string;
     const absoluteFilePath = path.resolve(cwd, filePath);
     try {
+        const stats = await fs.stat(absoluteFilePath);
+        if (stats.isDirectory()) {
+            logger.error(`Path is a directory, not a file: ${chalk.cyan(absoluteFilePath)}`);
+            return;
+        }
         content = await fs.readFile(absoluteFilePath, 'utf-8');
         logger.info(`Reading patch from file: ${chalk.cyan(absoluteFilePath)}`);
     } catch (error) {

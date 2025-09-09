@@ -246,7 +246,18 @@ export const LLM_RESPONSE_END = (uuid: string, changeSummary: { [key: string]: s
   ];
   
   if (gitCommitMsg) {
-    yamlContent.push(`gitCommitMsg: "${gitCommitMsg}"`);
+    // Support both oneliner and multi-line formats
+    if (gitCommitMsg.includes('\n')) {
+      // Multi-line format with >-
+      yamlContent.push(`gitCommitMsg: >-`);
+      const lines = gitCommitMsg.split('\n').filter(line => line.trim());
+      lines.forEach(line => {
+        yamlContent.push(`  ${line}`);
+      });
+    } else {
+      // Single line format
+      yamlContent.push(`gitCommitMsg: "${gitCommitMsg}"`);
+    }
   }
   
   return `

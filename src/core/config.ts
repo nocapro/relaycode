@@ -27,6 +27,10 @@ export const findConfig = async (cwd: string = process.cwd()): Promise<Config | 
     return null;
   }
   try {
+    const stats = await fs.stat(configPath);
+    if (stats.isDirectory()) {
+      return null; // Path is a directory, not a file
+    }
     const fileContent = await fs.readFile(configPath, 'utf-8');
     const configJson = JSON.parse(fileContent);
     return ConfigSchema.parse(configJson);
@@ -81,6 +85,10 @@ export const createConfig = async (projectId: string, cwd: string = process.cwd(
 export const getProjectId = async (cwd: string = process.cwd()): Promise<string> => {
   try {
     const pkgJsonPath = path.join(cwd, 'package.json');
+    const stats = await fs.stat(pkgJsonPath);
+    if (stats.isDirectory()) {
+      throw new Error('Path is a directory, not a file');
+    }
     const fileContent = await fs.readFile(pkgJsonPath, 'utf-8');
     const pkgJson = JSON.parse(fileContent);
     if (pkgJson.name && typeof pkgJson.name === 'string') {

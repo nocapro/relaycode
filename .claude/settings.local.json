@@ -5,7 +5,22 @@
       "Bash(npm run build:*)",
       "Bash(bun test:*)",
       "Bash(bun tsc:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "mcp__serena__activate_project",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__onboarding",
+      "mcp__serena__list_dir",
+      "Read(//home/realme-book/**)",
+      "Bash(sudo chown:*)",
+      "Bash(claude mcp remove:*)",
+      "Bash(claude mcp add:*)",
+      "Bash(notify-send:*)",
+      "Bash(paplay:*)",
+      "Bash(bun pm:*)",
+      "Bash(bun remove:*)",
+      "Bash(bun link:*)",
+      "Bash(bun run build)",
+      "Bash(bun run:*)"
     ],
     "deny": [],
     "ask": []

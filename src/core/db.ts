@@ -40,8 +40,13 @@ export function toStateFile(record: TransactionRecord): StateFile {
 }
 
 export function fromStateFile(stateFile: StateFile): Omit<TransactionRecord, 'id' | 'status'> {
+  if (!stateFile.uuid) {
+    throw new Error('StateFile must have a valid UUID');
+  }
+  
   return {
     ...stateFile,
+    uuid: stateFile.uuid, // Ensure UUID is explicitly included
     linesAdded: stateFile.linesAdded ?? null,
     linesRemoved: stateFile.linesRemoved ?? null,
     linesDifference: stateFile.linesDifference ?? null,

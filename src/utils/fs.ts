@@ -4,7 +4,12 @@ import { getErrorMessage, isEnoentError } from './logger';
 
 export const readFileContent = async (filePath: string, cwd: string = process.cwd()): Promise<string | null> => {
   try {
-    return await fs.readFile(path.resolve(cwd, filePath), 'utf-8');
+    const absolutePath = path.resolve(cwd, filePath);
+    const stats = await fs.stat(absolutePath);
+    if (stats.isDirectory()) {
+      return null; // Path is a directory, not a file
+    }
+    return await fs.readFile(absolutePath, 'utf-8');
   } catch (error) {
     if (isEnoentError(error)) {
       return null; // File doesn't exist

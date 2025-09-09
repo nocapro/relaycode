@@ -35,6 +35,12 @@ export const hasBeenProcessed = async (cwd: string, uuid: string): Promise<boole
 };
 
 export const writePendingState = async (cwd: string, state: StateFile): Promise<void> => {
+  // Validate UUID to prevent undefined.yaml errors
+  if (!state.uuid || typeof state.uuid !== 'string' || !state.uuid.match(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)) {
+    logger.error(`Fatal: Invalid UUID provided for writePendingState: ${state.uuid}`);
+    throw new Error(`Invalid UUID: ${state.uuid}`);
+  }
+  
   const db = getDb(cwd);
   // First, remove any orphaned pending transaction with the same UUID to prevent unique constraint errors.
   // This allows reprocessing of transactions that were interrupted or crashed.

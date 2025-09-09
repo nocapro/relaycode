@@ -8,9 +8,9 @@ import fs from 'fs';
 import path from 'path';
 
 const getSystemPrompt = (
-    projectId: string,
-    preferredStrategy: Config['watcher']['preferredStrategy'],
-    patchConfig: Config['patch'],
+  projectId: string,
+  preferredStrategy: Config['watcher']['preferredStrategy'],
+  patchConfig: Config['patch'],
 ): string => {
     const header = `
 ✅ relaycode is watching for changes.
@@ -20,9 +20,9 @@ Copy the entire text below and paste it into your LLM's "System Prompt"
 or "Custom Instructions" section.
 ---------------------------------------------------------------------------`;
 
-    const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+  const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
 
-    const syntaxAuto = `
+  const syntaxAuto = `
 **Syntax:**
 \`\`\`typescript // filePath {patchStrategy}
 ... content ...
@@ -38,7 +38,7 @@ or "Custom Instructions" section.
 ...
 \`\`\``;
 
-    const syntaxReplace = `
+  const syntaxReplace = `
 **Syntax:**
 \`\`\`typescript // filePath
 ... content ...
@@ -46,7 +46,7 @@ or "Custom Instructions" section.
 - \`filePath\`: The path to the file. **If the path contains spaces, it MUST be enclosed in double quotes.**
 - Only the \`replace\` strategy is enabled. This means you must provide the ENTIRE file content for any change. This is suitable for creating new files or making changes to small files.`;
 
-    const syntaxStandardDiff = `
+  const syntaxStandardDiff = `
 **Syntax:**
 \`\`\`typescript // filePath standard-diff
 ... diff content ...
@@ -54,7 +54,7 @@ or "Custom Instructions" section.
 - \`filePath\`: The path to the file. **If the path contains spaces, it MUST be enclosed in double quotes.**
 - You must use the \`standard-diff\` patch strategy for all modifications.`;
 
-    const syntaxSearchReplace = `
+  const syntaxSearchReplace = `
 **Syntax:**
 \`\`\`typescript // filePath search-replace
 ... diff content ...
@@ -62,7 +62,7 @@ or "Custom Instructions" section.
 - \`filePath\`: The path to the file. **If the path contains spaces, it MUST be enclosed in double quotes.**
 - You must use the \`search-replace\` patch strategy for all modifications.`;
 
-    const sectionStandardDiff = `---
+  const sectionStandardDiff = `---
 
 ### Strategy 1: Advanced Unified Diff (\`standard-diff\`) - RECOMMENDED
 
@@ -91,7 +91,7 @@ Use for most changes, like refactoring, adding features, and fixing bugs. It's r
 \`\`\`
 `;
 
-    const sectionSearchReplace = `---
+  const sectionSearchReplace = `---
 
 ### Strategy 2: Search-Replace (\`search-replace\`)
 
@@ -108,7 +108,7 @@ Repeat this block for each replacement.
 \`\`\`
 `;
 
-    const otherOps = `---
+  const otherOps = `---
 
 ### Other Operations
 
@@ -129,25 +129,25 @@ Repeat this block for each replacement.
     \`\`\`
 `;
 
-    const finalSteps_rules = [];
-    if (patchConfig.minFileChanges > 0) {
-        finalSteps_rules.push(`You must modify at least ${patchConfig.minFileChanges} file(s) in this transaction.`);
-    }
-    if (patchConfig.maxFileChanges) {
-        finalSteps_rules.push(`You must not modify more than ${patchConfig.maxFileChanges} file(s) in this transaction.`);
-    }
+  const finalSteps_rules = [];
+  if (patchConfig.minFileChanges > 0) {
+    finalSteps_rules.push(`You must modify at least ${patchConfig.minFileChanges} file(s) in this transaction.`);
+  }
+  if (patchConfig.maxFileChanges) {
+    finalSteps_rules.push(`You must not modify more than ${patchConfig.maxFileChanges} file(s) in this transaction.`);
+  }
 
-    const finalSteps_list = [
-        'Add your step-by-step reasoning in plain text before each code block.',
-    ];
-    if (finalSteps_rules.length > 0) {
-        finalSteps_list.push(`Adhere to file limits: ${finalSteps_rules.join(' ')}`);
-    }
-    finalSteps_list.push('ALWAYS add the following YAML block at the very end of your response. Use the exact projectId shown here. Generate a new random uuid for each response.');
+  const finalSteps_list = [
+    'Add your step-by-step reasoning in plain text before each code block.',
+  ];
+  if (finalSteps_rules.length > 0) {
+    finalSteps_list.push(`Adhere to file limits: ${finalSteps_rules.join(' ')}`);
+  }
+  finalSteps_list.push('ALWAYS add the following YAML block at the very end of your response. Use the exact projectId shown here. Generate a new random uuid for each response.');
 
-    const finalSteps_list_string = finalSteps_list.map((item, index) => `${index + 1}.  ${item}`).join('\n');
+  const finalSteps_list_string = finalSteps_list.map((item, index) => `${index + 1}.  ${item}`).join('\n');
 
-    const finalSteps = `---
+  const finalSteps = `---
 
 ### Final Steps
 
@@ -167,21 +167,21 @@ ${finalSteps_list_string}
       Optionally, provide a longer description here.
     \`\`\`
 `;
-    
-    const footer = `---------------------------------------------------------------------------`;
 
-    const strategyInfo = {
-        auto: { syntax: syntaxAuto, details: `${sectionStandardDiff}\n${sectionSearchReplace}` },
-        replace: { syntax: syntaxReplace, details: '' },
-        'standard-diff': { syntax: syntaxStandardDiff, details: sectionStandardDiff },
-        'search-replace': { syntax: syntaxSearchReplace, details: sectionSearchReplace },
-    };
+  const footer = `---------------------------------------------------------------------------`;
 
-    const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
-    const syntax = preferred.syntax;
-    const strategyDetails = preferred.details;
+  const strategyInfo = {
+    auto: { syntax: syntaxAuto, details: `${sectionStandardDiff}\n${sectionSearchReplace}` },
+    replace: { syntax: syntaxReplace, details: '' },
+    'standard-diff': { syntax: syntaxStandardDiff, details: sectionStandardDiff },
+    'search-replace': { syntax: syntaxSearchReplace, details: sectionSearchReplace },
+  };
 
-    return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+  const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
+  const syntax = preferred.syntax;
+  const strategyDetails = preferred.details;
+
+  return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
 };
 
 export const watchCommand = async (options: { yes?: boolean } = {}, cwd: string = process.cwd()): Promise<{ stop: () => void }> => {

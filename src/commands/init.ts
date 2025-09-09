@@ -29,6 +29,10 @@ const updateGitignore = async (cwd: string): Promise<void> => {
   const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
 
   try {
+    const stats = await fs.stat(gitignorePath);
+    if (stats.isDirectory()) {
+      throw new Error('Path is a directory, not a file');
+    }
     let content = await fs.readFile(gitignorePath, 'utf-8');
     if (!content.includes(STATE_DIRECTORY_NAME)) {
       content += entry;
