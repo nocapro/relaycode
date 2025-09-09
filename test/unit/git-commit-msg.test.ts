@@ -13,7 +13,7 @@ describe('gitCommitMsg normalization', () => {
       'This is a detailed description',
       'of the new feature'
     ]);
-    expect(result).toBe('feat: add new feature This is a detailed description of the new feature');
+    expect(result).toBe('feat: add new feature\nThis is a detailed description\nof the new feature');
   });
 
   it('should handle empty gitCommitMsg', () => {
@@ -29,5 +29,23 @@ describe('gitCommitMsg normalization', () => {
   it('should handle single element array gitCommitMsg', () => {
     const result = normalizeGitCommitMsg(['fix: resolve issue']);
     expect(result).toBe('fix: resolve issue');
+  });
+
+  it('should handle array with empty strings', () => {
+    const result = normalizeGitCommitMsg([
+      'feat: add feature',
+      '',
+      'This is a description'
+    ]);
+    expect(result).toBe('feat: add feature\n\nThis is a description');
+  });
+
+  it('should handle array with whitespace-only strings', () => {
+    const result = normalizeGitCommitMsg([
+      'feat: add feature',
+      '   ',
+      'This is a description'
+    ]);
+    expect(result).toBe('feat: add feature\n   \nThis is a description');
   });
 });

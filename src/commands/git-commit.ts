@@ -47,8 +47,11 @@ export const gitCommitCommand = async (options: { yes?: boolean } = {}, cwd: str
         return;
     }
 
-    // 4. Merge commit messages
-    const mergedCommitMessage = commitMessages.join('\n\n');
+    // 4. Merge commit messages with proper spacing
+    const mergedCommitMessage = commitMessages
+        .map(msg => msg.trim()) // Clean up whitespace
+        .filter(msg => msg.length > 0) // Remove empty messages
+        .join('\n\n');
 
     logger.log('Found new transactions to commit:');
     newTransactions.forEach(tx => {
@@ -73,7 +76,8 @@ export const gitCommitCommand = async (options: { yes?: boolean } = {}, cwd: str
     }
     logger.success(`${chalk.magenta("'git add .'")} completed successfully.`);
 
-    const commitCmd = `git commit -m "${mergedCommitMessage}"`;
+    // Use git commit with multiple -m flags to avoid shell escaping issues
+    const commitCmd = `git commit${mergedCommitMessage.split('\n\n').map(msg => ` -m "${msg.replace(/"/g, '\\"')}"`).join('')}`;
     logger.info(`Running commit command...`);
     const commitResult = await executeShellCommand(commitCmd, cwd);
 

@@ -76,6 +76,12 @@ export const markTransactionsAsGitCommitted = async (cwd: string, uuids: string[
 };
 
 export const deletePendingState = async (cwd: string, uuid: string): Promise<void> => {
+  // Validate UUID to prevent undefined.yaml errors
+  if (!uuid || typeof uuid !== 'string' || !uuid.match(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)) {
+    logger.error(`Fatal: Invalid UUID provided for deletePendingState: ${uuid}`);
+    return;
+  }
+  
   const db = getDb(cwd);
   // In case of rollback, we mark it as 'undone' instead of deleting.
   const updated = await db.update('transactions').set({ status: 'undone' }).where({ uuid, status: 'pending' });

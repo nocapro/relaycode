@@ -141,6 +141,12 @@ const logCompletionSummary = (
 };
 
 const rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnapshot, reason: string, enableNotifications: boolean = true, isError: boolean = true): Promise<void> => {
+    // Validate UUID to prevent undefined.yaml errors
+    if (!uuid || typeof uuid !== 'string' || !uuid.match(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)) {
+        logger.error(`Fatal: Invalid UUID provided for rollback: ${uuid}`);
+        return;
+    }
+    
     if (isError) {
         logger.warn(`Rolling back changes: ${reason}`);
     }

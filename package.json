@@ -39,7 +39,7 @@
     "chalk": "^5.4.1",
     "clipboardy": "^4.0.0",
     "commander": "^12.1.0",
-    "relaycode-core": "0.1.2",
+    "relaycode-core": "0.1.3",
     "esbuild": "0.25.6",
     "js-yaml": "^4.1.0",
     "konro": "0.1.17",
