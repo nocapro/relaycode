@@ -37,9 +37,9 @@ describe('e2e/transaction', () => {
     expect(finalContent).toBe(newContent);
 
     // Check that the transaction file exists at the correct path with a .yaml extension
-    const transactionDir = path.join(context.testDir.path, '.relay', 'transactions', 'transactions');
+    const transactionDir = path.join(context.testDir.path, '.relay', 'transactions');
     const files = await fs.readdir(transactionDir);
-    const transactionFile = files.find(f => f.endsWith('.yaml'));
+    const transactionFile = files.find(f => f.endsWith('.yaml') && f !== '_meta.json');
     expect(transactionFile).toBeDefined();
 
     const stateData = await readStateFile(context.testDir.path, uuid);
@@ -774,5 +774,34 @@ describe('e2e/transaction', () => {
 
     expect(content1).toBe(originalContent);
     expect(content2).toBe(originalContent);
+  });
+
+  it('should save transaction files directly in .relay/transactions directory (not nested)', async () => {
+    const newContent = 'console.log("testing transaction location");';
+    const { uuid } = await runProcessPatch(
+      context,
+      { linter: '', approvalMode: 'auto' },
+      [{ type: 'edit', path: testFile, content: newContent }]
+    );
+
+    // Verify transaction file is saved in .relay/transactions (not .relay/transactions/transactions)
+    const transactionDir = path.join(context.testDir.path, '.relay', 'transactions');
+    const transactionDirExists = await fs.access(transactionDir).then(() => true).catch(() => false);
+    expect(transactionDirExists).toBe(true);
+    
+    const files = await fs.readdir(transactionDir);
+    // Konro saves files using the auto-increment ID as filename, not UUID
+    const transactionFiles = files.filter(f => f.endsWith('.yaml') && f !== '_meta.json');
+    expect(transactionFiles.length).toBeGreaterThan(0);
+
+    // Verify the nested transactions directory does NOT exist (since we fixed the double nesting)
+    const nestedTransactionDir = path.join(context.testDir.path, '.relay', 'transactions', 'transactions');
+    const nestedDirExists = await fs.access(nestedTransactionDir).then(() => true).catch(() => false);
+    expect(nestedDirExists).toBe(false);
+
+    // Verify we can read the transaction data
+    const stateData = await readStateFile(context.testDir.path, uuid);
+    expect(stateData).not.toBeNull();
+    expect(stateData?.uuid).toBe(uuid);
   });
 });

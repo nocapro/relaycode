@@ -59,7 +59,7 @@ export function getDb(cwd: string): OnDemandDbContext<RelaySchema> {
     return existingInstance;
   }
 
-  const dbDir = path.join(getStateDirectory(resolvedCwd), 'transactions');
+  const dbDir = getStateDirectory(resolvedCwd);
 
   const adapter = konro.createFileAdapter({
     format: 'yaml',
