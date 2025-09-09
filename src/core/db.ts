@@ -1,5 +1,6 @@
 import { konro } from 'konro';
 import type { FileOperation, FileSnapshot, StateFile } from 'relaycode-core';
+import { normalizeGitCommitMsg } from 'relaycode-core';
 import path from 'path';
 import { getStateDirectory } from './config';
 import type { OnDemandDbContext } from 'konro';
@@ -44,7 +45,7 @@ export function fromStateFile(stateFile: StateFile): Omit<TransactionRecord, 'id
     linesAdded: stateFile.linesAdded ?? null,
     linesRemoved: stateFile.linesRemoved ?? null,
     linesDifference: stateFile.linesDifference ?? null,
-    gitCommitMsg: stateFile.gitCommitMsg ?? null,
+    gitCommitMsg: normalizeGitCommitMsg(stateFile.gitCommitMsg) ?? null,
     gitCommittedAt: (stateFile as any).gitCommittedAt ?? null,
     promptSummary: stateFile.promptSummary ?? null,
   };

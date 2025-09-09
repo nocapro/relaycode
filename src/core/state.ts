@@ -2,7 +2,6 @@ import { type StateFile } from 'relaycode-core';
 import { logger } from '../utils/logger';
 import { getDb, toStateFile, fromStateFile } from './db';
 import { promises as fs } from 'fs';
-import path from 'path';
 import { getStateDirectory } from './config';
 
 export const isRevertTransaction = (state: StateFile): boolean => {

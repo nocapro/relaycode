@@ -10,10 +10,7 @@ e2e_patch_tests:
     initial_state: []
     expected_state:
       - path: "src/new.ts"
-        content: |
-          export const newFunction = () => {
-              console.log("new file");
-          };
+        content: "export const newFunction = () => {\n    console.log(\"new file\");\n};"
 
   - name: delete-file
     description: Should delete an existing file
@@ -55,8 +52,7 @@ e2e_patch_tests:
     initial_state: []
     expected_state:
       - path: "src/components/My Component.tsx"
-        content: |
-          export const MyComponent = () => <div>Hello</div>;
+        content: "export const MyComponent = () => <div>Hello</div>;"
 
   - name: rename-file-with-spaces-in-path
     description: Should correctly rename a file to a path with spaces

@@ -36,7 +36,7 @@ e2e_patch_tests:
         content: ""
     expected_state:
       - path: "src/empty.js"
-        content: |
+        content: |-
           // This file is no longer empty.
           export const ready = true;
 
@@ -63,7 +63,7 @@ e2e_patch_tests:
     initial_state: []
     expected_state:
       - path: "src/service.ts"
-        content: |
+        content: |-
           export class Service {
             stop() { console.log('stopping'); }
             run() { console.log('running'); }

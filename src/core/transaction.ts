@@ -1,4 +1,4 @@
-import { type Config, type ParsedLLMResponse, type StateFile, type FileSnapshot, type FileOperation } from 'relaycode-core';
+import { type Config, type ParsedLLMResponse, type StateFile, type FileSnapshot, type FileOperation, normalizeGitCommitMsg } from 'relaycode-core';
 import { logger, getErrorMessage } from '../utils/logger';
 import { getErrorCount, executeShellCommand } from '../utils/shell';
 import { deleteFile, readFileContent, removeEmptyParentDirectories, renameFile, writeFileContent } from '../utils/fs';
@@ -370,7 +370,7 @@ const handleAutoGitBranch = async (config: Config, stateFile: StateFile, cwd: st
 
     let branchNameSegment = '';
     if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
-        branchNameSegment = stateFile.gitCommitMsg;
+        branchNameSegment = normalizeGitCommitMsg(stateFile.gitCommitMsg) ?? '';
     } else {
         branchNameSegment = stateFile.uuid;
     }

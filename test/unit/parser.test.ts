@@ -383,7 +383,7 @@ So it should be treated as regular content, not search-replace
       if (op.type === 'delete') {
         expect(op.path).toBe('src/old-helper.ts');
       }
-      expect(parsed?.reasoning.join(' ')).toContain("I'm removing the old helper file.");
+      expect(parsed?.reasoning.join(' ')).toContain("I'm removing the old helper file as it's no longer needed.");
     });
 
     it('should correctly parse path-with-spaces.md', async () => {

@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import { executeShellCommand } from '../utils/shell';
 import { createConfirmationHandler, type Prompter } from '../utils/prompt';
 import { formatTransactionDetails } from '../utils/formatters';
+import { normalizeGitCommitMsg } from 'relaycode-core';
 import chalk from 'chalk';
 
 export const gitCommitCommand = async (options: { yes?: boolean } = {}, cwd: string = process.cwd(), prompter?: Prompter): Promise<void> => {
@@ -39,7 +40,7 @@ export const gitCommitCommand = async (options: { yes?: boolean } = {}, cwd: str
         return;
     }
 
-    const commitMessages = newTransactions.map(tx => tx.gitCommitMsg).filter((msg): msg is string => !!msg);
+    const commitMessages = newTransactions.map(tx => normalizeGitCommitMsg(tx.gitCommitMsg)).filter((msg): msg is string => !!msg);
 
     if (commitMessages.length === 0) {
         logger.warn('No new transactions with git commit messages found.');

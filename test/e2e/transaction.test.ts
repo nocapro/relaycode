@@ -360,7 +360,7 @@ describe('e2e/transaction', () => {
       projectId: 'test-project',
       createdAt: new Date().toISOString(),
       reasoning: ['orphaned transaction'],
-      operations: [{ type: 'write', path: testFile, content: "this won't be applied", strategy: 'replace' }],
+      operations: [{ type: 'write', path: testFile, content: "this won't be applied", patchStrategy: 'replace' }],
       snapshot: { [testFile]: originalContent },
       approved: false,
     };

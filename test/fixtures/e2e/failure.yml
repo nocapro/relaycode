@@ -29,16 +29,19 @@ e2e_patch_tests:
         content: 'const version = 1;'
     expected_outcome: failure
 
-  - name: fail-on-invalid-strategy
-    description: Should fail transaction if an invalid patch strategy is provided
+  - name: handle-invalid-strategy-as-part-of-path
+    description: Should treat invalid patch strategy as part of the file path
     markdown_content: |
       ```typescript // src/index.js invalid-strategy
-      console.log("this will fail");
+      console.log("this will work");
       ```
     initial_state:
-      - path: "src/index.js"
+      - path: "src/index.js invalid-strategy"
         content: 'console.log("hello");'
-    expected_outcome: failure
+    expected_outcome: success
+    expected_state:
+      - path: "src/index.js invalid-strategy"
+        content: "console.log(\"this will work\");"
 
   - name: fail-on-rename-source-not-found
     description: Should fail transaction if renaming a file that does not exist

@@ -5,7 +5,7 @@ console.log("Updated main");
 ```
 
 ```typescript // src/utils.ts
-DELETE_FILE
+//TODO: delete this file
 ```
 
 ```tsx // "src/components/New Component.tsx" standard-diff

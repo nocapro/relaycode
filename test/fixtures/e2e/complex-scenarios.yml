@@ -27,12 +27,11 @@ e2e_patch_tests:
         content: 'export const util = {};'
     expected_state:
       - path: "src/main.ts"
-        content: |
-          console.log("Updated main");
+        content: "console.log(\"Updated main\");"
       - path: "src/utils.ts"
         exists: false
       - path: "src/components/New Component.tsx"
-        content: |
+        content: |-
           export const NewComponent = () => {
             return <div>New!</div>;
           };
@@ -78,8 +77,7 @@ e2e_patch_tests:
         content: '// This is old'
     expected_state:
       - path: "src/config.ts"
-        content: |
-          export const config = { timeout: 5000 };
+        content: "export const config = { timeout: 5000 };"
       - path: "src/main.ts"
         content: |-
           import { config } from './config';

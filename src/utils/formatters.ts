@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { type FileOperation, type StateFile } from 'relaycode-core';
+import { type FileOperation, type StateFile, normalizeGitCommitMsg } from 'relaycode-core';
 
 const opToString = (op: FileOperation): string => {
     switch (op.type) {
@@ -20,7 +20,7 @@ export const formatTransactionDetails = (
     ];
 
     if (tx.promptSummary) lines.push(`  ${chalk.bold('Prompt Summary')}: ${tx.promptSummary}`);
-    if (tx.gitCommitMsg) lines.push(`  ${chalk.bold('Git Commit')}: "${tx.gitCommitMsg}"`);
+    if (tx.gitCommitMsg) lines.push(`  ${chalk.bold('Git Commit')}: "${normalizeGitCommitMsg(tx.gitCommitMsg)}"`);
 
     const hasLineChanges = typeof tx.linesAdded === 'number' && typeof tx.linesRemoved === 'number';
     if (hasLineChanges) {

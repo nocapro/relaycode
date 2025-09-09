@@ -1,7 +1,7 @@
 I'm removing the old helper file as it's no longer needed.
 
 ```typescript // src/old-helper.ts
-DELETE_FILE
+//TODO: delete this file
 ```
 
 ```yaml
