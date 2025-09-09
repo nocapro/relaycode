@@ -1,6 +1,6 @@
 {
   "name": "relaycode",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "A developer assistant that automates applying code changes from LLMs.",
   "type": "module",
   "main": "./dist/index.js",
