@@ -207,17 +207,25 @@ export const watchCommand = async (options: { yes?: boolean } = {}, cwd: string 
         config.watcher.clipboardPollInterval,
         async (contents) => {
           logger.info(`Processing ${contents.length} clipboard items in bulk mode...`);
-          
+
           const parsedResponses: ParsedLLMResponse[] = [];
           for (const content of contents) {
             const parsedResponse = parseLLMResponse(content);
             if (parsedResponse) {
-              parsedResponses.push(parsedResponse);
+              if (parsedResponse.ignoredBlocks && parsedResponse.ignoredBlocks.length > 0) {
+                parsedResponse.ignoredBlocks.forEach(block => {
+                  logger.warn(`${chalk.yellow('⚠ Ignored block:')} ${block.reason}`);
+                });
+              }
+              // Only add responses that have operations to process
+              if (parsedResponse.operations.length > 0) {
+                parsedResponses.push(parsedResponse);
+              }
             }
           }
 
           if (parsedResponses.length === 0) {
-            logger.warn('No valid relaycode patches found in clipboard content.');
+            logger.warn('No operations to process from clipboard items.');
             return;
           }
 
@@ -236,11 +244,20 @@ export const watchCommand = async (options: { yes?: boolean } = {}, cwd: string 
           logger.debug('Clipboard content is not a valid relaycode patch. Ignoring.');
           return;
         }
-
+        
         // Check project ID before notifying and processing.
         if (parsedResponse.control.projectId !== config.projectId) {
           logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
           return;
+        }
+
+        if (parsedResponse.ignoredBlocks && parsedResponse.ignoredBlocks.length > 0) {
+            parsedResponse.ignoredBlocks.forEach(block => {
+                logger.warn(`${chalk.yellow('⚠ Ignored block:')} ${block.reason}`);
+            });
+        }
+        if (parsedResponse.operations.length === 0) {
+            return; // Silently return, user has been notified of ignored blocks if any.
         }
 
         await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });

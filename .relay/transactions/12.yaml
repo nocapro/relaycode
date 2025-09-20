@@ -1,0 +1,1318 @@
+uuid: a8d59160-c651-4e78-8316-c1edb080517f
+projectId: relaycode
+createdAt: '2025-09-20T06:19:38.885Z'
+gitCommitMsg: >-
+  feat(parser): Report ignored code blocks to the user
+
+  This enhances the user experience by providing explicit feedback when a code
+  block in an LLM response is ignored due to a malformed header or invalid
+  content.
+
+  - The core parser now identifies and collects malformed blocks with a reason
+    for why they were ignored.
+  - The `apply` and `watch` commands now check for these ignored blocks and
+    print a warning to the console, helping users debug their prompts or LLM
+    output more effectively.
+promptSummary: >-
+  The user requested that the CLI should provide feedback when a code block is
+  ignored due to being malformed, instead of failing silently.
+reasoning:
+  - >-
+    This is an excellent suggestion. Silently ignoring malformed blocks is not
+    ideal for the user experience. I will update the parser to report ignored
+    blocks and modify the CLI commands to display these warnings to the user.
+  - 'This involves a few steps:'
+  - >-
+    1.  **Core Parser (`relaycode-core`):** I'll enhance the parser to recognize
+    and flag malformed code blocks instead of just dropping them. The parsed
+    result will now include a list of ignored blocks and the reason for ignoring
+    them.
+  - >-
+    2.  **Types (`relaycode-core`):** The `ParsedLLMResponse` type will be
+    updated to include this new information about ignored blocks.
+  - >-
+    3.  **CLI Commands (`apply` and `watch`):** I will update the `apply` and
+    `watch` commands to check for ignored blocks in the parsed response and
+    print a clear warning to the console for each one.
+  - >-
+    This will provide immediate feedback to the user when an LLM generates a
+    response with a formatting error, helping them correct their prompts or
+    identify issues faster.
+  - 'Here are the changes:'
+  - '### 1. Update Core Types'
+  - >-
+    I'll start by updating the `ParsedLLMResponseSchema` in `relaycode-core` to
+    include an optional array for ignored blocks.
+  - '### 2. Enhance the Parser'
+  - >-
+    Next, I'll modify the core parser. It will now identify malformed blocks,
+    provide a reason for ignoring them, and collect them in the final parsed
+    object. This also includes the fix from the previous step to prevent
+    creating files with invalid names.
+  - '### 3. Update CLI Commands'
+  - >-
+    Finally, I'll update the `apply` and `watch` commands to display warnings
+    for any ignored blocks.
+  - '#### `apply` command'
+  - '#### `watch` command'
+  - This command needs updates for both single-patch and bulk-processing modes.
+operations:
+  - type: write
+    path: packages/relaycode-core/src/types.ts
+    content: |+
+      --- packages/relaycode-core/src/types.ts
+      +++ packages/relaycode-core/src/types.ts
+      @@ -151,6 +151,7 @@
+       export const ParsedLLMResponseSchema = z.object({
+         control: ControlYamlSchema,
+         operations: z.array(FileOperationSchema),
+         reasoning: z.array(z.string()),
+      +  ignoredBlocks: z.array(z.object({ reason: z.string() })).optional(),
+       });
+       export type ParsedLLMResponse = z.infer<typeof ParsedLLMResponseSchema>;
+
+    patchStrategy: standard-diff
+  - type: write
+    path: packages/relaycode-core/src/parser.ts
+    content: >+
+      --- packages/relaycode-core/src/parser.ts
+
+      +++ packages/relaycode-core/src/parser.ts
+
+      @@ -124,7 +124,12 @@
+         return { control: null, textWithoutYaml: rawText };
+       };
+       
+      -const parseCodeBlock = (match: RegExpExecArray): { operation:
+      FileOperation, fullMatch: string } | null => {
+
+      +type ParsedCodeBlockResult =
+
+      +  | { operation: FileOperation; fullMatch: string }
+
+      +  | { ignoredReason: string; fullMatch: string };
+
+      +
+
+      +
+
+      +const parseCodeBlock = (match: RegExpExecArray): ParsedCodeBlockResult |
+      null => {
+         const [fullMatch, rawHeader, rawContent] = match;
+         let headerLine = (rawHeader || '').trim();
+       
+      @@ -152,49 +157,14 @@
+             const { from, to } = z.object({ from: z.string().min(1), to: z.string().min(1) }).parse(JSON.parse(content));
+             return { operation: { type: 'rename', from, to }, fullMatch };
+           } catch (e) {
+      -      return null;
+
+      +      return { ignoredReason: `Invalid JSON for rename operation: ${e
+      instanceof Error ? e.message : String(e)}`, fullMatch };
+           }
+         }
+       
+         const parsedHeader = parseCodeBlockHeader(headerLine);
+         if (!parsedHeader) {
+           // If `parseCodeBlockHeader` returns null, it means the header is definitively malformed
+           // (e.g., it contains an invalid strategy, or is a misplaced diff header like `--- file.ts`).
+      -    // The fallback logic here was too lenient and caused bugs like
+      creating files named `--- file.ts`.
+
+      -    // By returning null, we ignore the malformed block, which is safer.
+
+      -    return null;
+
+      -  }
+
+      -
+
+      -  const { filePath } = parsedHeader;
+
+      -
+
+      -  if (content.trim() === DELETE_FILE_MARKER) {
+
+      -    return { operation: { type: 'delete', path: filePath }, fullMatch };
+
+      -  }
+
+      -
+
+      -  const patchStrategy = inferPatchStrategy(content,
+      parsedHeader.patchStrategy);
+
+      -
+
+      -  // CRITICAL FIX: Handle START/END markers and clean content for replace
+      strategy
+
+      -  let cleanContent = content;
+
+      -  if (patchStrategy === 'replace') {
+
+      -    // Remove START/END markers if present
+
+      -    cleanContent = content.replace(/^\/\/ START\s*\r?\n/,
+      '').replace(/\r?\n\/\/ END\s*$/, '');
+
+      -    // Remove leading newline if present
+
+      -    cleanContent = cleanContent.replace(/^\r?\n/, '');
+
+      -    // Remove trailing newline if present (but preserve other whitespace)
+
+      -    cleanContent = cleanContent.replace(/\r?\n$/, '');
+
+      -  }
+
+      -
+
+      -  if (patchStrategy === 'replace') {
+
+      -    logger.debug(`[parser] Final 'replace' content (JSON encoded):`,
+      JSON.stringify(cleanContent));
+
+      -  }
+
+      -
+
+      -  return {
+
+      -    operation: { type: 'write', path: filePath, content: cleanContent,
+      patchStrategy },
+
+      -    fullMatch
+
+      -  };
+
+      +    return { ignoredReason: `Malformed code block header:
+      "${headerLine}"`, fullMatch };
+
+      +  }
+
+      +
+
+      +  const { filePath } = parsedHeader;
+
+      +
+
+      +  if (content.trim() === DELETE_FILE_MARKER) {
+
+      +    return { operation: { type: 'delete', path: filePath }, fullMatch };
+
+      +  }
+
+      +
+
+      +  const patchStrategy = inferPatchStrategy(content,
+      parsedHeader.patchStrategy);
+
+      +
+
+      +  // CRITICAL FIX: Handle START/END markers and clean content for replace
+      strategy
+
+      +  let cleanContent = content;
+
+      +  if (patchStrategy === 'replace') {
+
+      +    // Remove START/END markers if present
+
+      +    cleanContent = content.replace(/^\/\/ START\s*\r?\n/,
+      '').replace(/\r?\n\/\/ END\s*$/, '');
+
+      +    // Remove leading newline if present
+
+      +    cleanContent = cleanContent.replace(/^\r?\n/, '');
+
+      +    // Remove trailing newline if present (but preserve other whitespace)
+
+      +    cleanContent = cleanContent.replace(/\r?\n$/, '');
+
+      +  }
+
+      +
+
+      +  if (patchStrategy === 'replace') {
+
+      +    logger.debug(`[parser] Final 'replace' content (JSON encoded):`,
+      JSON.stringify(cleanContent));
+
+      +  }
+
+      +
+
+      +  return {
+
+      +    operation: { type: 'write', path: filePath, content: cleanContent,
+      patchStrategy },
+
+      +    fullMatch
+
+      +  };
+       };
+       
+       export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null => {
+      @@ -205,19 +175,24 @@
+         }
+       
+         const operations: FileOperation[] = [];
+      +  const ignoredBlocks: { reason: string }[] = [];
+         const matchedBlocks: string[] = [];
+         let match;
+       
+         while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+           const result = parseCodeBlock(match);
+           if (result) {
+      -      operations.push(result.operation);
+
+      +      if ('operation' in result) {
+
+      +        operations.push(result.operation);
+
+      +      } else if ('ignoredReason' in result) {
+
+      +        ignoredBlocks.push({ reason: result.ignoredReason });
+
+      +      }
+             matchedBlocks.push(result.fullMatch);
+           }
+         }
+       
+      -  if (operations.length === 0) {
+
+      -    return null;
+
+      +  if (operations.length === 0 && ignoredBlocks.length === 0) {
+
+      +    return null; // No operations and nothing ignored, it's not for us.
+         }
+       
+         let reasoningText = textWithoutYaml;
+      @@ -227,7 +202,7 @@
+         const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+       
+         try {
+      -    const parsedResponse = ParsedLLMResponseSchema.parse({ control,
+      operations, reasoning });
+
+      +    const parsedResponse = ParsedLLMResponseSchema.parse({ control,
+      operations, reasoning, ignoredBlocks });
+           return parsedResponse;
+         } catch (e) {
+           return null;
+         }
+       };
+
+    patchStrategy: standard-diff
+  - type: write
+    path: src/commands/apply.ts
+    content: >+
+      --- src/commands/apply.ts
+
+      +++ src/commands/apply.ts
+
+      @@ -24,6 +24,17 @@
+               return;
+           }
+       
+      +    if (parsedResponse.ignoredBlocks &&
+      parsedResponse.ignoredBlocks.length > 0) {
+
+      +        parsedResponse.ignoredBlocks.forEach(block => {
+
+      +            logger.warn(`${chalk.yellow('⚠ Ignored block:')}
+      ${block.reason}`);
+
+      +        });
+
+      +    }
+
+      +
+
+      +    if (parsedResponse.operations.length === 0) {
+
+      +        logger.info('No operations to apply from this file.');
+
+      +        return;
+
+      +    }
+
+      +
+           logger.success('Valid patch format detected. Processing...');
+           await processPatch(config, parsedResponse, { cwd, yes: options.yes });
+           logger.info(chalk.gray('--------------------------------------------------'));
+
+    patchStrategy: standard-diff
+  - type: write
+    path: src/commands/watch.ts
+    content: >+
+      --- src/commands/watch.ts
+
+      +++ src/commands/watch.ts
+
+      @@ -219,17 +219,25 @@
+               config.watcher.clipboardPollInterval,
+               async (contents) => {
+                 logger.info(`Processing ${contents.length} clipboard items in bulk mode...`);
+      -          
+
+      +
+                 const parsedResponses: ParsedLLMResponse[] = [];
+                 for (const content of contents) {
+                   const parsedResponse = parseLLMResponse(content);
+                   if (parsedResponse) {
+      -              parsedResponses.push(parsedResponse);
+
+      +              if (parsedResponse.ignoredBlocks &&
+      parsedResponse.ignoredBlocks.length > 0) {
+
+      +                parsedResponse.ignoredBlocks.forEach(block => {
+
+      +                  logger.warn(`${chalk.yellow('⚠ Ignored block:')}
+      ${block.reason}`);
+
+      +                });
+
+      +              }
+
+      +              // Only add responses that have operations to process
+
+      +              if (parsedResponse.operations.length > 0) {
+
+      +                parsedResponses.push(parsedResponse);
+
+      +              }
+                   }
+                 }
+       
+                 if (parsedResponses.length === 0) {
+      -            logger.warn('No valid relaycode patches found in clipboard
+      content.');
+
+      +            logger.warn('No operations to process from clipboard
+      items.');
+                   return;
+                 }
+       
+      @@ -246,12 +254,20 @@
+                 logger.debug('Clipboard content is not a valid relaycode patch. Ignoring.');
+                 return;
+               }
+      -
+
+      +        
+               // Check project ID before notifying and processing.
+               if (parsedResponse.control.projectId !== config.projectId) {
+                 logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+                 return;
+               }
+       
+      +        if (parsedResponse.ignoredBlocks &&
+      parsedResponse.ignoredBlocks.length > 0) {
+
+      +            parsedResponse.ignoredBlocks.forEach(block => {
+
+      +                logger.warn(`${chalk.yellow('⚠ Ignored block:')}
+      ${block.reason}`);
+
+      +            });
+
+      +        }
+
+      +        if (parsedResponse.operations.length === 0) {
+
+      +            return; // Silently return, user has been notified of ignored
+      blocks if any.
+
+      +        }
+
+      +
+               await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+               logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+             });
+
+    patchStrategy: standard-diff
+snapshot:
+  packages/relaycode-core/src/types.ts: >-
+    import { z } from 'zod';
+
+
+    export const LogLevelNameSchema = z.enum(['silent', 'error', 'warn', 'info',
+    'debug']).default('info');
+
+    export type LogLevelName = z.infer<typeof LogLevelNameSchema>;
+
+
+    // Schema for relaycode.config.json
+
+    const CoreConfigSchema = z.object({
+      logLevel: LogLevelNameSchema,
+      enableNotifications: z.boolean().default(true),
+      watchConfig: z.boolean().default(true),
+    });
+
+
+    const WatcherConfigSchema = z.object({
+      clipboardPollInterval: z.number().int().positive().default(2000),
+      preferredStrategy: z.enum(['auto', 'replace', 'standard-diff', 'search-replace']).default('auto'),
+      enableBulkProcessing: z.boolean().default(false),
+      bulkSize: z.number().int().positive().default(5),
+      bulkTimeout: z.number().int().positive().default(30000),
+    });
+
+
+    const PatchConfigSchema = z.object({
+      approvalMode: z.enum(['auto', 'manual']).default('auto'),
+      approvalOnErrorCount: z.number().int().min(0).default(0),
+      linter: z.string().default('bun tsc --noEmit'),
+      preCommand: z.string().default(''),
+      postCommand: z.string().default(''),
+      minFileChanges: z.number().int().min(0).default(0),
+      maxFileChanges: z.number().int().min(1).optional(),
+    });
+
+
+    const GitConfigSchema = z.object({
+      autoGitBranch: z.boolean().default(false),
+      gitBranchPrefix: z.string().default('relay/'),
+      gitBranchTemplate: z.enum(['uuid', 'gitCommitMsg']).default('gitCommitMsg'),
+    });
+
+
+    const BaseConfigSchema = z.object({
+      projectId: z.string().min(1),
+      core: CoreConfigSchema,
+      watcher: WatcherConfigSchema,
+      patch: PatchConfigSchema,
+      git: GitConfigSchema,
+    });
+
+
+    export const ConfigSchema = BaseConfigSchema.deepPartial().extend({
+      projectId: z.string().min(1),
+    }).transform(val => ({
+      projectId: val.projectId,
+      core: CoreConfigSchema.parse(val.core ?? {}),
+      watcher: WatcherConfigSchema.parse(val.watcher ?? {}),
+      patch: PatchConfigSchema.parse(val.patch ?? {}),
+      git: GitConfigSchema.parse(val.git ?? {}),
+    }));
+
+    export type Config = z.infer<typeof ConfigSchema>;
+
+
+    export type RelayCodeConfigInput = z.input<typeof ConfigSchema>;
+
+    export const defineConfig = (config: RelayCodeConfigInput):
+    RelayCodeConfigInput => config;
+
+
+    export const PatchStrategySchema = z.enum([
+      'replace',
+      'standard-diff',
+      'search-replace',
+    ]).default('replace');
+
+    export type PatchStrategy = z.infer<typeof PatchStrategySchema>;
+
+
+    export const FileSnapshotSchema = z.record(z.string(),
+    z.string().nullable());
+
+    export type FileSnapshot = z.infer<typeof FileSnapshotSchema>;
+
+
+    // Schema for operations parsed from code blocks
+
+    export const FileOperationSchema = z.union([
+      z.object({
+        type: z.literal('write'),
+        path: z.string(),
+        content: z.string(),
+        patchStrategy: PatchStrategySchema,
+      }),
+      z.object({
+        type: z.literal('delete'),
+        path: z.string(),
+      }),
+      z.object({
+        type: z.literal('rename'),
+        from: z.string(),
+        to: z.string(),
+      }),
+    ]);
+
+    export type FileOperation = z.infer<typeof FileOperationSchema>;
+
+
+    // Schema for the state file (transaction record)
+
+    export const StateFileSchema = z.object({
+      uuid: z.string().uuid(),
+      projectId: z.string(),
+      createdAt: z.string(), // ISO string
+      approved: z.boolean(),
+      linesAdded: z.number().optional(),
+      linesRemoved: z.number().optional(),
+      linesDifference: z.number().optional(),
+      gitCommitMsg: z.union([z.string(), z.array(z.string())]).optional(),
+      promptSummary: z.string().optional(),
+      reasoning: z.array(z.string()),
+      operations: z.array(FileOperationSchema),
+      snapshot: FileSnapshotSchema,
+    });
+
+    export type StateFile = z.infer<typeof StateFileSchema>;
+
+
+    // Schema for the control YAML block at the end of the LLM response
+
+    export const ControlYamlSchema = z.object({
+      projectId: z.string(),
+      uuid: z.string().uuid(),
+      changeSummary: z.array(z.record(z.string(), z.string())).optional(), // Not strictly used, but good to parse
+      gitCommitMsg: z.union([z.string(), z.array(z.string())]).optional(),
+      promptSummary: z.string().optional(),
+    });
+
+    export type ControlYaml = z.infer<typeof ControlYamlSchema>;
+
+
+    // Helper function to normalize gitCommitMsg to support both oneliner and
+    multi-line formats
+
+    export const normalizeGitCommitMsg = (gitCommitMsg: string | string[] |
+    undefined): string | undefined => {
+      if (!gitCommitMsg) return undefined;
+      if (Array.isArray(gitCommitMsg)) {
+        // Join with newlines to preserve multiline structure
+        return gitCommitMsg.join('\n');
+      }
+      return gitCommitMsg;
+    };
+
+
+    // Helper function to format gitCommitMsg for YAML output
+
+    export const formatGitCommitMsgForYaml = (gitCommitMsg: string | string[] |
+    undefined): string | string[] | undefined => {
+      if (!gitCommitMsg) return undefined;
+      if (Array.isArray(gitCommitMsg)) {
+        // If it's already an array, keep it as is for YAML formatting
+        return gitCommitMsg;
+      }
+      // If it's a string with newlines, convert to array for proper YAML formatting
+      if (gitCommitMsg.includes('\n')) {
+        return gitCommitMsg.split('\n').filter(line => line.trim());
+      }
+      // Single line, return as string
+      return gitCommitMsg;
+    };
+
+
+    // The fully parsed response from the clipboard
+
+    export const ParsedLLMResponseSchema = z.object({
+      control: ControlYamlSchema,
+      operations: z.array(FileOperationSchema),
+      reasoning: z.array(z.string()),
+    });
+
+    export type ParsedLLMResponse = z.infer<typeof ParsedLLMResponseSchema>;
+  src/commands/apply.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { loadConfigOrExit } from '../core/config';
+
+    import { parseLLMResponse } from 'relaycode-core';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import chalk from 'chalk';
+
+
+    export const applyCommand = async (filePath: string, options: { yes?:
+    boolean } = {}, cwd: string = process.cwd()): Promise<void> => {
+        const config = await loadConfigOrExit(cwd);
+        logger.setLevel(config.core.logLevel);
+
+        let content: string;
+        const absoluteFilePath = path.resolve(cwd, filePath);
+        try {
+            const stats = await fs.stat(absoluteFilePath);
+            if (stats.isDirectory()) {
+                logger.error(`Path is a directory, not a file: ${chalk.cyan(absoluteFilePath)}`);
+                return;
+            }
+            content = await fs.readFile(absoluteFilePath, 'utf-8');
+            logger.info(`Reading patch from file: ${chalk.cyan(absoluteFilePath)}`);
+        } catch (error) {
+            logger.error(`Failed to read patch file at '${chalk.cyan(absoluteFilePath)}'. Aborting.`);
+            return;
+        }
+
+        logger.info('Attempting to parse patch file...');
+        const parsedResponse = parseLLMResponse(content);
+
+        if (!parsedResponse) {
+            logger.error('The content of the file is not a valid relaycode patch. Aborting.');
+            return;
+        }
+
+        logger.success('Valid patch format detected. Processing...');
+        await processPatch(config, parsedResponse, { cwd, yes: options.yes });
+        logger.info(chalk.gray('--------------------------------------------------'));
+    };
+  src/commands/watch.ts: >
+    import { findConfig, loadConfigOrExit, findConfigPath } from
+    '../core/config';
+
+    import { createClipboardWatcher, createBulkClipboardWatcher } from
+    '../core/clipboard';
+
+    import chalk from 'chalk';
+
+    import { parseLLMResponse, type ParsedLLMResponse } from 'relaycode-core';
+
+    import { processPatch, processPatchesBulk } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { type Config } from 'relaycode-core';
+
+    import fs from 'fs';
+
+
+    const getSystemPrompt = (
+      projectId: string,
+      preferredStrategy: Config['watcher']['preferredStrategy'],
+      patchConfig: Config['patch'],
+    ): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+      const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+      const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`standard-diff\`,
+    \`search-replace\`. If omitted, the entire file is replaced (this is the
+    \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" standard-diff
+
+    ...
+
+    \`\`\``;
+
+      const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+      const syntaxStandardDiff = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath standard-diff
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`standard-diff\` patch strategy for all modifications.`;
+
+      const syntaxSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`search-replace\` patch strategy for all
+    modifications.`;
+
+      const sectionStandardDiff = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`standard-diff\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+      const sectionSearchReplace = `---
+
+    ### Strategy 2: Search-Replace (\`search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+      const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+      const finalSteps_rules = [];
+      if (patchConfig.minFileChanges > 0) {
+        finalSteps_rules.push(`You must modify at least ${patchConfig.minFileChanges} file(s) in this transaction.`);
+      }
+      if (patchConfig.maxFileChanges) {
+        finalSteps_rules.push(`You must not modify more than ${patchConfig.maxFileChanges} file(s) in this transaction.`);
+      }
+
+      const finalSteps_list = [
+        'Add your step-by-step reasoning in plain text before each code block.',
+      ];
+      if (finalSteps_rules.length > 0) {
+        finalSteps_list.push(`Adhere to file limits: ${finalSteps_rules.join(' ')}`);
+      }
+      finalSteps_list.push('ALWAYS add the following YAML block at the very end of your response. Use the exact projectId shown here. Generate a new random uuid for each response.');
+
+      const finalSteps_list_string = finalSteps_list.map((item, index) => `${index + 1}.  ${item}`).join('\n');
+
+      const finalSteps = `---
+
+    ### Final Steps
+
+
+    ${finalSteps_list_string}
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary: # A list of key-value pairs for changes
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: A brief summary of my request.
+        gitCommitMsg: >-
+          feat: A concise, imperative git commit message.
+
+          Optionally, provide a longer description here.
+        \`\`\`
+    `;
+
+      const footer = `---------------------------------------------------------------------------`;
+
+      const strategyInfo = {
+        auto: { syntax: syntaxAuto, details: `${sectionStandardDiff}\n${sectionSearchReplace}` },
+        replace: { syntax: syntaxReplace, details: '' },
+        'standard-diff': { syntax: syntaxStandardDiff, details: sectionStandardDiff },
+        'search-replace': { syntax: syntaxSearchReplace, details: sectionSearchReplace },
+      };
+
+      const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
+      const syntax = preferred.syntax;
+      const strategyDetails = preferred.details;
+
+      return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    };
+
+
+    export const watchCommand = async (options: { yes?: boolean } = {}, cwd:
+    string = process.cwd()): Promise<{ stop: () => void }> => {
+      let clipboardWatcher: { stop: () => void } | null = null;
+      let configWatcher: fs.FSWatcher | null = null;
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.core.logLevel);
+        logger.debug(`Log level set to: ${config.core.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.watcher.preferredStrategy, config.patch));
+
+        // Use bulk clipboard watcher if bulk mode is enabled
+        if (config.watcher.enableBulkProcessing) {
+          clipboardWatcher = createBulkClipboardWatcher(
+            config.watcher.clipboardPollInterval,
+            async (contents) => {
+              logger.info(`Processing ${contents.length} clipboard items in bulk mode...`);
+              
+              const parsedResponses: ParsedLLMResponse[] = [];
+              for (const content of contents) {
+                const parsedResponse = parseLLMResponse(content);
+                if (parsedResponse) {
+                  parsedResponses.push(parsedResponse);
+                }
+              }
+
+              if (parsedResponses.length === 0) {
+                logger.warn('No valid relaycode patches found in clipboard content.');
+                return;
+              }
+
+              await processPatchesBulk(config, parsedResponses, { cwd, notifyOnStart: true, yes: options.yes });
+              logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+            },
+            config.watcher.bulkSize || 5,
+            config.watcher.bulkTimeout || 30000
+          );
+        } else {
+          clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+            logger.debug('New clipboard content detected. Attempting to parse...');
+            const parsedResponse = parseLLMResponse(content);
+
+            if (!parsedResponse) {
+              logger.debug('Clipboard content is not a valid relaycode patch. Ignoring.');
+              return;
+            }
+
+            // Check project ID before notifying and processing.
+            if (parsedResponse.control.projectId !== config.projectId) {
+              logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+              return;
+            }
+
+            await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+            logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+          });
+        }
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`Configuration file is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      const configPath = await findConfigPath(cwd);
+      
+      const { clipboardPollInterval } = initialConfig.watcher;
+      logger.info(
+        chalk.gray(
+          `[relay] Watching for patches... (project: ${initialConfig.projectId}, approval: ${initialConfig.patch.approvalMode}, poll: ${clipboardPollInterval}ms)`
+        )
+      );
+      
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      if (initialConfig.core.watchConfig && configPath) {
+        configWatcher = fs.watch(configPath, handleConfigChange);
+      } else {
+        logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');
+      }
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+  packages/relaycode-core/src/parser.ts: >
+    import yaml from 'js-yaml';
+
+    import { logger } from './logger';
+
+    import { z } from 'zod';
+
+    import {
+      ControlYamlSchema,
+      ParsedLLMResponseSchema,
+      PatchStrategySchema,
+    } from './types';
+
+    import type {
+      FileOperation,
+      ParsedLLMResponse,
+      PatchStrategy,
+    } from './types';
+
+    import {
+      DELETE_FILE_MARKER,
+      RENAME_FILE_OPERATION
+    } from './constants';
+
+
+    const CODE_BLOCK_REGEX = /```(?:\w+)?\s*([^\r\n]*?)\r?\n([\s\S]*?)```/g;
+
+
+    type ParsedHeader = {
+      filePath: string;
+      patchStrategy: PatchStrategy | null;
+    };
+
+
+    const parseCodeBlockHeader = (headerLine: string): ParsedHeader | null => {
+      // This regex handles:
+      // 1. A quoted file path, optionally followed by a strategy.
+      // 2. An unquoted file path, optionally followed by a strategy.
+      // It's more robust than splitting by space.
+      const match = headerLine.match(/^(?:"([^"]+)"|(\S+))(?:\s+(\S+))?$/);
+
+      if (!match) {
+        // If the regex fails, it might be a path with spaces that isn't quoted.
+        // The instructions say paths with spaces MUST be quoted, but we can be lenient.
+        // We'll check if the last word is a strategy. If so, the rest is the path.
+        const parts = headerLine.split(/\s+/);
+        if (parts.length > 1) {
+          const lastPart = parts[parts.length - 1]!;
+          const parsedStrategy = PatchStrategySchema.safeParse(lastPart);
+          if (parsedStrategy.success) {
+            const filePath = parts.slice(0, -1).join(' ');
+            return { filePath, patchStrategy: parsedStrategy.data };
+          }
+        }
+        // Otherwise, assume the whole line is a file path with no strategy.
+        return headerLine.trim() ? { filePath: headerLine.trim(), patchStrategy: null } : null;
+      }
+
+      const filePath = match[1] || match[2]; // Group 1 is quoted, group 2 is unquoted.
+      if (!filePath) return null;
+
+      const strategyStr = match[3] || '';
+      if (strategyStr) {
+        const parsedStrategy = PatchStrategySchema.safeParse(strategyStr);
+        if (!parsedStrategy.success) {
+          return null; // Explicit but invalid strategy
+        }
+        return { filePath, patchStrategy: parsedStrategy.data };
+      }
+
+      return { filePath, patchStrategy: null }; // No strategy provided
+    };
+
+
+    const inferPatchStrategy = (content: string, providedStrategy: PatchStrategy
+    | null): PatchStrategy => {
+      if (providedStrategy) return providedStrategy;
+      if (/^<<<<<<< SEARCH\s*$/m.test(content) && content.includes('>>>>>>> REPLACE')) return 'search-replace';
+      if (content.startsWith('--- ') && content.includes('+++ ') && content.includes('@@')) return 'standard-diff';
+      return 'replace';
+    };
+
+
+    const extractAndParseYaml = (rawText: string) => {
+      // Strategy 1: Find all fenced YAML blocks and try to parse the last one.
+      const yamlBlockMatches = [...rawText.matchAll(/```\s*(?:yaml|yml)[\r\n]([\s\S]+?)```/gi)];
+
+      if (yamlBlockMatches.length > 0) {
+        const lastMatch = yamlBlockMatches[yamlBlockMatches.length - 1]!;
+        try {
+          const yamlContent: unknown = yaml.load(lastMatch[1]!);
+          const control = ControlYamlSchema.parse(yamlContent);
+          // Success! This is our control block.
+          const textWithoutYaml = rawText.substring(0, lastMatch.index) + rawText.substring(lastMatch.index! + lastMatch[0].length);
+          return { control, textWithoutYaml: textWithoutYaml.trim() };
+        } catch (e) {
+          // The last block was not a valid control block.
+          // We will now fall through to the non-fenced strategy, assuming the fenced block was just an example.
+        }
+      }
+
+      // Strategy 2: Look for a non-fenced block at the end.
+      const lines = rawText.trim().split('\n');
+      let yamlStartIndex = -1;
+      // Heuristic: project ID is required, so we look for that.
+      const searchLimit = Math.max(0, lines.length - 20);
+      for (let i = lines.length - 1; i >= searchLimit; i--) {
+        if (lines[i]?.trim().match(/^projectId:/)) {
+          yamlStartIndex = i;
+          break;
+        }
+      }
+
+      if (yamlStartIndex !== -1) {
+        const yamlText = lines.slice(yamlStartIndex).join('\n');
+        try {
+          const yamlContent: unknown = yaml.load(yamlText);
+          const control = ControlYamlSchema.parse(yamlContent);
+          // Success!
+          const textWithoutYaml = lines.slice(0, yamlStartIndex).join('\n');
+          return { control, textWithoutYaml: textWithoutYaml.trim() };
+        } catch (e) {
+          // Non-fenced YAML block at the end was not a valid control block.
+        }
+      }
+
+      // If both strategies fail, there's no valid control block.
+      return { control: null, textWithoutYaml: rawText };
+    };
+
+
+    const parseCodeBlock = (match: RegExpExecArray): { operation: FileOperation,
+    fullMatch: string } | null => {
+      const [fullMatch, rawHeader, rawContent] = match;
+      let headerLine = (rawHeader || '').trim();
+
+      // CRITICAL FIX: Do not strip the trailing newline. Preserve the raw content from the regex.
+      const content = rawContent || '';
+
+      logger.debug(`[parser] Matched block header: '${rawHeader}'`);
+      logger.debug(`[parser] Raw content (JSON encoded):`, JSON.stringify(content));
+
+      const commentIndex = headerLine.indexOf('//');
+      if (commentIndex !== -1) {
+        // If we find `//`, we assume what follows is the file path and optional strategy.
+        headerLine = headerLine.substring(commentIndex + 2).trim();
+        // This handles formats like `typescript // "path/to/my component.ts" standard-diff`.
+      }
+
+      if (headerLine.startsWith('//')) {
+        headerLine = headerLine.substring(2).trim();
+      }
+
+      if (!headerLine) return null;
+
+      if (headerLine === RENAME_FILE_OPERATION) {
+        try {
+          const { from, to } = z.object({ from: z.string().min(1), to: z.string().min(1) }).parse(JSON.parse(content));
+          return { operation: { type: 'rename', from, to }, fullMatch };
+        } catch (e) {
+          return null;
+        }
+      }
+
+      const parsedHeader = parseCodeBlockHeader(headerLine);
+      if (!parsedHeader) {
+        // If `parseCodeBlockHeader` returns null, it means the header is definitively malformed
+        // (e.g., it contains an invalid strategy, or is a misplaced diff header like `--- file.ts`).
+        // The fallback logic here was too lenient and caused bugs like creating files named `--- file.ts`.
+        // By returning null, we ignore the malformed block, which is safer.
+        return null;
+      }
+
+      const { filePath } = parsedHeader;
+
+      if (content.trim() === DELETE_FILE_MARKER) {
+        return { operation: { type: 'delete', path: filePath }, fullMatch };
+      }
+
+      const patchStrategy = inferPatchStrategy(content, parsedHeader.patchStrategy);
+
+      // CRITICAL FIX: Handle START/END markers and clean content for replace strategy
+      let cleanContent = content;
+      if (patchStrategy === 'replace') {
+        // Remove START/END markers if present
+        cleanContent = content.replace(/^\/\/ START\s*\r?\n/, '').replace(/\r?\n\/\/ END\s*$/, '');
+        // Remove leading newline if present
+        cleanContent = cleanContent.replace(/^\r?\n/, '');
+        // Remove trailing newline if present (but preserve other whitespace)
+        cleanContent = cleanContent.replace(/\r?\n$/, '');
+      }
+
+      if (patchStrategy === 'replace') {
+        logger.debug(`[parser] Final 'replace' content (JSON encoded):`, JSON.stringify(cleanContent));
+      }
+
+      return {
+        operation: { type: 'write', path: filePath, content: cleanContent, patchStrategy },
+        fullMatch
+      };
+    };
+
+
+    export const parseLLMResponse = (rawText: string): ParsedLLMResponse | null
+    => {
+      const { control, textWithoutYaml } = extractAndParseYaml(rawText);
+
+      if (!control) {
+        return null;
+      }
+
+      const operations: FileOperation[] = [];
+      const matchedBlocks: string[] = [];
+      let match;
+
+      while ((match = CODE_BLOCK_REGEX.exec(textWithoutYaml)) !== null) {
+        const result = parseCodeBlock(match);
+        if (result) {
+          operations.push(result.operation);
+          matchedBlocks.push(result.fullMatch);
+        }
+      }
+
+      if (operations.length === 0) {
+        return null;
+      }
+
+      let reasoningText = textWithoutYaml;
+      for (const block of matchedBlocks) {
+        reasoningText = reasoningText.replace(block, '');
+      }
+      const reasoning = reasoningText.split('\n').map(line => line.trim()).filter(Boolean);
+
+      try {
+        const parsedResponse = ParsedLLMResponseSchema.parse({ control, operations, reasoning });
+        return parsedResponse;
+      } catch (e) {
+        return null;
+      }
+    };
+approved: true
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: committed
+id: 12

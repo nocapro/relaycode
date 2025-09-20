@@ -1,3 +1,7 @@
+===
+
+when user run relay w, no need to ask them to copy,,
+
 === DONE
 
 
@@ -45,6 +49,10 @@ so now on relay -v command user can now which build source code the deps use
 
 ===
 
+fix below problem where it create new file starting with ---
+
+
+==== problem start
 
 ```diff
 --- tsup.config.ts
@@ -91,6 +99,8 @@ ls
  debug.ts    package.json        src                  '--- tsup.config.ts'
  dist        README.md           test                  tsup.config.ts
  docs        relay.config.json   tsconfig.json
+
+==== problem end
 
 ===
 

@@ -33,6 +33,17 @@ export const applyCommand = async (filePath: string, options: { yes?: boolean } 
         return;
     }
 
+    if (parsedResponse.ignoredBlocks && parsedResponse.ignoredBlocks.length > 0) {
+        parsedResponse.ignoredBlocks.forEach(block => {
+            logger.warn(`${chalk.yellow('⚠ Ignored block:')} ${block.reason}`);
+        });
+    }
+
+    if (parsedResponse.operations.length === 0) {
+        logger.info('No operations to apply from this file.');
+        return;
+    }
+
     logger.success('Valid patch format detected. Processing...');
     await processPatch(config, parsedResponse, { cwd, yes: options.yes });
     logger.info(chalk.gray('--------------------------------------------------'));
