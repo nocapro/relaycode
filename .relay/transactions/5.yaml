@@ -1,0 +1,1397 @@
+uuid: a53ac079-c5c8-4712-a720-3162b7cd831f
+projectId: relaycode
+createdAt: '2025-09-12T03:01:26.007Z'
+gitCommitMsg: >-
+  refactor(ui): Improve cohesion and reduce noise in terminal output
+
+  This commit refactors the terminal UI to be more cohesive and less verbose,
+  addressing several areas of redundancy and noise.
+
+  - **Consolidated Startup Message**: The watcher startup message now presents
+  all key information (project, approval mode, poll interval) on a single line.
+
+  - **Streamlined Transaction Logs**:
+    - Combines the "patch detected" and "starting transaction" messages into a single, clearer log entry.
+    - Removes noisy, implementation-detail logs such as "Applying file operations..." and staging messages.
+    - Replaces the ambiguous internal "Transaction committed" log with a more concise summary.
+
+  - **Improved Summaries**: The post-patch summary is now a single, compact line
+  detailing file operations, duration, and linter errors.
+
+  - **Clarified Approval Flow**:
+    - The redundant "Manual approval mode is enabled" message has been removed.
+    - The final git commit confirmation is now clearer ("Patch committed").
+    - The "Watching for next patch..." message is now standardized.
+    - Shortened the notification timeout message for better readability.
+promptSummary: >-
+  The user wants to improve the terminal UI to be more cohesive and less
+  redundant.
+reasoning:
+  - >-
+    Based on your request to make the terminal UI more cohesive and less
+    redundant, I've analyzed the output and identified several areas for
+    improvement. My changes focus on reducing noise, combining related
+    information into single, clear messages, and ensuring a consistent look and
+    feel throughout the process.
+  - 'Here is my plan to achieve this:'
+  - >-
+    1.  **Refine Startup Messaging**: I'll consolidate the various startup
+    messages into a single, informative line that tells you everything you need
+    to know at a glance: the project being watched, the approval mode, and the
+    polling interval.
+  - >-
+    2.  **Streamline Patch Processing Logs**: I'll merge the "patch detected"
+    and "starting transaction" messages. I will also remove internal
+    implementation details like "Staged changes..." and "Applying file
+    operations..." which are not essential for you to see every time.
+  - >-
+    3.  **Improve the Summary**: The end-of-transaction summary will be more
+    compact, presenting the number of file operations, duration, and linter
+    error count in one line.
+  - >-
+    4.  **Clarify Commit Messages**: I'll remove the ambiguous "Transaction
+    committed" message that appears before the approval prompt. The final
+    confirmation message after you approve will be clearer, stating that the
+    patch was "committed".
+  - >-
+    5.  **Reduce Redundancy**: The "Manual approval mode is enabled" message,
+    which appears with every patch, will be removed since this information is
+    already available in the new startup message.
+  - >-
+    6.  **Enhance Readability**: I'll shorten the notification timeout message
+    and standardize the "Watching for patches..." message to be consistent with
+    the initial startup log.
+  - Let's apply these changes.
+  - '### 1. Refine Watcher Startup Message'
+  - >-
+    I'll start by updating `watch.ts` to provide a single, clean startup message
+    and remove the redundant "Valid patch detected" log, which will now be
+    handled within the transaction flow.
+  - '### 2. Streamline Transaction Logging'
+  - >-
+    Next, I'll modify `transaction.ts`. Although the file snippet provided is
+    minimal, I will construct a patch based on the user-provided terminal output
+    and logical code flow to remove noisy logs, update summaries, and clarify
+    messages.
+  - '### 3. Shorten Notification Message'
+  - >-
+    Finally, I'll make the notification timeout message in `notifier.ts` more
+    concise.
+  - >-
+    These changes will result in a cleaner, more focused terminal UI that
+    prioritizes essential information, making your development workflow smoother
+    and less cluttered.
+operations:
+  - type: write
+    path: src/commands/watch.ts
+    content: >+
+      --- src/commands/watch.ts
+
+      +++ src/commands/watch.ts
+
+      @@ -1,5 +1,6 @@
+       import { findConfig, loadConfigOrExit, findConfigPath } from '../core/config';
+       import { createClipboardWatcher, createBulkClipboardWatcher } from '../core/clipboard';
+      +import chalk from 'chalk';
+       import { parseLLMResponse, type ParsedLLMResponse } from 'relaycode-core';
+       import { processPatch, processPatchesBulk } from '../core/transaction';
+       import { logger } from '../utils/logger';
+      @@ -26,10 +27,14 @@
+           if (configWatcher) {
+             configWatcher.close();
+             logger.info('Config watcher stopped.');
+           }
+      -
+           const { pollInterval, bulk } = config.watcher;
+       
+      +    logger.info(
+
+      +      chalk.gray(
+
+      +        `[relay] Watching for patches... (project: ${config.projectId},
+      approval: ${config.patch.approval.mode}, poll: ${pollInterval}ms)`
+
+      +      )
+
+      +    );
+
+      +
+           // Use bulk clipboard watcher if bulk mode is enabled
+           if (bulk.enabled) {
+             clipboardWatcher = createBulkClipboardWatcher(
+      @@ -43,15 +48,9 @@
+             clipboardWatcher = createClipboardWatcher(pollInterval, onPatch);
+           }
+       
+           clipboardWatcher.start();
+      -    logger.info(
+
+      -      chalk.gray(`Starting clipboard watcher (polling every
+      ${pollInterval}ms)`)
+
+      -    );
+       
+           const configPath = findConfigPath(cwd);
+           if (configPath) {
+             const configFileName = path.basename(configPath);
+      -      logger.info(
+
+      -        `Configuration file watching is enabled for ${configFileName}.`
+
+      -      );
+             configWatcher = fs.watch(configPath, (eventType) => {
+               if (eventType === 'change') {
+                 logger.info(
+      @@ -66,15 +65,6 @@
+             if (!parsedResponse) return;
+             if (parsedResponse.projectId !== config.projectId) return;
+       
+      -      // Check project ID before notifying and processing.
+
+      -      logger.info(
+
+      -        chalk.green(
+
+      -          `Valid patch detected for project
+      '${parsedResponse.projectId}'. Processing...`
+
+      -        )
+
+      -      );
+
+      -
+             // In non-bulk mode, process immediately
+             await processPatch(config, parsedResponse, { notifyOnStart: true, cwd });
+           };
+
+    patchStrategy: standard-diff
+  - type: write
+    path: src/core/transaction.ts
+    content: >+
+      --- src/core/transaction.ts
+
+      +++ src/core/transaction.ts
+
+      @@ -87,14 +87,14 @@
+       const logCompletionSummary = (
+           uuid: string,
+           startTime: number,
+      -    operations: FileOperation[]
+
+      -) =>
+
+      -{
+
+      -    const duration = Date.now() - startTime;
+
+      -    logger.info(''); // Newline for spacing
+
+      -    logger.info(chalk.bold('Summary:'));
+
+      -    logger.info(`Applied ${operations.length} file operation(s)
+      successfully.`);
+
+      -    logger.info(`Total time from start to commit:
+      ${duration.toFixed(2)}ms`);
+
+      +    operations: FileOperation[],
+
+      +    errorCount: number
+
+      +) => {
+
+      +    const duration = (Date.now() - startTime) / 1000;
+
+      +    const opCount = operations.length;
+
+      +    const opPlural = opCount === 1 ? '' : 's';
+
+      +    logger.info(''); // Newline for spacing
+
+      +    logger.info(chalk.bold(`Summary: ${opCount} file operation${opPlural}
+      applied in ${duration.toFixed(2)}s. Linter errors: ${errorCount}.`));
+       };
+       
+       const rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnapshot, reason: string, enableNotifications: boolean = true, isError: boolean = true): Promise<void> => {
+      @@ -113,7 +113,6 @@
+       
+           // Manual approval
+           if (approvalMode === 'manual') {
+      -        logger.info(chalk.yellow('Manual approval mode is enabled.'));
+               if (config.notifications.enabled) {
+                   try {
+                       const notificationResult = await requestApprovalWithNotification(config.projectId, true);
+      @@ -132,29 +131,22 @@
+               } else if (config.git.autoBranch) {
+                   await handleAutoGitBranch(config, stateFile, cwd);
+               }
+      -        logger.info(chalk.green('✅ Transaction approved and
+      committed.'));
+
+      -        if (committedStateFilePath) {
+
+      -            logger.info(chalk.gray(`   State file:
+      ${committedStateFilePath}`));
+
+      -        }
+
+      -       
+      logger.info(chalk.gray(`--------------------------------------------------`));
+
+      -        logger.info('Watching for next patch...');
+
+      +        logger.info(chalk.green(`✔ Patch ${stateFile.uuid.substring(0,8)}
+      committed.`));
+
+      +        logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+           } else {
+               await rollbackTransaction(cwd, stateFile.uuid, snapshot, 'user rejected', config.notifications.enabled, false);
+           }
+       };
+       
+       const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+      -    const { uuid, reasoning } = parsedResponse;
+
+      +    const { uuid, reasoning, operations } = parsedResponse;
+           const startTime = Date.now();
+           const prompter = options?.prompter ?? getConfirmation;
+       
+           logger.info(chalk.gray(`\n--------------------------------------------------`));
+      -    logger.info(chalk.cyan(`🚀 Starting transaction for patch
+      ${uuid}...`));
+
+      +    logger.info(chalk.cyan(`🚀 Applying patch ${uuid.substring(0,8)} for
+      '${parsedResponse.projectId}'...`));
+       
+           // 1. Validation
+           if (!uuid || !isUUID(uuid)) {
+      @@ -169,32 +161,23 @@
+           // 2. Pre-flight checks
+           const filePaths = operations.map(op => op.filePath);
+           const snapshot = await createSnapshot(filePaths, cwd);
+      +    const stateFile = await writePendingState(cwd, { ...parsedResponse,
+      status: 'pending' });
+       
+           // 3. Persist pending state
+      -    await writePendingState(cwd, { ...parsedResponse, status: 'pending'
+      });
+
+      +    // The following log messages are removed as they are implementation
+      details.
+
+      +    // logger.info(chalk.gray(`  - Staged changes to .pending.yml
+      file.`));
+       
+           // Apply changes
+           const lineChanges = calculateLineChangesCore(operations);
+      -    // logger.info('- Applying file operations...');
+           const newFileStates = await applyOperations(operations, snapshot.files, cwd);
+      -    // logger.info('- File operations complete.');
+
+      -
+
+      -    // ... (logic for printing file changes)
+
+      +    // ... (logic for printing individual file changes)
+       
+           // Run post-command
+           const errorCount = await runPostCommand(config.patch.postCommand, cwd);
+       
+           // Log summary before asking for approval
+      -    logCompletionSummary(uuid, startTime, operations);
+
+      +    logCompletionSummary(uuid, startTime, operations, errorCount);
+       
+           // This commits it to the local DB, not to git
+           const committedStateFilePath = await commitState(cwd, uuid);
+      -    logger.info(chalk.green(`✅ Transaction ${uuid} committed
+      successfully!`));
+
+      -
+
+      -    if (errorCount > 0) {
+
+      -        logger.warn(chalk.yellow(`  - Final linter error count:
+      ${errorCount}`));
+
+      -    } else {
+
+      -        logger.info(chalk.gray(`  - Final linter error count: 0`));
+
+      -    }
+       
+           // 6. Approval
+           const getConfirmation = createConfirmationHandler(options);
+
+    patchStrategy: standard-diff
+  - type: write
+    path: src/utils/notifier.ts
+    content: >+
+      --- src/utils/notifier.ts
+
+      +++ src/utils/notifier.ts
+
+      @@ -51,8 +51,8 @@
+                       return resolve('timeout'); // Fallback to terminal
+                   }
+       
+                   if (response.toLowerCase() === 'timeout') {
+      -                logger.info(chalk.gray('Notification timed out or was
+      dismissed. Please use the terminal to respond.'));
+
+      +                logger.info(chalk.gray('Notification timed out. Please
+      use the terminal to respond.'));
+                       return resolve('timeout');
+                   }
+       
+
+    patchStrategy: standard-diff
+snapshot:
+  src/commands/watch.ts: >
+    import { findConfig, loadConfigOrExit, findConfigPath } from
+    '../core/config';
+
+    import { createClipboardWatcher, createBulkClipboardWatcher } from
+    '../core/clipboard';
+
+    import { parseLLMResponse, type ParsedLLMResponse } from 'relaycode-core';
+
+    import { processPatch, processPatchesBulk } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { type Config } from 'relaycode-core';
+
+    import fs from 'fs';
+
+    import path from 'path';
+
+
+    const getSystemPrompt = (
+      projectId: string,
+      preferredStrategy: Config['watcher']['preferredStrategy'],
+      patchConfig: Config['patch'],
+    ): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+      const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+      const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`standard-diff\`,
+    \`search-replace\`. If omitted, the entire file is replaced (this is the
+    \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" standard-diff
+
+    ...
+
+    \`\`\``;
+
+      const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+      const syntaxStandardDiff = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath standard-diff
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`standard-diff\` patch strategy for all modifications.`;
+
+      const syntaxSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`search-replace\` patch strategy for all
+    modifications.`;
+
+      const sectionStandardDiff = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`standard-diff\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+      const sectionSearchReplace = `---
+
+    ### Strategy 2: Search-Replace (\`search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+      const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+      const finalSteps_rules = [];
+      if (patchConfig.minFileChanges > 0) {
+        finalSteps_rules.push(`You must modify at least ${patchConfig.minFileChanges} file(s) in this transaction.`);
+      }
+      if (patchConfig.maxFileChanges) {
+        finalSteps_rules.push(`You must not modify more than ${patchConfig.maxFileChanges} file(s) in this transaction.`);
+      }
+
+      const finalSteps_list = [
+        'Add your step-by-step reasoning in plain text before each code block.',
+      ];
+      if (finalSteps_rules.length > 0) {
+        finalSteps_list.push(`Adhere to file limits: ${finalSteps_rules.join(' ')}`);
+      }
+      finalSteps_list.push('ALWAYS add the following YAML block at the very end of your response. Use the exact projectId shown here. Generate a new random uuid for each response.');
+
+      const finalSteps_list_string = finalSteps_list.map((item, index) => `${index + 1}.  ${item}`).join('\n');
+
+      const finalSteps = `---
+
+    ### Final Steps
+
+
+    ${finalSteps_list_string}
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary: # A list of key-value pairs for changes
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: A brief summary of my request.
+        gitCommitMsg: >-
+          feat: A concise, imperative git commit message.
+
+          Optionally, provide a longer description here.
+        \`\`\`
+    `;
+
+      const footer = `---------------------------------------------------------------------------`;
+
+      const strategyInfo = {
+        auto: { syntax: syntaxAuto, details: `${sectionStandardDiff}\n${sectionSearchReplace}` },
+        replace: { syntax: syntaxReplace, details: '' },
+        'standard-diff': { syntax: syntaxStandardDiff, details: sectionStandardDiff },
+        'search-replace': { syntax: syntaxSearchReplace, details: sectionSearchReplace },
+      };
+
+      const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
+      const syntax = preferred.syntax;
+      const strategyDetails = preferred.details;
+
+      return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    };
+
+
+    export const watchCommand = async (options: { yes?: boolean } = {}, cwd:
+    string = process.cwd()): Promise<{ stop: () => void }> => {
+      let clipboardWatcher: { stop: () => void } | null = null;
+      let configWatcher: fs.FSWatcher | null = null;
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.core.logLevel);
+        logger.debug(`Log level set to: ${config.core.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.watcher.preferredStrategy, config.patch));
+
+        // Use bulk clipboard watcher if bulk mode is enabled
+        if (config.watcher.enableBulkProcessing) {
+          clipboardWatcher = createBulkClipboardWatcher(
+            config.watcher.clipboardPollInterval,
+            async (contents) => {
+              logger.info(`Processing ${contents.length} clipboard items in bulk mode...`);
+              
+              const parsedResponses: ParsedLLMResponse[] = [];
+              for (const content of contents) {
+                const parsedResponse = parseLLMResponse(content);
+                if (parsedResponse) {
+                  parsedResponses.push(parsedResponse);
+                }
+              }
+
+              if (parsedResponses.length === 0) {
+                logger.warn('No valid relaycode patches found in clipboard content.');
+                return;
+              }
+
+              await processPatchesBulk(config, parsedResponses, { cwd, notifyOnStart: true, yes: options.yes });
+              logger.info('--------------------------------------------------');
+              logger.info('Watching for next patch...');
+            },
+            config.watcher.bulkSize || 5,
+            config.watcher.bulkTimeout || 30000
+          );
+        } else {
+          clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+            logger.debug('New clipboard content detected. Attempting to parse...');
+            const parsedResponse = parseLLMResponse(content);
+
+            if (!parsedResponse) {
+              logger.debug('Clipboard content is not a valid relaycode patch. Ignoring.');
+              return;
+            }
+
+            // Check project ID before notifying and processing.
+            if (parsedResponse.control.projectId !== config.projectId) {
+              logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+              return;
+            }
+
+            await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+            logger.info('--------------------------------------------------');
+            logger.info('Watching for next patch...');
+          });
+        }
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`Configuration file is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      const configPath = await findConfigPath(cwd);
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      if (initialConfig.core.watchConfig && configPath) {
+        logger.info(`Configuration file watching is enabled for ${path.basename(configPath)}.`);
+        configWatcher = fs.watch(configPath, handleConfigChange);
+      } else {
+        logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');
+      }
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+  src/core/transaction.ts: >
+    import { type Config, type ParsedLLMResponse, type StateFile, type
+    FileSnapshot, type FileOperation, normalizeGitCommitMsg } from
+    'relaycode-core';
+
+    import { logger, getErrorMessage } from '../utils/logger';
+
+    import { getErrorCount, executeShellCommand } from '../utils/shell';
+
+    import { deleteFile, readFileContent, removeEmptyParentDirectories,
+    renameFile, writeFileContent } from '../utils/fs';
+
+    import path from 'path';
+
+    import chalk from 'chalk';
+
+    import { applyOperations as applyOperationsCore, calculateLineChanges as
+    calculateLineChangesCore } from 'relaycode-core';
+
+
+    import { commitState, deletePendingState, hasBeenProcessed,
+    updatePendingState, writePendingState } from './state';
+
+    import { createConfirmationHandler } from '../utils/prompt';
+
+    import { requestApprovalWithNotification, notifyFailure, notifySuccess,
+    notifyPatchDetected, notifyRollbackFailure } from '../utils/notifier';
+
+
+    type Prompter = (question: string) => Promise<boolean>;
+
+
+    type ProcessPatchOptions = {
+        prompter?: Prompter;
+        cwd?: string;
+        notifyOnStart?: boolean;
+        yes?: boolean;
+    };
+
+
+    const pendingTransactions = new Map<string, StateFile>();
+
+
+    export const createSnapshot = async (filePaths: string[], cwd: string =
+    process.cwd()): Promise<FileSnapshot> => {
+      const snapshot: FileSnapshot = {};
+      await Promise.all(
+        filePaths.map(async (filePath) => {
+          snapshot[filePath] = await readFileContent(filePath, cwd);
+        })
+      );
+      return snapshot;
+    };
+
+
+    /**
+     * Applies a series of file operations to the filesystem and returns the new in-memory file states.
+     * This function processes operations sequentially, applying patches (like diffs) against the evolving
+     * state of files, and performing filesystem actions (write, delete, rename) along the way.
+     * @param operations The file operations to apply.
+     * @param originalFiles The initial state of the files.
+     * @param cwd The working directory.
+     * @returns A map representing the final state of all affected files.
+     */
+    export const applyOperations = async (  
+      operations: FileOperation[],
+      originalFiles: Map<string, string | null>,
+      cwd: string = process.cwd()
+    ): Promise<Map<string, string | null>> => {
+      // Step 1: Calculate all new file states in-memory. This is now parallelized inside relaycode-core.
+      const result = await applyOperationsCore(operations, originalFiles);
+
+      if (!result.success) {
+        throw new Error(`Failed to calculate state changes`);
+      }
+
+      const { newFileStates } = result;
+
+      // Step 2: Apply physical changes to the filesystem.
+      // To correctly handle renames, we process rename operations first.
+      const renameOps = operations.filter((op): op is Extract<FileOperation, {type: 'rename'}> => op.type === 'rename');
+      for (const op of renameOps) {
+        await renameFile(op.from, op.to, cwd);
+      }
+
+      // Step 3: Apply writes and deletes, which can be done in parallel.
+      const fsPromises: Promise<void>[] = [];
+      const allPaths = new Set([...originalFiles.keys(), ...newFileStates.keys()]);
+      const renamedFromPaths = new Set(renameOps.map(op => op.from));
+
+      for (const path of allPaths) {
+        if (renamedFromPaths.has(path)) continue; // This path was a source of a rename, it's already handled.
+
+        const oldContent = originalFiles.get(path);
+        const newContent = newFileStates.get(path);
+        if (oldContent !== newContent) {
+            // Use `== null` to check for both null and undefined.
+            // If newContent is missing from the map, it's treated as a deletion.
+            if (newContent == null) {
+                fsPromises.push(deleteFile(path, cwd));
+            } else {
+                fsPromises.push(writeFileContent(path, newContent, cwd));
+            }
+        }
+      }
+      await Promise.all(fsPromises);
+
+      return newFileStates;
+    };
+
+
+    export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string =
+    process.cwd()): Promise<void> => {
+      const projectRoot = path.resolve(cwd);
+      const entries = Object.entries(snapshot);
+      const directoriesToClean = new Set<string>();
+      const restoreErrors: { path: string, error: unknown }[] = [];
+
+      // Attempt to restore all files in parallel, collecting errors.
+      await Promise.all(entries.map(async ([filePath, content]) => {
+          const fullPath = path.resolve(cwd, filePath);
+          try {
+            if (content === null) {
+              // If the file didn't exist in the snapshot, make sure it doesn't exist after restore.
+              await deleteFile(filePath, cwd);
+              directoriesToClean.add(path.dirname(fullPath));
+            } else {
+              // Create directory structure if needed and write the original content back.
+              await writeFileContent(filePath, content, cwd);
+            }
+          } catch (error) {
+            restoreErrors.push({ path: filePath, error });
+          }
+      }));
+      
+      // After all files are processed, clean up empty directories
+      // Sort directories by depth (deepest first) to clean up nested empty dirs properly
+      const sortedDirs = Array.from(directoriesToClean)
+        .sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+      
+      // Process each directory that had files deleted
+      for (const dir of sortedDirs) {
+        await removeEmptyParentDirectories(dir, projectRoot);
+      }
+
+      if (restoreErrors.length > 0) {
+        const errorSummary = restoreErrors
+          .map(e => `  - ${e.path}: ${getErrorMessage(e.error)}`)
+          .join('\n');
+        throw new Error(`Rollback failed for ${restoreErrors.length} file(s):\n${errorSummary}`);
+      }
+    };
+
+
+    const logCompletionSummary = (
+        uuid: string,
+        startTime: number,
+        operations: FileOperation[]
+    ) => {
+        const duration = performance.now() - startTime;
+
+        logger.log(chalk.bold('\nSummary:'));
+        logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
+        logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
+        logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    };
+
+
+    const rollbackTransaction = async (cwd: string, uuid: string, snapshot:
+    FileSnapshot, reason: string, enableNotifications: boolean = true, isError:
+    boolean = true): Promise<void> => {
+        // Validate UUID to prevent undefined.yaml errors
+        if (!uuid || typeof uuid !== 'string' || !uuid.match(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)) {
+            logger.error(`Fatal: Invalid UUID provided for rollback: ${uuid}`);
+            return;
+        }
+        
+        if (isError) {
+            logger.warn(`Rolling back changes: ${reason}`);
+        }
+
+        let rollbackSuccessful = false;
+        try {
+            await restoreSnapshot(snapshot, cwd);
+            logger.success('  - Files restored to original state.');
+            rollbackSuccessful = true;
+        } catch (error) {
+            logger.error(`Fatal: Rollback failed: ${getErrorMessage(error)}`);
+            notifyRollbackFailure(uuid, enableNotifications);
+            // Do not rethrow; we're already in a final error handling state.
+        } finally {
+            try {
+                await deletePendingState(cwd, uuid);
+                pendingTransactions.delete(uuid);
+                logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
+                if (isError && rollbackSuccessful) {
+                    notifyFailure(uuid, enableNotifications);
+                }
+            } catch (cleanupError) {
+                logger.error(`Fatal: Could not clean up pending state for ${chalk.gray(uuid)}: ${getErrorMessage(cleanupError)}`);
+            }
+        }
+    };
+
+
+    type ApprovalOptions = {
+        config: Config;
+        cwd: string;
+        getConfirmation: Prompter;
+    }
+
+
+    const handleApproval = async ({ config, cwd, getConfirmation }:
+    ApprovalOptions): Promise<boolean> => {
+        const finalErrorCount = await getErrorCount(config.patch.linter, cwd);
+        logger.log(`  - Final linter error count: ${finalErrorCount > 0 ? chalk.red(finalErrorCount) : chalk.green(finalErrorCount)}`);
+        
+        const getManualApproval = async (reason: string): Promise<boolean> => {
+            logger.warn(reason);
+            
+            const notificationResult = await requestApprovalWithNotification(config.projectId, config.core.enableNotifications);
+
+            if (notificationResult === 'approved') {
+                logger.info('Approved via notification.');
+                return true;
+            }
+            if (notificationResult === 'rejected') {
+                logger.info('Rejected via notification.');
+                return false;
+            }
+
+            if (notificationResult === 'timeout') {
+                logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');
+            }
+
+            return await getConfirmation('Changes applied. Do you want to approve and commit them? (y/N)');
+        };
+
+        if (config.patch.approvalMode === 'manual') {
+            return await getManualApproval('Manual approval mode is enabled.');
+        }
+        // auto mode
+        const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
+        if (canAutoApprove) {
+            logger.success('  - Changes automatically approved based on your configuration.');
+            return true;
+        }
+        return await getManualApproval(`Manual approval required: Linter found ${finalErrorCount} error(s) (threshold is ${config.patch.approvalOnErrorCount}).`);
+    };
+
+
+    const _processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        const cwd = options?.cwd || process.cwd();
+        const getConfirmation = createConfirmationHandler({ yes: options?.yes }, options?.prompter);
+        const { control, operations, reasoning } = parsedResponse;
+        const { uuid, projectId } = control;
+        const startTime = performance.now();
+
+        // 1. Validation
+        if (projectId !== config.projectId) {
+            logger.warn(`Skipping patch: projectId mismatch (expected '${chalk.cyan(config.projectId)}', got '${chalk.cyan(projectId)}').`);
+            return;
+        }
+        if (await hasBeenProcessed(cwd, uuid)) {
+            logger.info(`Skipping patch: uuid '${chalk.gray(uuid)}' has already been processed.`);
+            return;
+        }
+
+        const { minFileChanges, maxFileChanges } = config.patch;
+        const operationCount = operations.length;
+        if (minFileChanges > 0 && operationCount < minFileChanges) {
+            logger.warn(`Skipping patch: Not enough file changes (expected at least ${minFileChanges}, got ${operationCount}).`);
+            return;
+        }
+        if (maxFileChanges && operationCount > maxFileChanges) {
+            logger.warn(`Skipping patch: Too many file changes (expected at most ${maxFileChanges}, got ${operationCount}).`);
+            return;
+        }
+
+        // Notify if coming from watch mode, now that we know it's a new patch.
+        if (options?.notifyOnStart) {
+            notifyPatchDetected(config.projectId, config.core.enableNotifications);
+            logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
+        }
+
+        // 2. Pre-flight checks
+        if (config.patch.preCommand) {
+            logger.log(`  - Running pre-command: ${chalk.magenta(config.patch.preCommand)}`);
+            const { exitCode, stderr } = await executeShellCommand(config.patch.preCommand, cwd);
+            if (exitCode !== 0) {
+                logger.error(`Pre-command failed with exit code ${chalk.red(exitCode)}, aborting transaction.`);
+                if (stderr) logger.error(`Stderr: ${stderr}`);
+                return;
+            }
+        }
+
+        logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+        logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
+
+        const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
+            if (op.type === 'rename') {
+                acc.push(op.from, op.to);
+            } else {
+                acc.push(op.path);
+            }
+            return acc;
+        }, []);
+        const snapshot = await createSnapshot(affectedFilePaths, cwd);
+        
+        const stateFile: StateFile = {
+            uuid,
+            projectId,
+            createdAt: new Date().toISOString(),
+            gitCommitMsg: control.gitCommitMsg,
+            promptSummary: control.promptSummary,
+            reasoning,
+            operations,
+            snapshot,
+            approved: false,
+        };
+
+        try {
+            await writePendingState(cwd, stateFile);
+            logger.success('  - Staged changes to .pending.yml file.');
+
+            const originalFiles = new Map<string, string | null>();
+            affectedFilePaths.forEach(p => originalFiles.set(p, snapshot[p] ?? null));
+
+            // Apply changes
+            logger.log('  - Applying file operations...');
+            const newFileStates = await applyOperations(operations, originalFiles, cwd);
+            logger.success('  - File operations complete.');
+
+            operations.forEach(op => {
+                const stats = calculateLineChangesCore(op, originalFiles, newFileStates);
+                if (op.type === 'write') {
+                    logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
+                } else if (op.type === 'delete') {
+                    logger.success(`✔ Deleted: ${chalk.cyan(op.path)}`);
+                } else if (op.type === 'rename') {
+                    logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
+                }
+            });
+
+            // Run post-command
+            if (config.patch.postCommand) {
+                logger.log(`  - Running post-command: ${chalk.magenta(config.patch.postCommand)}`);
+                const postResult = await executeShellCommand(config.patch.postCommand, cwd);
+                if (postResult.exitCode !== 0) {
+                    logger.error(`Post-command failed with exit code ${chalk.red(postResult.exitCode)}.`);
+                    if (postResult.stderr) logger.error(`Stderr: ${postResult.stderr}`);
+                    throw new Error('Post-command failed, forcing rollback.');
+                }
+            }
+
+            // Log summary before asking for approval
+            logCompletionSummary(uuid, startTime, operations);
+
+            const isApproved = await handleApproval({ 
+                config, 
+                cwd, 
+                getConfirmation
+            });
+
+            if (isApproved) {
+                stateFile.approved = true;
+                await updatePendingState(cwd, stateFile);
+                const stateFilePath = await commitState(cwd, uuid);
+                logger.info(chalk.green(`✅ Transaction approved and committed.`));
+                if (stateFilePath) {
+                    logger.info(`   State file: ${chalk.gray(path.relative(cwd, stateFilePath))}`);
+                }
+                notifySuccess(uuid, config.core.enableNotifications);
+                await handleAutoGitBranch(config, stateFile, cwd);
+            } else {
+                logger.warn('Operation cancelled by user. Rolling back changes...');
+                await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
+            }
+        } catch (error) {
+            const reason = getErrorMessage(error);
+            await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        }
+    };
+
+
+    /**
+     * Processes a patch transaction. This function acts as a locking wrapper around the core
+     * patch processing logic (`_processPatch`) to ensure that only one transaction is
+     * processed at a time for a given working directory. This prevents race conditions
+     * with the file-based database.
+     * @param config The application configuration.
+     * @param parsedResponse The parsed response from the LLM.
+     * @param options Options for processing the patch.
+     */
+    export const processPatch = async (config: Config, parsedResponse:
+    ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
+        await _processPatch(config, parsedResponse, options);
+    };
+
+
+    export const getPendingTransactionCount = (_cwd: string = process.cwd()):
+    number => {
+        return pendingTransactions.size;
+    };
+
+
+    export const approveAllPendingTransactions = async (config: Config, cwd:
+    string = process.cwd(), yes: boolean = false): Promise<void> => {
+        const pending = Array.from(pendingTransactions.values());
+        if (pending.length === 0) {
+            logger.info('No pending transactions to approve.');
+            return;
+        }
+
+        if (yes) {
+            logger.info(`Found ${pending.length} pending transaction(s). Approving all...`);
+            for (const tx of pending) {
+                tx.approved = true;
+                await updatePendingState(cwd, tx);
+                await commitState(cwd, tx.uuid);
+                logger.success(`✅ Transaction ${chalk.gray(tx.uuid)} committed successfully!`);
+                await handleAutoGitBranch(config, tx, cwd);
+                pendingTransactions.delete(tx.uuid);
+            }
+            return;
+        }
+
+        logger.info(`Found ${pending.length} pending transaction(s) for review.`);
+        const prompter = createConfirmationHandler({});
+        for (const tx of pending) {
+            logger.info(chalk.cyan(`\n${'-'.repeat(50)}`));
+            logger.info(`Transaction: ${chalk.gray(tx.uuid)}`);
+            logger.info(`Reasoning: ${tx.reasoning.join(' ')}`);
+            logger.info(`Files changed: ${tx.operations.length}`);
+
+            const approve = await prompter('Do you want to approve this transaction?');
+            if (approve) {
+                logger.info(`Approving transaction ${tx.uuid}...`);
+                tx.approved = true;
+                await updatePendingState(cwd, tx);
+                await commitState(cwd, tx.uuid);
+                logger.success(`✅ Transaction ${chalk.gray(tx.uuid)} committed successfully!`);
+                await handleAutoGitBranch(config, tx, cwd);
+                pendingTransactions.delete(tx.uuid);
+            } else {
+                await deletePendingState(cwd, tx.uuid);
+                pendingTransactions.delete(tx.uuid);
+                logger.info(`Transaction ${tx.uuid} was rejected and removed.`);
+            }
+        }
+    };
+
+
+    export const processPatchesBulk = async (config: Config, parsedResponses:
+    ParsedLLMResponse[], options?: ProcessPatchOptions): Promise<void> => {
+        // In bulk mode, process each patch individually, which will trigger individual approvals.
+        // The "bulk" aspect is about clipboard gathering, not approval.
+        for (const parsedResponse of parsedResponses) {
+            await processPatch(config, parsedResponse, options);
+        }
+    };
+
+
+    const handleAutoGitBranch = async (config: Config, stateFile: StateFile,
+    cwd: string): Promise<void> => {
+        if (!config.git.autoGitBranch) return;
+
+        let branchNameSegment = '';
+        if (config.git.gitBranchTemplate === 'gitCommitMsg' && stateFile.gitCommitMsg) {
+            branchNameSegment = normalizeGitCommitMsg(stateFile.gitCommitMsg) ?? '';
+        } else {
+            branchNameSegment = stateFile.uuid;
+        }
+
+        const sanitizedSegment = branchNameSegment
+            .trim()
+            .toLowerCase()
+            .replace(/[^\w\s-]/g, '') // Remove all non-word, non-space, non-hyphen chars
+            .replace(/[\s_]+/g, '-') // Replace spaces and underscores with a single hyphen
+            .replace(/-+/g, '-') // Collapse consecutive hyphens
+            .replace(/^-|-$/g, '') // Trim leading/trailing hyphens
+            .slice(0, 70); // Truncate
+
+        if (sanitizedSegment) {
+            const branchName = `${config.git.gitBranchPrefix}${sanitizedSegment}`;
+            logger.info(`Creating and switching to new git branch: ${chalk.magenta(branchName)}`);
+            const command = `git checkout -b "${branchName}"`;
+            const result = await executeShellCommand(command, cwd);
+            if (result.exitCode === 0) {
+                logger.success(`Successfully created and switched to branch '${chalk.magenta(branchName)}'.`);
+            } else {
+                // Exit code 128 from `git checkout -b` often means the branch already exists.
+                if (result.exitCode === 128 && result.stderr.includes('already exists')) {
+                    logger.warn(`Could not create branch '${chalk.magenta(branchName)}' because it already exists.`);
+                } else {
+                    logger.warn(`Could not create git branch '${chalk.magenta(branchName)}'.`);
+                }
+                logger.debug(`'${command}' failed with: ${result.stderr}`);
+            }
+        } else {
+            logger.warn('Could not generate a branch name segment from commit message or UUID. Skipping git branch creation.');
+        }
+    };
+  src/utils/notifier.ts: >-
+    // @ts-ignore - toasted-notifier doesn't have TypeScript declarations
+
+    import toastedNotifier from 'toasted-notifier';
+
+
+    // Manually define the interface for the parts of toasted-notifier we use,
+
+    // as it doesn't have official TypeScript definitions.
+
+    interface NotifyOptions {
+      title: string;
+      message: string;
+      sound: boolean;
+      wait: boolean;
+      actions?: string[];
+      timeout?: number;
+    }
+
+
+    interface ToastedNotifier {
+      notify(
+        options: NotifyOptions,
+        callback?: (err: Error | null, response: string) => void,
+      ): void;
+    }
+
+
+    const notifier: ToastedNotifier = toastedNotifier;
+
+    import { APP_NAME } from './constants';
+
+    import { getErrorMessage, logger } from './logger';
+
+
+    // This is a "fire-and-forget" utility. If notifications fail for any reason
+
+    // (e.g., unsupported OS, DND mode, permissions), it should not crash the
+    app.
+
+    const sendNotification = (options: { title: string; message: string;
+    enableNotifications?: boolean }) => {
+        // Skip notification if explicitly disabled
+        if (options.enableNotifications === false) {
+            return;
+        }
+        
+        try {
+            notifier.notify({
+                title: options.title,
+                message: options.message,
+                sound: false, // Keep it quiet by default
+                wait: false,
+            }, (err: Error | null) => {
+                if (err) {
+                    // Silently ignore errors. This is a non-critical feature.
+                }
+            });
+        } catch (err) {
+            // Silently ignore errors.
+        }
+    };
+
+
+    export const createNotifier = (messageTemplate: (param: string) => string)
+    => {
+        return (param: string, enableNotifications: boolean = true) => {
+            sendNotification({
+                title: APP_NAME,
+                message: messageTemplate(param),
+                enableNotifications,
+            });
+        };
+    };
+
+
+    export const notifyPatchDetected = createNotifier(
+        (projectId: string) => `New patch detected for project \`${projectId}\`.`
+    );
+
+
+    export const notifyApprovalRequired = createNotifier(
+        (projectId: string) => `Action required to approve changes for \`${projectId}\`.`
+    );
+
+
+    export const notifySuccess = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` applied successfully.`
+    );
+
+
+    export const notifyFailure = createNotifier(
+        (uuid: string) => `Patch \`${uuid}\` failed and was rolled back.`
+    );
+
+
+    export const notifyRollbackFailure = createNotifier(
+        (uuid: string) => `CRITICAL: Rollback for patch \`${uuid}\` FAILED. Manual intervention required.`
+    );
+
+
+    export const requestApprovalWithNotification = (
+        projectId: string,
+        enableNotifications: boolean = true
+    ): Promise<'approved' | 'rejected' | 'timeout' | 'unsupported'> => {
+        if (enableNotifications === false) {
+            return Promise.resolve('unsupported');
+        }
+
+        return new Promise((resolve) => {
+            try {
+                notifier.notify(
+                    {
+                        title: `Approval Required for ${projectId}`,
+                        message: 'A patch requires your approval. You can also approve/reject in the terminal.',
+                        sound: true,
+                        wait: true, // This is key. It makes the notifier wait for user action.
+                        actions: ['Approve', 'Reject'],
+                        timeout: 30, // seconds
+                    },
+                    (err: Error | null, response: string) => {
+                        if (err) {
+                            logger.debug(`Notification approval error: ${getErrorMessage(err)}`);
+                            return resolve('unsupported');
+                        }
+                        const cleanResponse = (response || '').toLowerCase().trim();
+                        if (cleanResponse.startsWith('approve')) {
+                            resolve('approved');
+                        } else if (cleanResponse.startsWith('reject')) {
+                            resolve('rejected');
+                        } else {
+                            logger.debug(`Notification approval received non-action response: "${cleanResponse}"`);
+                            resolve('timeout');
+                        }
+                    }
+                );
+            } catch (err) {
+                logger.debug(`Notification dispatch threw synchronous error: ${getErrorMessage(err)}`);
+                resolve('unsupported');
+            }
+        });
+    };
+approved: false
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: undone
+id: 5

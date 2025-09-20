@@ -1,0 +1,905 @@
+uuid: a206b0d9-0b16-43b4-a292-6f296c05d098
+projectId: relaycode
+createdAt: '2025-09-20T03:32:25.198Z'
+gitCommitMsg: >-
+  feat(cli): enhance version command with build timestamps
+
+  Implements a new, more informative output for the `relay -v` command.
+
+  - Adds an ASCII art logo for `relaycode`. - Displays the last modified
+  timestamp for the source code of `relaycode`, `relaycode-core`,
+  `apply-multi-diff`, and `konro`. - Introduces a new
+  `scripts/update-timestamp.ts` script that runs on `prebuild` for each package
+  to automatically update a timestamp comment in their respective `index.ts`
+  files. - Refactors `src/cli.ts` to support asynchronous operations for reading
+  timestamps and constructing the new version output.
+promptSummary: >-
+  Enhance the `relay -v` command to show an ASCII logo, version, and
+  last-modified timestamps for relaycode and its local packages. This involves
+  creating a script to timestamp source files during build and updating the CLI
+  to display this information.
+reasoning:
+  - >-
+    This is an excellent request. Enhancing the version command with more
+    context about the build is a great way to improve developer experience and
+    traceability. I'll implement this by creating a timestamping script that
+    runs during the build process for `relaycode` and its local packages, and
+    then I'll update the CLI to display this information in the format you've
+    requested.
+  - 'Here are the steps I''ll take:'
+  - >-
+    1.  **Create Timestamp Scripts**: I'll create a new script,
+    `scripts/update-timestamp.ts`, for `relaycode` and each of the specified
+    local packages (`konro`, `apply-multi-diff`, `relaycode-core`). This script
+    will add or update a `// last-modified: YYYY-MM-DD HH:MM:SS` comment at the
+    top of the main `index.ts` file for each package.
+  - >-
+    2.  **Integrate into Build Process**: I'll modify the `package.json` file
+    for each of the four packages to execute this new timestamp script as part
+    of their `build` command, ensuring the timestamp is always current after a
+    build.
+  - >-
+    3.  **Enhance the CLI Version Command**: I will refactor `src/cli.ts` to
+    replace the standard version output. The new output will include the ASCII
+    art logo, the version number, and the last modified timestamps for each
+    package, which will be read directly from their respective `index.ts` files.
+  - Let's begin.
+  - '### 1. Create Timestamp Update Scripts'
+  - >-
+    First, I'll create the script to update the timestamp in `src/index.ts`.
+    This same script will be used across all four packages.
+  - Here's the new script for the main `relaycode` package.
+  - Now, I'll create the same script for the other packages.
+  - '### 2. Update `package.json` Files'
+  - >-
+    Next, I'll add a `prebuild` script to each `package.json` to run the
+    timestamp updater.
+  - '### 3. Update CLI for Enhanced Version Output'
+  - >-
+    Finally, I'll update `src/cli.ts` to implement the custom version output.
+    This requires refactoring the file to be asynchronous to fetch the
+    timestamps.
+  - >-
+    These changes complete your request. After running `bun run build` in any of
+    the packages (or the root), the `index.ts` files will be timestamped.
+    Running `relay -v` will now display the beautiful and informative version
+    screen you designed.
+operations:
+  - type: write
+    path: scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+
+      // This script is intended to be run from the root of a package.
+      const filePath = path.resolve('src/index.ts');
+
+      const now = new Date();
+      // Format to 'YYYY-MM-DD HH:MM:SS'
+      const timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
+
+      const timestampComment = `// last-modified: ${timestamp}`;
+
+      async function updateTimestamp() {
+        let content = '';
+        try {
+          content = await fs.readFile(filePath, 'utf-8');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.error(`Error reading ${filePath}:`, error);
+            process.exit(1);
+          }
+          // File doesn't exist, which is fine. We'll create it.
+        }
+
+        const regex = /^\/\/ last-modified: .*\r?\n?/;
+
+        if (regex.test(content)) {
+          content = content.replace(regex, `${timestampComment}\n`);
+        } else {
+          content = `${timestampComment}\n${content}`;
+        }
+
+        try {
+          // Ensure directory exists
+          await fs.mkdir(path.dirname(filePath), { recursive: true });
+          await fs.writeFile(filePath, content, 'utf-8');
+        } catch (error) {
+          console.error(`Error writing to ${filePath}:`, error);
+          process.exit(1);
+        }
+      }
+
+      updateTimestamp();
+    patchStrategy: replace
+  - type: write
+    path: packages/apply-multi-diff/scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+
+      // This script is intended to be run from the root of a package.
+      const filePath = path.resolve('src/index.ts');
+
+      const now = new Date();
+      // Format to 'YYYY-MM-DD HH:MM:SS'
+      const timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
+
+      const timestampComment = `// last-modified: ${timestamp}`;
+
+      async function updateTimestamp() {
+        let content = '';
+        try {
+          content = await fs.readFile(filePath, 'utf-8');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.error(`Error reading ${filePath}:`, error);
+            process.exit(1);
+          }
+          // File doesn't exist, which is fine. We'll create it.
+        }
+
+        const regex = /^\/\/ last-modified: .*\r?\n?/;
+
+        if (regex.test(content)) {
+          content = content.replace(regex, `${timestampComment}\n`);
+        } else {
+          content = `${timestampComment}\n${content}`;
+        }
+
+        try {
+          // Ensure directory exists
+          await fs.mkdir(path.dirname(filePath), { recursive: true });
+          await fs.writeFile(filePath, content, 'utf-8');
+        } catch (error) {
+          console.error(`Error writing to ${filePath}:`, error);
+          process.exit(1);
+        }
+      }
+
+      updateTimestamp();
+    patchStrategy: replace
+  - type: write
+    path: packages/konro/scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+
+      // This script is intended to be run from the root of a package.
+      const filePath = path.resolve('src/index.ts');
+
+      const now = new Date();
+      // Format to 'YYYY-MM-DD HH:MM:SS'
+      const timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
+
+      const timestampComment = `// last-modified: ${timestamp}`;
+
+      async function updateTimestamp() {
+        let content = '';
+        try {
+          content = await fs.readFile(filePath, 'utf-8');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.error(`Error reading ${filePath}:`, error);
+            process.exit(1);
+          }
+          // File doesn't exist, which is fine. We'll create it.
+        }
+
+        const regex = /^\/\/ last-modified: .*\r?\n?/;
+
+        if (regex.test(content)) {
+          content = content.replace(regex, `${timestampComment}\n`);
+        } else {
+          content = `${timestampComment}\n${content}`;
+        }
+
+        try {
+          // Ensure directory exists
+          await fs.mkdir(path.dirname(filePath), { recursive: true });
+          await fs.writeFile(filePath, content, 'utf-8');
+        } catch (error) {
+          console.error(`Error writing to ${filePath}:`, error);
+          process.exit(1);
+        }
+      }
+
+      updateTimestamp();
+    patchStrategy: replace
+  - type: write
+    path: packages/relaycode-core/scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+
+      // This script is intended to be run from the root of a package.
+      const filePath = path.resolve('src/index.ts');
+
+      const now = new Date();
+      // Format to 'YYYY-MM-DD HH:MM:SS'
+      const timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
+
+      const timestampComment = `// last-modified: ${timestamp}`;
+
+      async function updateTimestamp() {
+        let content = '';
+        try {
+          content = await fs.readFile(filePath, 'utf-8');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.error(`Error reading ${filePath}:`, error);
+            process.exit(1);
+          }
+          // File doesn't exist, which is fine. We'll create it.
+        }
+
+        const regex = /^\/\/ last-modified: .*\r?\n?/;
+
+        if (regex.test(content)) {
+          content = content.replace(regex, `${timestampComment}\n`);
+        } else {
+          content = `${timestampComment}\n${content}`;
+        }
+
+        try {
+          // Ensure directory exists
+          await fs.mkdir(path.dirname(filePath), { recursive: true });
+          await fs.writeFile(filePath, content, 'utf-8');
+        } catch (error) {
+          console.error(`Error writing to ${filePath}:`, error);
+          process.exit(1);
+        }
+      }
+
+      updateTimestamp();
+    patchStrategy: replace
+  - type: write
+    path: package.json
+    content: |+
+      --- package.json
+      +++ package.json
+      @@ -19,6 +19,7 @@
+         },
+         "scripts": {
+           "clean": "rm -rf dist",
+      +    "prebuild": "bun scripts/update-timestamp.ts",
+           "build": "tsup",
+           "test": "bun test",
+           "lint": "eslint . --ext .ts,.js",
+
+    patchStrategy: standard-diff
+  - type: write
+    path: packages/apply-multi-diff/package.json
+    content: |+
+      --- packages/apply-multi-diff/package.json
+      +++ packages/apply-multi-diff/package.json
+      @@ -16,6 +16,7 @@
+           "dist"
+         ],
+         "scripts": {
+      +    "prebuild": "bun scripts/update-timestamp.ts",
+           "build": "tsup",
+           "test": "bun test"
+         },
+
+    patchStrategy: standard-diff
+  - type: write
+    path: packages/konro/package.json
+    content: |+
+      --- packages/konro/package.json
+      +++ packages/konro/package.json
+      @@ -52,6 +52,7 @@
+           }
+         },
+         "scripts": {
+      +    "prebuild": "bun scripts/update-timestamp.ts",
+           "lint": "eslint .",
+           "build": "tsup",
+           "dev": "tsup --watch",
+
+    patchStrategy: standard-diff
+  - type: write
+    path: packages/relaycode-core/package.json
+    content: |+
+      --- packages/relaycode-core/package.json
+      +++ packages/relaycode-core/package.json
+      @@ -27,6 +27,7 @@
+           "dist"
+         ],
+         "scripts": {
+      +    "prebuild": "bun scripts/update-timestamp.ts",
+           "build": "tsup",
+           "dev": "tsup --watch",
+           "prepublishOnly": "bun run build"
+
+    patchStrategy: standard-diff
+  - type: write
+    path: src/cli.ts
+    content: >+
+      --- src/cli.ts
+
+      +++ src/cli.ts
+
+      @@ -8,8 +8,55 @@
+       import { approveAllCommand } from './commands/approve-all';
+       import { createRequire } from 'node:module';
+       import { fileURLToPath } from 'node:url';
+      -import { dirname, join } from 'node:path';
+
+      +import { dirname, join } from 'node:path';
+
+      +import fs from 'fs';
+       
+      +const getTimestampFromFile = async (filePath: string): Promise<string> =>
+      {
+
+      +  try {
+
+      +    const content = await fs.promises.readFile(filePath, 'utf-8');
+
+      +    const match = content.match(/\/\/ last-modified: (.*)/);
+
+      +    return match ? match[1].trim() : 'N/A';
+
+      +  } catch (error) {
+
+      +    return 'N/A';
+
+      +  }
+
+      +};
+
+      +
+
+      +const buildVersionOutput = async (version: string): Promise<string> => {
+
+      +    const asciiArt = `  ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+
+      +  ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+
+      +  ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀`;
+
+      +
+
+      +    const currentDir = dirname(fileURLToPath(import.meta.url));
+
+      +    const rootDir = join(currentDir, '..');
+
+      +
+
+      +    const paths = {
+
+      +        relaycode: join(rootDir, 'src/index.ts'),
+
+      +        'relaycode-core': join(rootDir,
+      'packages/relaycode-core/src/index.ts'),
+
+      +        'apply-multi-diff': join(rootDir,
+      'packages/apply-multi-diff/src/index.ts'),
+
+      +        konro: join(rootDir, 'packages/konro/src/index.ts'),
+
+      +    };
+
+      +
+
+      +    const timestamps = await Promise.all([
+
+      +        getTimestampFromFile(paths.relaycode),
+
+      +        getTimestampFromFile(paths['relaycode-core']),
+
+      +        getTimestampFromFile(paths['apply-multi-diff']),
+
+      +        getTimestampFromFile(paths.konro),
+
+      +    ]);
+
+      +
+
+      +    const packages = [
+
+      +        { name: 'relaycode', ts: timestamps[0] },
+
+      +        { name: 'relaycode-core', ts: timestamps[1] },
+
+      +        { name: 'apply-multi-diff', ts: timestamps[2] },
+
+      +        { name: 'konro', ts: timestamps[3] },
+
+      +    ];
+
+      +
+
+      +    const packageLines = packages.map(p => ` 
+      ${p.name.padEnd(22)}${p.ts}`).join('\n');
+
+      +
+
+      +    return `\n${asciiArt}\n\n  relaycode version ${version}\n\n  last
+      modified source code\n\n${packageLines}\n`;
+
+      +};
+
+      +
+
+      +const main = async () => {
+       // Default version in case we can't find the package.json
+       let version = 'unknown';
+       
+      @@ -21,8 +68,8 @@
+           // Fallback for local development
+           const currentDir = dirname(fileURLToPath(import.meta.url));
+           const pkgPath = join(currentDir, '../package.json');
+      -    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+
+      -    version = pkg.version;
+
+      +    const pkgContent = await fs.promises.readFile(pkgPath, 'utf-8');
+
+      +    version = JSON.parse(pkgContent).version;
+         } catch (e2) {
+           // ignore
+         }
+      @@ -32,15 +79,20 @@
+       if (version === 'unknown') {
+           version = '1.1.5';
+       }
+      +
+       const program = new Command();
+       
+      +program.option('-v, --version', 'output the current version');
+
+      +program.on('option:version', async () => {
+
+      +    const output = await buildVersionOutput(version);
+
+      +    console.log(output);
+
+      +    process.exit(0);
+
+      +});
+       program
+         .name(COMMAND_NAME)
+         .description(
+           'A developer assistant that automates applying code changes from LLMs.'
+      -  )
+
+      -  .version(version, '-v, --version', 'output the current version');
+
+      +  );
+       
+       interface CommandInfo {
+         name: string;
+      @@ -107,3 +159,7 @@
+       setupCommands(git, gitCommands);
+       
+       program.parse(process.argv);
+      +};
+
+      +
+
+      +main().catch(console.error);
+
+    patchStrategy: standard-diff
+snapshot:
+  scripts/update-timestamp.ts: null
+  packages/apply-multi-diff/scripts/update-timestamp.ts: null
+  packages/konro/scripts/update-timestamp.ts: null
+  packages/relaycode-core/scripts/update-timestamp.ts: null
+  package.json: |
+    {
+      "name": "relaycode",
+      "version": "1.1.5",
+      "description": "A developer assistant that automates applying code changes from LLMs.",
+      "type": "module",
+      "main": "./dist/index.js",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "bin": {
+        "relay": "./dist/cli.cjs"
+      },
+      "files": [
+        "dist",
+        "fallbacks"
+      ],
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+      },
+      "scripts": {
+        "clean": "rm -rf dist",
+        "build": "tsup",
+        "test": "bun test",
+        "lint": "eslint . --ext .ts,.js",
+        "lint:fix": "eslint . --ext .ts,.js --fix",
+        "dev": "bun run src/cli.ts",
+        "prepublishOnly": "bun run build",
+        "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+        "commit": "bun run src/cli.ts git commit -y && git push"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/uuid": "^10.0.0",
+        "@typescript-eslint/eslint-plugin": "^8.43.0",
+        "@typescript-eslint/parser": "^8.43.0",
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "esbuild": "0.25.6",
+        "js-yaml": "^4.1.0",
+        "konro": "0.1.17",
+        "relaycode-core": "0.1.3",
+        "toasted-notifier": "^10.1.0",
+        "tsup": "^8.5.0",
+        "typescript": "^5.8.3",
+        "typescript-eslint": "^8.43.0",
+        "uuid": "^11.1.0",
+        "zod": "^3.25.67"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "automation",
+        "codegen",
+        "developer-tool",
+        "cli"
+      ],
+      "author": "Noca.pro",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/nocapro/relaycode.git"
+      },
+      "homepage": "https://relay.noca.pro"
+    }
+  packages/relaycode-core/package.json: |
+    {
+      "name": "relaycode-core",
+      "version": "0.1.3",
+      "description": "The shared engine behind RelayCode and Noca.pro – a zero-friction, AI-native patch engine that turns your clipboard into a surgical code-editing laser.",
+      "author": "Noca.pro",
+      "license": "MIT",
+      "homepage": "https://github.com/nocapro/relaycode-core",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/nocapro/relaycode-core.git"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "patch",
+        "diff",
+        "codemod",
+        "automation",
+        "typescript"
+      ],
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "prepublishOnly": "bun run build"
+      },
+      "dependencies": {
+        "apply-multi-diff": "0.1.4",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "tsup": "^8.2.3",
+        "typescript": "^5.8.3"
+      },
+      "peerDependencies": {
+        "typescript": "^5"
+      }
+    }
+  packages/apply-multi-diff/package.json: |
+    {
+      "name": "apply-multi-diff",
+      "version": "0.1.4",
+      "description": "A zero-dependency library to apply unified diffs and search-and-replace patches, with support for fuzzy matching.",
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "scripts": {
+        "build": "tsup",
+        "test": "bun test"
+      },
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nocapro/apply-multi-diff.git"
+      },
+      "keywords": [
+        "diff",
+        "patch",
+        "apply",
+        "unified-diff",
+        "search-replace",
+        "fuzzy"
+      ],
+      "license": "MIT",
+      "bugs": {
+        "url": "https://github.com/nocapro/apply-multi-diff/issues"
+      },
+      "homepage": "https://github.com/nocapro/apply-multi-diff#readme",
+      "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
+        "bun-types": "latest",
+        "js-yaml": "^4.1.0",
+        "tsup": "^8.0.2"
+      },
+      "peerDependencies": {
+        "typescript": "^5.0.0"
+      }
+    }
+  src/cli.ts: >-
+    #!/usr/bin/env node
+
+    import { Command } from 'commander';
+
+    import { initCommand } from './commands/init';
+
+    import { watchCommand } from './commands/watch';
+
+    import { COMMAND_NAME } from './utils/constants';
+
+    import { revertCommand } from './commands/revert';
+
+    import { logCommand } from './commands/log';
+
+    import { applyCommand } from './commands/apply';
+
+    import { gitCommitCommand } from './commands/git-commit';
+
+    import { approveAllCommand } from './commands/approve-all';
+
+    import { createRequire } from 'node:module';
+
+    import { fileURLToPath } from 'node:url';
+
+    import { dirname, join } from 'node:path';
+
+
+    // Default version in case we can't find the package.json
+
+    let version = '0.0.0';
+
+
+    try {
+      const require = createRequire(import.meta.url);
+      let pkg;
+      try {
+        // This works when installed as a package
+        pkg = require('relaycode/package.json');
+      } catch (e) {
+        // Fallback for local development
+        try {
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+          pkg = require(join(__dirname, '..', 'package.json'));
+        } catch (e2) {
+          // ignore
+        }
+      }
+      
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+
+    interface CommandInfo {
+      name: string;
+      alias: string;
+      description: string;
+      action: (...args: any[]) => void;
+      args?: { syntax: string; description: string };
+      options?: { flags: string; description: string }[];
+    }
+
+
+    const skipConfirmationOption = { flags: '-y, --yes', description: 'Skip
+    confirmation prompts' };
+
+
+    const program = new Command();
+
+
+    program
+      .name(COMMAND_NAME)
+      .version(version, '-v, --version')
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    const mainCommands: CommandInfo[] = [
+      { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
+      { name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.',
+        action: (options: { yes: boolean }) => { watchCommand(options, process.cwd()); },
+        options: [skipConfirmationOption]
+      },
+      { name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.',
+        args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' },
+        action: (filePath: string, options: { yes: boolean }) => applyCommand(filePath, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      { name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.', 
+        action: (options: { yes: boolean }) => approveAllCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
+      { name: 'revert', alias: 'u', description: 'Reverts a transaction. Defaults to the last one.',
+        args: { syntax: '[uuid_or_index]', description: 'The UUID or index (e.g., 1, 2) of the transaction to revert.' },
+        action: (identifier: string, options: { yes: boolean }) => revertCommand(identifier, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const gitCommands: CommandInfo[] = [
+      {
+        name: 'commit',
+        alias: 'c',
+        description: 'Commits the last transaction using the message from the transaction log.',
+        action: (options: { yes: boolean }) => gitCommitCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const setupCommands = (parent: Command, commandList: CommandInfo[]) => {
+      commandList.forEach(cmdInfo => {
+        const command = parent
+          .command(cmdInfo.name)
+          .alias(cmdInfo.alias)
+          .description(cmdInfo.description);
+      
+        if (cmdInfo.args) {
+          command.argument(cmdInfo.args.syntax, cmdInfo.args.description);
+        }
+      
+        if (cmdInfo.options) {
+          cmdInfo.options.forEach(opt => {
+            command.option(opt.flags, opt.description);
+          });
+        }
+      
+        command.action(cmdInfo.action);
+      });
+    };
+
+
+    setupCommands(program, mainCommands);
+
+
+    // Git command group
+
+    const git = program.command('git').description('Git related commands');
+
+    setupCommands(git, gitCommands);
+
+
+    program.parse(process.argv);
+
+
+    if (!process.argv.slice(2).length) {
+        program.outputHelp();
+    }
+  packages/konro/package.json: |
+    {
+      "name": "konro",
+      "version": "0.1.17",
+      "description": "A type-safe, functional-inspired ORM for local JSON/YAML file-based data sources.",
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "homepage": "https://github.com/nocapro/konro",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nocapro/konro.git"
+      },
+      "keywords": [
+        "orm",
+        "json",
+        "yaml",
+        "csv",
+        "xlsx",
+        "database",
+        "typescript",
+        "local-first",
+        "immutable",
+        "functional"
+      ],
+      "author": "nocapro",
+      "license": "MIT",
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/papaparse": "^5.3.14",
+        "@typescript-eslint/eslint-plugin": "^8.36.0",
+        "@typescript-eslint/parser": "^8.36.0",
+        "eslint": "^9.30.1",
+        "js-yaml": "^4.1.0",
+        "papaparse": "^5.4.1",
+        "typescript": "^5.5.4",
+        "xlsx": "^0.18.5",
+        "tsup": "^8.5.0"
+      },
+      "peerDependencies": {
+        "js-yaml": "^4.1.0",
+        "papaparse": "^5.4.1",
+        "typescript": "^5.0.0",
+        "xlsx": "^0.18.5"
+      },
+      "peerDependenciesMeta": {
+        "js-yaml": {
+          "optional": true
+        },
+        "papaparse": {
+          "optional": true
+        },
+        "xlsx": {
+          "optional": true
+        }
+      },
+      "scripts": {
+        "lint": "eslint .",
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "test": "bun test",
+        "test:restore-importer": "git checkout -- test/konro-test-import.ts",
+        "test:src": "npm run test:restore-importer && bun test",
+        "test:dist": "npm run build && echo \"export * from '../dist/index.js';\" > test/konro-test-import.ts && bun test && npm run test:restore-importer",
+        "prepublishOnly": "npm run build"
+      }
+    }
+approved: false
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: undone
+id: 6

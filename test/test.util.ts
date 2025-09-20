@@ -163,6 +163,9 @@ export const createTestConfig = async (cwd: string, overrides: Record<string, an
     watcher: {
       clipboardPollInterval: 100,
       preferredStrategy: 'auto',
+      enableBulkProcessing: false,
+      bulkSize: 5,
+      bulkTimeout: 30000,
     },
     patch: {
       approvalMode: 'auto',

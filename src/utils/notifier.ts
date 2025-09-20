@@ -1,5 +1,6 @@
 // @ts-ignore - toasted-notifier doesn't have TypeScript declarations
 import toastedNotifier from 'toasted-notifier';
+import chalk from 'chalk';
 
 // Manually define the interface for the parts of toasted-notifier we use,
 // as it doesn't have official TypeScript definitions.
@@ -106,6 +107,9 @@ export const requestApprovalWithNotification = (
                         resolve('approved');
                     } else if (cleanResponse.startsWith('reject')) {
                         resolve('rejected');
+                    } else if (cleanResponse === 'timeout') {
+                        logger.info(chalk.gray('Notification timed out. Please use the terminal to respond.'));
+                        return resolve('timeout');
                     } else {
                         logger.debug(`Notification approval received non-action response: "${cleanResponse}"`);
                         resolve('timeout');

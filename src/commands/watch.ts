@@ -1,11 +1,11 @@
 import { findConfig, loadConfigOrExit, findConfigPath } from '../core/config';
-import { createClipboardWatcher } from '../core/clipboard';
-import { parseLLMResponse } from 'relaycode-core';
-import { processPatch } from '../core/transaction';
+import { createClipboardWatcher, createBulkClipboardWatcher } from '../core/clipboard';
+import chalk from 'chalk';
+import { parseLLMResponse, type ParsedLLMResponse } from 'relaycode-core';
+import { processPatch, processPatchesBulk } from '../core/transaction';
 import { logger } from '../utils/logger';
 import { type Config } from 'relaycode-core';
 import fs from 'fs';
-import path from 'path';
 
 const getSystemPrompt = (
   projectId: string,
@@ -185,7 +185,7 @@ ${finalSteps_list_string}
 };
 
 export const watchCommand = async (options: { yes?: boolean } = {}, cwd: string = process.cwd()): Promise<{ stop: () => void }> => {
-  let clipboardWatcher: ReturnType<typeof createClipboardWatcher> | null = null;
+  let clipboardWatcher: { stop: () => void } | null = null;
   let configWatcher: fs.FSWatcher | null = null;
   let debounceTimer: NodeJS.Timeout | null = null;
 
@@ -201,25 +201,52 @@ export const watchCommand = async (options: { yes?: boolean } = {}, cwd: string 
 
     logger.log(getSystemPrompt(config.projectId, config.watcher.preferredStrategy, config.patch));
 
-    clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
-      logger.info('New clipboard content detected. Attempting to parse...');
-      const parsedResponse = parseLLMResponse(content);
+    // Use bulk clipboard watcher if bulk mode is enabled
+    if (config.watcher.enableBulkProcessing) {
+      clipboardWatcher = createBulkClipboardWatcher(
+        config.watcher.clipboardPollInterval,
+        async (contents) => {
+          logger.info(`Processing ${contents.length} clipboard items in bulk mode...`);
+          
+          const parsedResponses: ParsedLLMResponse[] = [];
+          for (const content of contents) {
+            const parsedResponse = parseLLMResponse(content);
+            if (parsedResponse) {
+              parsedResponses.push(parsedResponse);
+            }
+          }
 
-      if (!parsedResponse) {
-        logger.warn('Clipboard content is not a valid relaycode patch. Ignoring.');
-        return;
-      }
+          if (parsedResponses.length === 0) {
+            logger.warn('No valid relaycode patches found in clipboard content.');
+            return;
+          }
 
-      // Check project ID before notifying and processing.
-      if (parsedResponse.control.projectId !== config.projectId) {
-        logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
-        return;
-      }
+          await processPatchesBulk(config, parsedResponses, { cwd, notifyOnStart: true, yes: options.yes });
+          logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+        },
+        config.watcher.bulkSize || 5,
+        config.watcher.bulkTimeout || 30000
+      );
+    } else {
+      clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+        logger.debug('New clipboard content detected. Attempting to parse...');
+        const parsedResponse = parseLLMResponse(content);
 
-      await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
-      logger.info('--------------------------------------------------');
-      logger.info('Watching for next patch...');
-    });
+        if (!parsedResponse) {
+          logger.debug('Clipboard content is not a valid relaycode patch. Ignoring.');
+          return;
+        }
+
+        // Check project ID before notifying and processing.
+        if (parsedResponse.control.projectId !== config.projectId) {
+          logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+          return;
+        }
+
+        await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+        logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+      });
+    }
   };
 
   const handleConfigChange = () => {
@@ -247,12 +274,19 @@ export const watchCommand = async (options: { yes?: boolean } = {}, cwd: string 
   // Initial startup
   const initialConfig = await loadConfigOrExit(cwd);
   const configPath = await findConfigPath(cwd);
+  
+  const { clipboardPollInterval } = initialConfig.watcher;
+  logger.info(
+    chalk.gray(
+      `[relay] Watching for patches... (project: ${initialConfig.projectId}, approval: ${initialConfig.patch.approvalMode}, poll: ${clipboardPollInterval}ms)`
+    )
+  );
+  
   logger.success('Configuration loaded. Starting relaycode watch...');
   startServices(initialConfig);
 
   // Watch for changes after initial setup
   if (initialConfig.core.watchConfig && configPath) {
-    logger.info(`Configuration file watching is enabled for ${path.basename(configPath)}.`);
     configWatcher = fs.watch(configPath, handleConfigChange);
   } else {
     logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');

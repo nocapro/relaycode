@@ -7,9 +7,15 @@ import { revertCommand } from './commands/revert';
 import { logCommand } from './commands/log';
 import { applyCommand } from './commands/apply';
 import { gitCommitCommand } from './commands/git-commit';
+import { approveAllCommand } from './commands/approve-all';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import chalk from 'chalk';
+import { __LAST_MODIFIED__ as relaycodeTimestamp } from '../index';
+import { __LAST_MODIFIED__ as relaycodeCoreTimestamp } from 'relaycode-core';
+import { __LAST_MODIFIED__ as applyMultiDiffTimestamp } from 'apply-multi-diff';
+import { __LAST_MODIFIED__ as konroTimestamp } from 'konro';
 
 // Default version in case we can't find the package.json
 let version = '0.0.0';
@@ -54,8 +60,33 @@ const program = new Command();
 
 program
   .name(COMMAND_NAME)
-  .version(version, '-v, --version')
-  .description('A developer assistant that automates applying code changes from LLMs.');
+  .version(version, '-v, --version', 'output the current version')
+  .description('A developer assistant that automates applying code changes from LLMs.')
+  .on('option:version', () => {
+    const asciiArt = `
+  ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+  ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+  ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
+`;
+    const packages = [
+      { name: 'relaycode', timestamp: relaycodeTimestamp },
+      { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
+      { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp },
+      { name: 'konro', timestamp: konroTimestamp },
+    ];
+    const maxLength = Math.max(...packages.map(p => p.name.length));
+
+    console.log(chalk.blue(asciiArt));
+    console.log(`  relaycode version ${version}\n`);
+    console.log('  last modified source code\n');
+    
+    packages.forEach(p => {
+      console.log(`  ${p.name.padEnd(maxLength)}       ${p.timestamp}`);
+    });
+
+    console.log('');
+    process.exit(0);
+  });
 
 const mainCommands: CommandInfo[] = [
   { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
@@ -66,6 +97,10 @@ const mainCommands: CommandInfo[] = [
   { name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.',
     args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' },
     action: (filePath: string, options: { yes: boolean }) => applyCommand(filePath, options, process.cwd()),
+    options: [skipConfirmationOption]
+  },
+  { name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.', 
+    action: (options: { yes: boolean }) => approveAllCommand(options, process.cwd()),
     options: [skipConfirmationOption]
   },
   { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 
 type ClipboardCallback = (content: string) => void;
 type ClipboardReader = () => Promise<string>;
+type BulkClipboardCallback = (contents: string[]) => void;
 
 // Path to the directory of the current module (e.g., /path/to/relaycode/dist)
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -156,6 +157,95 @@ export const createClipboardWatcher = (
       intervalId = null;
       logger.info('Clipboard watcher stopped.');
     }
+  };
+
+  start();
+  
+  return { stop };
+};
+
+export const createBulkClipboardWatcher = (
+  pollInterval: number,
+  bulkCallback: BulkClipboardCallback,
+  bulkSize: number = 5,
+  bulkTimeout: number = 30000,
+  reader?: ClipboardReader,
+) => {
+  // Ensure clipboard executable exists before starting
+  ensureClipboardExecutable();
+  // Check for Linux dependencies. This is fire-and-forget.
+  checkLinuxClipboardDependencies();
+  
+  // On Windows, use the direct Windows reader
+  // Otherwise use the provided reader or clipboardy
+  const clipboardReader = process.platform === 'win32' ? 
+    createDirectWindowsClipboardReader() : 
+    reader || clipboardy.read;
+  
+  let lastContent = '';
+  let intervalId: NodeJS.Timeout | null = null;
+  let bulkTimer: NodeJS.Timeout | null = null;
+  let clipboardBuffer: string[] = [];
+
+  const processBulk = () => {
+    if (clipboardBuffer.length > 0) {
+      const contentsToProcess = [...clipboardBuffer];
+      clipboardBuffer = [];
+      bulkCallback(contentsToProcess);
+    }
+    if (bulkTimer) {
+      clearTimeout(bulkTimer);
+      bulkTimer = null;
+    }
+  };
+
+  const checkClipboard = async () => {
+    try {
+      const content = await clipboardReader();
+      if (content && content !== lastContent) {
+        lastContent = content;
+        clipboardBuffer.push(content);
+        
+        // Process immediately if we reach the bulk size
+        if (clipboardBuffer.length >= bulkSize) {
+          processBulk();
+        } else {
+          // Set or reset the bulk timer
+          if (bulkTimer) {
+            clearTimeout(bulkTimer);
+          }
+          bulkTimer = setTimeout(processBulk, bulkTimeout);
+        }
+      }
+    } catch (error) {
+      // It's common for clipboard access to fail occasionally (e.g., on VM focus change)
+      // So we log a warning but don't stop the watcher.
+      logger.warn('Could not read from clipboard: ' + getErrorMessage(error));
+    }
+  };
+
+  const start = () => {
+    if (intervalId) {
+      return;
+    }
+    logger.info(`Starting bulk clipboard watcher (polling every ${pollInterval}ms, bulk size: ${bulkSize})`);
+    // Immediately check once, then start the interval
+    checkClipboard();
+    intervalId = setInterval(checkClipboard, pollInterval);
+  };
+
+  const stop = () => {
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+    if (bulkTimer) {
+      clearTimeout(bulkTimer);
+      bulkTimer = null;
+    }
+    // Process any remaining items in the buffer
+    processBulk();
+    logger.info('Bulk clipboard watcher stopped.');
   };
 
   start();

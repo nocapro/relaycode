@@ -2,6 +2,7 @@ import { type StateFile } from 'relaycode-core';
 import { logger } from '../utils/logger';
 import { getDb, toStateFile, fromStateFile } from './db';
 import { promises as fs } from 'fs';
+import path from 'path';
 import { getStateDirectory } from './config';
 
 export const isRevertTransaction = (state: StateFile): boolean => {
@@ -60,13 +61,20 @@ export const updatePendingState = async (cwd:string, state: StateFile): Promise<
     }
 }
 
-export const commitState = async (cwd: string, uuid: string): Promise<void> => {
+export const commitState = async (cwd: string, uuid: string): Promise<string | null> => {
   const db = getDb(cwd);
   // Also update status from 'pending' to 'committed'
   const updated = await db.update('transactions').set({ status: 'committed' }).where({ uuid, status: 'pending' });
-  if (updated.length === 0) {
-      logger.warn(`Could not find pending transaction with uuid ${uuid} to commit.`);
+  
+  if (updated.length > 0) {
+    const record = updated[0] as { id: number };
+    const stateDir = getStateDirectory(cwd);
+    // Path construction based on konro's per-record strategy. The double 'transactions' is intentional.
+    // <stateDir>/<dbName>/<tableName>/<recordId>.json
+    const filePath = path.join(stateDir, 'transactions', 'transactions', `${record.id}.json`);
+    return filePath;
   }
+  return null;
 };
 
 export const markTransactionsAsGitCommitted = async (cwd: string, uuids: string[]): Promise<void> => {
@@ -115,7 +123,7 @@ export const readAllStateFiles = async (cwd: string = process.cwd(), options: Re
     }
 
     const db = getDb(cwd);
-    let records = await db.query().from('transactions').where({ status: 'committed' }).all();
+    const records = await db.query().from('transactions').where({ status: 'committed' }).all();
     
     if (!records) return [];
     

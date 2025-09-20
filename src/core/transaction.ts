@@ -19,7 +19,7 @@ type ProcessPatchOptions = {
     yes?: boolean;
 };
 
-const transactionLocks = new Map<string, Promise<any>>();
+const pendingTransactions = new Map<string, StateFile>();
 
 export const createSnapshot = async (filePaths: string[], cwd: string = process.cwd()): Promise<FileSnapshot> => {
   const snapshot: FileSnapshot = {};
@@ -49,7 +49,7 @@ export const applyOperations = async (
   const result = await applyOperationsCore(operations, originalFiles);
 
   if (!result.success) {
-    throw new Error(`Failed to calculate state changes: ${result.error}`);
+    throw new Error(`Failed to calculate state changes: ${result.error || 'Unknown error'}`);
   }
 
   const { newFileStates } = result;
@@ -128,16 +128,16 @@ export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string = proc
 };
 
 const logCompletionSummary = (
-    uuid: string,
+    _uuid: string,
     startTime: number,
-    operations: FileOperation[]
+    operations: FileOperation[],
+    errorCount: number
 ) => {
-    const duration = performance.now() - startTime;
-
-    logger.log(chalk.bold('\nSummary:'));
-    logger.log(`Applied ${chalk.cyan(operations.length)} file operation(s) successfully.`);
-    logger.log(`Total time from start to commit: ${chalk.gray(`${duration.toFixed(2)}ms`)}`);
-    logger.success(`✅ Transaction ${chalk.gray(uuid)} committed successfully!`);
+    const duration = (Date.now() - startTime) / 1000;
+    const opCount = operations.length;
+    const opPlural = opCount === 1 ? '' : 's';
+    logger.info(''); // Newline for spacing
+    logger.info(chalk.bold(`Summary: ${opCount} file operation${opPlural} applied in ${duration.toFixed(2)}s. Linter errors: ${errorCount}.`));
 };
 
 const rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnapshot, reason: string, enableNotifications: boolean = true, isError: boolean = true): Promise<void> => {
@@ -163,6 +163,7 @@ const rollbackTransaction = async (cwd: string, uuid: string, snapshot: FileSnap
     } finally {
         try {
             await deletePendingState(cwd, uuid);
+            pendingTransactions.delete(uuid);
             logger.info(`↩️ Transaction ${chalk.gray(uuid)} rolled back.`);
             if (isError && rollbackSuccessful) {
                 notifyFailure(uuid, enableNotifications);
@@ -198,14 +199,14 @@ const handleApproval = async ({ config, cwd, getConfirmation }: ApprovalOptions)
         }
 
         if (notificationResult === 'timeout') {
-            logger.info('Notification timed out or was dismissed. Please use the terminal to respond.');
+            logger.info('Notification timed out. Please use the terminal to respond.');
         }
 
         return await getConfirmation('Changes applied. Do you want to approve and commit them? (y/N)');
     };
 
     if (config.patch.approvalMode === 'manual') {
-        return await getManualApproval('Manual approval mode is enabled.');
+        return await getManualApproval('');
     }
     // auto mode
     const canAutoApprove = finalErrorCount <= config.patch.approvalOnErrorCount;
@@ -247,7 +248,6 @@ const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, 
     // Notify if coming from watch mode, now that we know it's a new patch.
     if (options?.notifyOnStart) {
         notifyPatchDetected(config.projectId, config.core.enableNotifications);
-        logger.success(`Valid patch detected for project '${chalk.cyan(config.projectId)}'. Processing...`);
     }
 
     // 2. Pre-flight checks
@@ -261,7 +261,8 @@ const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, 
         }
     }
 
-    logger.info(`🚀 Starting transaction for patch ${chalk.gray(uuid)}...`);
+    logger.info(chalk.gray(`\n--------------------------------------------------`));
+    logger.info(chalk.cyan(`🚀 Applying patch ${uuid.substring(0,8)} for '${projectId}'...`));
     logger.log(`${chalk.bold('Reasoning:')}\n  ${reasoning.join('\n  ')}`);
 
     const affectedFilePaths = operations.reduce<string[]>((acc, op) => {
@@ -288,17 +289,14 @@ const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, 
 
     try {
         await writePendingState(cwd, stateFile);
-        logger.success('  - Staged changes to .pending.yml file.');
 
         const originalFiles = new Map<string, string | null>();
         affectedFilePaths.forEach(p => originalFiles.set(p, snapshot[p] ?? null));
 
         // Apply changes
-        logger.log('  - Applying file operations...');
         const newFileStates = await applyOperations(operations, originalFiles, cwd);
-        logger.success('  - File operations complete.');
 
-        const opStats = operations.map(op => {
+        operations.forEach(op => {
             const stats = calculateLineChangesCore(op, originalFiles, newFileStates);
             if (op.type === 'write') {
                 logger.success(`✔ Written: ${chalk.cyan(op.path)} (${chalk.green(`+${stats.added}`)}, ${chalk.red(`-${stats.removed}`)})`);
@@ -307,7 +305,6 @@ const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, 
             } else if (op.type === 'rename') {
                 logger.success(`✔ Renamed: ${chalk.cyan(op.from)} -> ${chalk.cyan(op.to)}`);
             }
-            return stats;
         });
 
         // Run post-command
@@ -321,28 +318,26 @@ const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, 
             }
         }
 
+        // Run post-command
+        const errorCount = await getErrorCount(config.patch.linter, cwd);
+        
         // Log summary before asking for approval
-        const checksDuration = performance.now() - startTime;
-        const totalAdded = opStats.reduce((sum, s) => sum + s.added, 0);
-        const totalRemoved = opStats.reduce((sum, s) => sum + s.removed, 0);
-        const totalDifference = opStats.reduce((sum, s) => sum + s.difference, 0);
+        logCompletionSummary(uuid, startTime, operations, errorCount);
 
-        logger.log(chalk.bold('\nPre-flight summary:'));
-        logger.success(`Lines changed: ${chalk.green(`+${totalAdded}`)}, ${chalk.red(`-${totalRemoved}`)} (${chalk.yellow(`${totalDifference} total`)})`);
-        logger.log(`Checks completed in ${chalk.gray(`${checksDuration.toFixed(2)}ms`)}`);
-
-        const isApproved = await handleApproval({ config, cwd, getConfirmation });
+        const isApproved = await handleApproval({ 
+            config, 
+            cwd, 
+            getConfirmation
+        });
 
         if (isApproved) {
             stateFile.approved = true;
-            stateFile.linesAdded = totalAdded;
-            stateFile.linesRemoved = totalRemoved;
-            stateFile.linesDifference = totalDifference;
-            await updatePendingState(cwd, stateFile); // Update state with approval and stats before commit
+            await updatePendingState(cwd, stateFile);
             await commitState(cwd, uuid);
-            logCompletionSummary(uuid, startTime, operations);
             notifySuccess(uuid, config.core.enableNotifications);
             await handleAutoGitBranch(config, stateFile, cwd);
+            logger.info(chalk.green(`✔ Patch ${uuid.substring(0,8)} committed.`));
+            logger.info(chalk.gray(`\n[relay] Watching for patches...`));
         } else {
             logger.warn('Operation cancelled by user. Rolling back changes...');
             await rollbackTransaction(cwd, uuid, snapshot, 'User cancellation', config.core.enableNotifications, false);
@@ -350,6 +345,7 @@ const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, 
     } catch (error) {
         const reason = getErrorMessage(error);
         await rollbackTransaction(cwd, uuid, snapshot, reason, config.core.enableNotifications, true);
+        logger.info(chalk.gray(`\n[relay] Watching for patches...`));
     }
 };
 
@@ -363,13 +359,68 @@ const _processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, 
  * @param options Options for processing the patch.
  */
 export const processPatch = async (config: Config, parsedResponse: ParsedLLMResponse, options?: ProcessPatchOptions): Promise<void> => {
-    const cwd = options?.cwd || process.cwd();
-    const run = () => _processPatch(config, parsedResponse, options);
-    const ongoingTransaction = transactionLocks.get(cwd) ?? Promise.resolve();
-    const nextTransaction = ongoingTransaction.finally(run);
-    transactionLocks.set(cwd, nextTransaction);
-    await nextTransaction;
+    await _processPatch(config, parsedResponse, options);
 };
+
+export const getPendingTransactionCount = (_cwd: string = process.cwd()): number => {
+    return pendingTransactions.size;
+};
+
+export const approveAllPendingTransactions = async (_config: Config, cwd: string = process.cwd(), yes: boolean = false): Promise<void> => {
+    const pending = Array.from(pendingTransactions.values());
+    if (pending.length === 0) {
+        logger.info('No pending transactions to approve.');
+        return;
+    }
+
+    const sortedPending = pending.sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    logger.info(chalk.bold(`Found ${pending.length} pending patch(es):`));
+    sortedPending.forEach(tx => {
+        const reasoning = (normalizeGitCommitMsg(Array.isArray(tx.reasoning) ? tx.reasoning.join(' ') : tx.reasoning) || 'No reasoning provided.').split('\n')[0];
+        logger.info(`  - ${chalk.cyan(tx.uuid.substring(0,8))}: ${reasoning}`);
+    });
+    logger.info(''); // spacing
+
+    if (yes) {
+        logger.info(''); // spacing
+        for (const tx of sortedPending) {
+            // Note: autoCommit and autoBranch are not in the current config schema
+            await commitState(cwd, tx.uuid);
+            logger.info(chalk.green(`✔ Patch ${tx.uuid.substring(0,8)} committed.`));
+            pendingTransactions.delete(tx.uuid);
+        }
+        logger.info(chalk.bold.green(`\n✅ Successfully committed ${pending.length} patch(es).`));
+        return;
+    }
+
+    const prompter = createConfirmationHandler({});
+    const confirmed = await prompter('Do you want to approve and commit all of them?');
+
+    if (!confirmed) {
+        logger.info('Bulk approval cancelled.');
+        return;
+    }
+
+    logger.info(''); // spacing
+    for (const tx of sortedPending) {
+        // Note: autoCommit and autoBranch are not in the current config schema
+        await commitState(cwd, tx.uuid);
+        logger.info(chalk.green(`✔ Patch ${tx.uuid.substring(0,8)} committed.`));
+        pendingTransactions.delete(tx.uuid);
+    }
+
+    logger.info(chalk.bold.green(`\n✅ Successfully committed ${pending.length} patch(es).`));
+};
+
+export const processPatchesBulk = async (config: Config, parsedResponses: ParsedLLMResponse[], options?: ProcessPatchOptions): Promise<void> => {
+    // In bulk mode, process each patch individually, which will trigger individual approvals.
+    // The "bulk" aspect is about clipboard gathering, not approval.
+    for (const parsedResponse of parsedResponses) {
+        await processPatch(config, parsedResponse, options);
+    }
+};
+
 
 const handleAutoGitBranch = async (config: Config, stateFile: StateFile, cwd: string): Promise<void> => {
     if (!config.git.autoGitBranch) return;

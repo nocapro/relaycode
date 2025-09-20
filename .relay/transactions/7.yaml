@@ -1,0 +1,1032 @@
+uuid: ca0c1840-a359-4d6f-87d3-64a3e9c40212
+projectId: relaycode
+createdAt: '2025-09-20T04:57:04.693Z'
+gitCommitMsg: >-
+  feat(cli): enhance version command with timestamps and ascii art
+
+  This commit significantly enhances the `relay -v` command to provide more
+  detailed build information.
+
+  - The version command now displays an ASCII art logo, the current
+    version, and the last modified timestamps for `relaycode`,
+    `relaycode-core`, `apply-multi-diff`, and `konro`.
+  - A new script, `scripts/update-timestamp.ts`, has been added to each
+    package to automatically update a `__LAST_MODIFIED__` timestamp export
+    in the respective `index.ts` file.
+  - The `build` scripts in all relevant `package.json` files have been
+    updated to run this timestamp script before building, ensuring the
+    timestamps are always current with the latest build.
+promptSummary: >-
+  Enhance the `relay -v` command to show an ASCII art logo, version, and last
+  modified timestamps for all local packages, and automate timestamp updates on
+  build.
+reasoning:
+  - >-
+    To enhance the `relay -v` command as you requested, I'll perform the
+    following changes:
+  - >-
+    1.  **Create Timestamp Update Scripts**: I will add a new script,
+    `scripts/update-timestamp.ts`, to `relaycode` and each of its local packages
+    (`konro`, `apply-multi-diff`, `relaycode-core`). This script will
+    automatically update a timestamp in the corresponding `index.ts` file.
+  - >-
+    2.  **Modify `package.json` Build Scripts**: I'll update the `build` script
+    in all relevant `package.json` files to execute the timestamp update script
+    before running `tsup`. This ensures the timestamp reflects the latest build
+    time.
+  - >-
+    3.  **Update `index.ts` Files**: I will add an exported `__LAST_MODIFIED__`
+    constant to each `index.ts` file, which the new script will manage.
+  - >-
+    4.  **Enhance `cli.ts`**: I will modify the main CLI entry point to override
+    the default version flag behavior. When a user runs `relay -v` or `relay
+    --version`, it will now display the ASCII art logo, the version number, and
+    the last modified timestamps for `relaycode` and its local dependencies.
+  - 'Here are the detailed changes:'
+  - '### 1. Create Timestamp Update Scripts'
+  - >-
+    I'll create the same script in four locations. This script will find and
+    update (or add) a `__LAST_MODIFIED__` export in the `index.ts` file of its
+    package.
+  - '### 2. Update `package.json` Build Scripts and `index.ts` files'
+  - >-
+    I'll modify the build scripts and add the timestamp constant to the
+    `index.ts` files.
+  - '### 3. Enhance CLI Version Command'
+  - Finally, I'll update `src/cli.ts` to implement the custom version display.
+operations:
+  - type: write
+    path: scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+      import { fileURLToPath } from 'url';
+
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+
+      const updateTimestamp = async (filePath: string) => {
+          try {
+              let content = '';
+              try {
+                  content = await fs.readFile(filePath, 'utf-8');
+              } catch (e) {
+                  if (!(e instanceof Error && 'code' in e && e.code === 'ENOENT')) {
+                      throw e;
+                  }
+              }
+              
+              const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+              const regex = /(export const __LAST_MODIFIED__ = ')[^']*(';)/;
+
+              if (regex.test(content)) {
+                  content = content.replace(regex, `$1${timestamp}$2`);
+              } else {
+                  const exportStatement = `export const __LAST_MODIFIED__ = '${timestamp}';`;
+                  if (content.trim() === '') {
+                      content = exportStatement;
+                  } else {
+                      content = content.trimEnd() + '\n\n' + exportStatement;
+                  }
+              }
+
+              await fs.writeFile(filePath, content.trim() + '\n', 'utf-8');
+              console.log(`Updated timestamp in ${path.relative(process.cwd(), filePath)} to ${timestamp}`);
+          } catch (error) {
+              console.error(`Failed to update timestamp in ${filePath}:`, error);
+              process.exit(1);
+          }
+      };
+
+      const targetFilePath = path.resolve(__dirname, '../src/index.ts');
+      updateTimestamp(targetFilePath);
+    patchStrategy: replace
+  - type: write
+    path: packages/apply-multi-diff/scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+      import { fileURLToPath } from 'url';
+
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+
+      const updateTimestamp = async (filePath: string) => {
+          try {
+              let content = '';
+              try {
+                  content = await fs.readFile(filePath, 'utf-8');
+              } catch (e) {
+                  if (!(e instanceof Error && 'code' in e && e.code === 'ENOENT')) {
+                      throw e;
+                  }
+              }
+              
+              const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+              const regex = /(export const __LAST_MODIFIED__ = ')[^']*(';)/;
+
+              if (regex.test(content)) {
+                  content = content.replace(regex, `$1${timestamp}$2`);
+              } else {
+                  const exportStatement = `export const __LAST_MODIFIED__ = '${timestamp}';`;
+                  if (content.trim() === '') {
+                      content = exportStatement;
+                  } else {
+                      content = content.trimEnd() + '\n\n' + exportStatement;
+                  }
+              }
+
+              await fs.writeFile(filePath, content.trim() + '\n', 'utf-8');
+              console.log(`Updated timestamp in ${path.relative(process.cwd(), filePath)} to ${timestamp}`);
+          } catch (error) {
+              console.error(`Failed to update timestamp in ${filePath}:`, error);
+              process.exit(1);
+          }
+      };
+
+      const targetFilePath = path.resolve(__dirname, '../src/index.ts');
+      updateTimestamp(targetFilePath);
+    patchStrategy: replace
+  - type: write
+    path: packages/konro/scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+      import { fileURLToPath } from 'url';
+
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+
+      const updateTimestamp = async (filePath: string) => {
+          try {
+              let content = '';
+              try {
+                  content = await fs.readFile(filePath, 'utf-8');
+              } catch (e) {
+                  if (!(e instanceof Error && 'code' in e && e.code === 'ENOENT')) {
+                      throw e;
+                  }
+              }
+              
+              const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+              const regex = /(export const __LAST_MODIFIED__ = ')[^']*(';)/;
+
+              if (regex.test(content)) {
+                  content = content.replace(regex, `$1${timestamp}$2`);
+              } else {
+                  const exportStatement = `export const __LAST_MODIFIED__ = '${timestamp}';`;
+                  if (content.trim() === '') {
+                      content = exportStatement;
+                  } else {
+                      content = content.trimEnd() + '\n\n' + exportStatement;
+                  }
+              }
+
+              await fs.writeFile(filePath, content.trim() + '\n', 'utf-8');
+              console.log(`Updated timestamp in ${path.relative(process.cwd(), filePath)} to ${timestamp}`);
+          } catch (error) {
+              console.error(`Failed to update timestamp in ${filePath}:`, error);
+              process.exit(1);
+          }
+      };
+
+      const targetFilePath = path.resolve(__dirname, '../src/index.ts');
+      updateTimestamp(targetFilePath);
+    patchStrategy: replace
+  - type: write
+    path: packages/relaycode-core/scripts/update-timestamp.ts
+    content: |-
+      import { promises as fs } from 'fs';
+      import path from 'path';
+      import { fileURLToPath } from 'url';
+
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+
+      const updateTimestamp = async (filePath: string) => {
+          try {
+              let content = '';
+              try {
+                  content = await fs.readFile(filePath, 'utf-8');
+              } catch (e) {
+                  if (!(e instanceof Error && 'code' in e && e.code === 'ENOENT')) {
+                      throw e;
+                  }
+              }
+              
+              const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+              const regex = /(export const __LAST_MODIFIED__ = ')[^']*(';)/;
+
+              if (regex.test(content)) {
+                  content = content.replace(regex, `$1${timestamp}$2`);
+              } else {
+                  const exportStatement = `export const __LAST_MODIFIED__ = '${timestamp}';`;
+                  if (content.trim() === '') {
+                      content = exportStatement;
+                  } else {
+                      content = content.trimEnd() + '\n\n' + exportStatement;
+                  }
+              }
+
+              await fs.writeFile(filePath, content.trim() + '\n', 'utf-8');
+              console.log(`Updated timestamp in ${path.relative(process.cwd(), filePath)} to ${timestamp}`);
+          } catch (error) {
+              console.error(`Failed to update timestamp in ${filePath}:`, error);
+              process.exit(1);
+          }
+      };
+
+      const targetFilePath = path.resolve(__dirname, '../src/index.ts');
+      updateTimestamp(targetFilePath);
+    patchStrategy: replace
+  - type: write
+    path: packages/apply-multi-diff/src/index.ts
+    content: |+
+      --- packages/apply-multi-diff/src/index.ts
+      +++ packages/apply-multi-diff/src/index.ts
+      @@ -9,3 +9,5 @@
+       export * from "./utils/error";
+       export * from "./utils/logger";
+       export * from "./utils/string";
+      +
+      +export const __LAST_MODIFIED__ = '2024-01-01 00:00:00';
+
+    patchStrategy: standard-diff
+  - type: write
+    path: packages/apply-multi-diff/package.json
+    content: |
+      <<<<<<< SEARCH
+          "build": "tsup",
+      =======
+          "build": "bun run scripts/update-timestamp.ts && tsup",
+      >>>>>>> REPLACE
+    patchStrategy: search-replace
+  - type: write
+    path: packages/konro/src/index.ts
+    content: |+
+      --- packages/konro/src/index.ts
+      +++ packages/konro/src/index.ts
+      @@ -83,3 +83,5 @@
+         min,
+         max,
+       };
+      +
+      +export const __LAST_MODIFIED__ = '2024-01-01 00:00:00';
+
+    patchStrategy: standard-diff
+  - type: write
+    path: packages/konro/package.json
+    content: |
+      <<<<<<< SEARCH
+          "build": "tsup",
+      =======
+          "build": "bun run scripts/update-timestamp.ts && tsup",
+      >>>>>>> REPLACE
+    patchStrategy: search-replace
+  - type: write
+    path: packages/relaycode-core/src/index.ts
+    content: |+
+      --- packages/relaycode-core/src/index.ts
+      +++ packages/relaycode-core/src/index.ts
+      @@ -4,3 +4,5 @@
+       export * from './parser';
+       export * from './patch';
+       export * from './logger';
+      +
+      +export const __LAST_MODIFIED__ = '2024-01-01 00:00:00';
+
+    patchStrategy: standard-diff
+  - type: write
+    path: packages/relaycode-core/package.json
+    content: |
+      <<<<<<< SEARCH
+          "build": "tsup",
+      =======
+          "build": "bun run scripts/update-timestamp.ts && tsup",
+      >>>>>>> REPLACE
+    patchStrategy: search-replace
+  - type: write
+    path: src/index.ts
+    content: |+
+      --- src/index.ts
+      +++ src/index.ts
+      @@ -43,3 +43,5 @@
+         notifyRollbackFailure,
+       } from './utils/notifier';
+       export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+      +
+      +export const __LAST_MODIFIED__ = '2024-01-01 00:00:00';
+
+    patchStrategy: standard-diff
+  - type: write
+    path: package.json
+    content: |
+      <<<<<<< SEARCH
+          "build": "tsup",
+      =======
+          "build": "bun run scripts/update-timestamp.ts && tsup",
+      >>>>>>> REPLACE
+    patchStrategy: search-replace
+  - type: write
+    path: src/cli.ts
+    content: >+
+      --- src/cli.ts
+
+      +++ src/cli.ts
+
+      @@ -8,6 +8,11 @@
+       import { approveAllCommand } from './commands/approve-all';
+       import { createRequire } from 'node:module';
+       import { fileURLToPath } from 'node:url';
+       import { dirname, join } from 'node:path';
+      +import chalk from 'chalk';
+
+      +import { __LAST_MODIFIED__ as relaycodeTimestamp } from '../index';
+
+      +import { __LAST_MODIFIED__ as relaycodeCoreTimestamp } from
+      'relaycode-core';
+
+      +import { __LAST_MODIFIED__ as applyMultiDiffTimestamp } from
+      'apply-multi-diff';
+
+      +import { __LAST_MODIFIED__ as konroTimestamp } from 'konro';
+       
+       // Default version in case we can't find the package.json
+       let version = '0.0.0';
+      @@ -43,8 +48,34 @@
+       
+       program
+         .name(COMMAND_NAME)
+      -  .version(version, '-v, --version')
+
+      -  .description('A developer assistant that automates applying code
+      changes from LLMs.');
+
+      +  .version(version, '-v, --version', 'output the current version')
+
+      +  .description('A developer assistant that automates applying code
+      changes from LLMs.')
+
+      +  .on('option:version', () => {
+
+      +    const asciiArt = `
+
+      +  ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+
+      +  ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+
+      +  ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
+
+      +`;
+
+      +    const packages = [
+
+      +      { name: 'relaycode', timestamp: relaycodeTimestamp },
+
+      +      { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
+
+      +      { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp },
+
+      +      { name: 'konro', timestamp: konroTimestamp },
+
+      +    ];
+
+      +    const maxLength = Math.max(...packages.map(p => p.name.length));
+
+      +
+
+      +    console.log(chalk.blue(asciiArt));
+
+      +    console.log(`  relaycode version ${version}\n`);
+
+      +    console.log('  last modified source code\n');
+
+      +    
+
+      +    packages.forEach(p => {
+
+      +      console.log(`  ${p.name.padEnd(maxLength)}       ${p.timestamp}`);
+
+      +    });
+
+      +
+
+      +    console.log('');
+
+      +    process.exit(0);
+
+      +  });
+       
+       const mainCommands: CommandInfo[] = [
+         { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
+
+    patchStrategy: standard-diff
+snapshot:
+  scripts/update-timestamp.ts: null
+  packages/apply-multi-diff/scripts/update-timestamp.ts: null
+  packages/relaycode-core/scripts/update-timestamp.ts: null
+  packages/konro/scripts/update-timestamp.ts: null
+  packages/apply-multi-diff/src/index.ts: |-
+    export {
+      applyDiff as applyStandardDiff,
+      getToolDescription as getStandardDiffToolDescription,
+    } from "./strategies/standard-diff";
+    export {
+      applyDiff as applySearchReplace,
+      getToolDescription as getSearchReplaceToolDescription,
+    } from "./strategies/search-replace";
+
+    export * from "./types";
+    export * from "./constants";
+    export * from "./utils/error";
+    export * from "./utils/logger";
+    export * from "./utils/string";
+  packages/apply-multi-diff/package.json: |
+    {
+      "name": "apply-multi-diff",
+      "version": "0.1.4",
+      "description": "A zero-dependency library to apply unified diffs and search-and-replace patches, with support for fuzzy matching.",
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "scripts": {
+        "build": "tsup",
+        "test": "bun test"
+      },
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nocapro/apply-multi-diff.git"
+      },
+      "keywords": [
+        "diff",
+        "patch",
+        "apply",
+        "unified-diff",
+        "search-replace",
+        "fuzzy"
+      ],
+      "license": "MIT",
+      "bugs": {
+        "url": "https://github.com/nocapro/apply-multi-diff/issues"
+      },
+      "homepage": "https://github.com/nocapro/apply-multi-diff#readme",
+      "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
+        "bun-types": "latest",
+        "js-yaml": "^4.1.0",
+        "tsup": "^8.0.2"
+      },
+      "peerDependencies": {
+        "typescript": "^5.0.0"
+      }
+    }
+  packages/relaycode-core/src/index.ts: |-
+    export * from './types';
+    export * from './constants';
+    export * from './parser';
+    export * from './patch';
+    export * from './logger';
+  package.json: |
+    {
+      "name": "relaycode",
+      "version": "1.1.5",
+      "description": "A developer assistant that automates applying code changes from LLMs.",
+      "type": "module",
+      "main": "./dist/index.js",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "bin": {
+        "relay": "./dist/cli.cjs"
+      },
+      "files": [
+        "dist",
+        "fallbacks"
+      ],
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+      },
+      "scripts": {
+        "clean": "rm -rf dist",
+        "build": "tsup",
+        "test": "bun test",
+        "lint": "eslint . --ext .ts,.js",
+        "lint:fix": "eslint . --ext .ts,.js --fix",
+        "dev": "bun run src/cli.ts",
+        "prepublishOnly": "bun run build",
+        "bundle": "repomix && sudo rm -rf docs/repomix-output.md && clear",
+        "commit": "bun run src/cli.ts git commit -y && git push"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/uuid": "^10.0.0",
+        "@typescript-eslint/eslint-plugin": "^8.43.0",
+        "@typescript-eslint/parser": "^8.43.0",
+        "chalk": "^5.4.1",
+        "clipboardy": "^4.0.0",
+        "commander": "^12.1.0",
+        "esbuild": "0.25.6",
+        "js-yaml": "^4.1.0",
+        "konro": "0.1.17",
+        "relaycode-core": "0.1.3",
+        "toasted-notifier": "^10.1.0",
+        "tsup": "^8.5.0",
+        "typescript": "^5.8.3",
+        "typescript-eslint": "^8.43.0",
+        "uuid": "^11.1.0",
+        "zod": "^3.25.67"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "automation",
+        "codegen",
+        "developer-tool",
+        "cli"
+      ],
+      "author": "Noca.pro",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/nocapro/relaycode.git"
+      },
+      "homepage": "https://relay.noca.pro"
+    }
+  packages/relaycode-core/package.json: |
+    {
+      "name": "relaycode-core",
+      "version": "0.1.3",
+      "description": "The shared engine behind RelayCode and Noca.pro – a zero-friction, AI-native patch engine that turns your clipboard into a surgical code-editing laser.",
+      "author": "Noca.pro",
+      "license": "MIT",
+      "homepage": "https://github.com/nocapro/relaycode-core",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/nocapro/relaycode-core.git"
+      },
+      "keywords": [
+        "ai",
+        "llm",
+        "patch",
+        "diff",
+        "codemod",
+        "automation",
+        "typescript"
+      ],
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "prepublishOnly": "bun run build"
+      },
+      "dependencies": {
+        "apply-multi-diff": "0.1.4",
+        "js-yaml": "^4.1.0",
+        "zod": "^3.25.67"
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "tsup": "^8.2.3",
+        "typescript": "^5.8.3"
+      },
+      "peerDependencies": {
+        "typescript": "^5"
+      }
+    }
+  packages/konro/src/index.ts: >
+    import { createDatabase } from './db';
+
+    import { createFileAdapter } from './adapter';
+
+    import { createSchema, id, uuid, string, number, boolean, date, createdAt,
+    updatedAt, deletedAt, object, one, many, count, sum, avg, min, max } from
+    './schema';
+
+
+    export type {
+      // --- Core & Schema ---
+      KonroSchema,
+      DatabaseState,
+      KRecord,
+      // Schema Definition
+      ColumnDefinition,
+      RelationDefinition,
+      OneRelationDefinition,
+      ManyRelationDefinition,
+      BaseRelationDefinition,
+      AggregationDefinition,
+
+      // --- DB Contexts ---
+      DbContext,
+      InMemoryDbContext,
+      OnDemandDbContext,
+
+      // --- Fluent Query Builders ---
+      QueryBuilder,
+      ChainedQueryBuilder,
+      UpdateBuilder,
+      DeleteBuilder,
+      OnDemandQueryBuilder,
+      OnDemandChainedQueryBuilder,
+      OnDemandUpdateBuilder,
+      OnDemandDeleteBuilder,
+      WithArgument,
+
+      // --- Adapters & I/O ---
+      StorageAdapter,
+      FileStorageAdapter,
+      FileAdapterOptions,
+      SingleFileStrategy,
+      MultiFileStrategy,
+      PerRecordStrategy,
+      FsProvider,
+      Serializer,
+    } from './types';
+
+
+    /**
+     * The main Konro object, providing access to all core functionalities
+     * for schema definition, database creation, and adapter configuration.
+     */
+    export const konro = {
+      /**
+       * Defines the structure, types, and relations of your database.
+       * This is the single source of truth for both runtime validation and static types.
+       */
+      createSchema,
+      /**
+       * Creates the main `db` context, which is the primary interface for all
+       * database operations (read, write, query, etc.).
+       */
+      createDatabase,
+      /**
+       * Creates a file-based storage adapter for persisting the database state
+       * to a JSON or YAML file.
+       */
+      createFileAdapter,
+      // --- Column Definition Helpers ---
+      id,
+      uuid,
+      string,
+      number,
+      boolean,
+      date,
+      createdAt,
+      updatedAt,
+      deletedAt,
+      object,
+      // --- Relationship Definition Helpers ---
+      one,
+      many,
+      // --- Aggregation Definition Helpers ---
+      count,
+      sum,
+      avg,
+      min,
+      max,
+    };
+  packages/konro/package.json: |
+    {
+      "name": "konro",
+      "version": "0.1.17",
+      "description": "A type-safe, functional-inspired ORM for local JSON/YAML file-based data sources.",
+      "type": "module",
+      "main": "./dist/index.cjs",
+      "module": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "import": "./dist/index.js",
+          "require": "./dist/index.cjs"
+        }
+      },
+      "files": [
+        "dist"
+      ],
+      "homepage": "https://github.com/nocapro/konro",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nocapro/konro.git"
+      },
+      "keywords": [
+        "orm",
+        "json",
+        "yaml",
+        "csv",
+        "xlsx",
+        "database",
+        "typescript",
+        "local-first",
+        "immutable",
+        "functional"
+      ],
+      "author": "nocapro",
+      "license": "MIT",
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/js-yaml": "^4.0.9",
+        "@types/papaparse": "^5.3.14",
+        "@typescript-eslint/eslint-plugin": "^8.36.0",
+        "@typescript-eslint/parser": "^8.36.0",
+        "eslint": "^9.30.1",
+        "js-yaml": "^4.1.0",
+        "papaparse": "^5.4.1",
+        "typescript": "^5.5.4",
+        "xlsx": "^0.18.5",
+        "tsup": "^8.5.0"
+      },
+      "peerDependencies": {
+        "js-yaml": "^4.1.0",
+        "papaparse": "^5.4.1",
+        "typescript": "^5.0.0",
+        "xlsx": "^0.18.5"
+      },
+      "peerDependenciesMeta": {
+        "js-yaml": {
+          "optional": true
+        },
+        "papaparse": {
+          "optional": true
+        },
+        "xlsx": {
+          "optional": true
+        }
+      },
+      "scripts": {
+        "lint": "eslint .",
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "test": "bun test",
+        "test:restore-importer": "git checkout -- test/konro-test-import.ts",
+        "test:src": "npm run test:restore-importer && bun test",
+        "test:dist": "npm run build && echo \"export * from '../dist/index.js';\" > test/konro-test-import.ts && bun test && npm run test:restore-importer",
+        "prepublishOnly": "npm run build"
+      }
+    }
+  src/cli.ts: >-
+    #!/usr/bin/env node
+
+    import { Command } from 'commander';
+
+    import { initCommand } from './commands/init';
+
+    import { watchCommand } from './commands/watch';
+
+    import { COMMAND_NAME } from './utils/constants';
+
+    import { revertCommand } from './commands/revert';
+
+    import { logCommand } from './commands/log';
+
+    import { applyCommand } from './commands/apply';
+
+    import { gitCommitCommand } from './commands/git-commit';
+
+    import { approveAllCommand } from './commands/approve-all';
+
+    import { createRequire } from 'node:module';
+
+    import { fileURLToPath } from 'node:url';
+
+    import { dirname, join } from 'node:path';
+
+
+    // Default version in case we can't find the package.json
+
+    let version = '0.0.0';
+
+
+    try {
+      const require = createRequire(import.meta.url);
+      let pkg;
+      try {
+        // This works when installed as a package
+        pkg = require('relaycode/package.json');
+      } catch (e) {
+        // Fallback for local development
+        try {
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+          pkg = require(join(__dirname, '..', 'package.json'));
+        } catch (e2) {
+          // ignore
+        }
+      }
+      
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+
+    interface CommandInfo {
+      name: string;
+      alias: string;
+      description: string;
+      action: (...args: any[]) => void;
+      args?: { syntax: string; description: string };
+      options?: { flags: string; description: string }[];
+    }
+
+
+    const skipConfirmationOption = { flags: '-y, --yes', description: 'Skip
+    confirmation prompts' };
+
+
+    const program = new Command();
+
+
+    program
+      .name(COMMAND_NAME)
+      .version(version, '-v, --version')
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    const mainCommands: CommandInfo[] = [
+      { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
+      { name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.',
+        action: (options: { yes: boolean }) => { watchCommand(options, process.cwd()); },
+        options: [skipConfirmationOption]
+      },
+      { name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.',
+        args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' },
+        action: (filePath: string, options: { yes: boolean }) => applyCommand(filePath, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      { name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.', 
+        action: (options: { yes: boolean }) => approveAllCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
+      { name: 'revert', alias: 'u', description: 'Reverts a transaction. Defaults to the last one.',
+        args: { syntax: '[uuid_or_index]', description: 'The UUID or index (e.g., 1, 2) of the transaction to revert.' },
+        action: (identifier: string, options: { yes: boolean }) => revertCommand(identifier, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const gitCommands: CommandInfo[] = [
+      {
+        name: 'commit',
+        alias: 'c',
+        description: 'Commits the last transaction using the message from the transaction log.',
+        action: (options: { yes: boolean }) => gitCommitCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const setupCommands = (parent: Command, commandList: CommandInfo[]) => {
+      commandList.forEach(cmdInfo => {
+        const command = parent
+          .command(cmdInfo.name)
+          .alias(cmdInfo.alias)
+          .description(cmdInfo.description);
+      
+        if (cmdInfo.args) {
+          command.argument(cmdInfo.args.syntax, cmdInfo.args.description);
+        }
+      
+        if (cmdInfo.options) {
+          cmdInfo.options.forEach(opt => {
+            command.option(opt.flags, opt.description);
+          });
+        }
+      
+        command.action(cmdInfo.action);
+      });
+    };
+
+
+    setupCommands(program, mainCommands);
+
+
+    // Git command group
+
+    const git = program.command('git').description('Git related commands');
+
+    setupCommands(git, gitCommands);
+
+
+    program.parse(process.argv);
+
+
+    if (!process.argv.slice(2).length) {
+        program.outputHelp();
+    }
+  src/index.ts: >
+    // Core logic
+
+    export { createClipboardWatcher } from './core/clipboard';
+
+    export { findConfig, createConfig, getProjectId, ensureStateDirExists,
+    loadConfigOrExit, findConfigPath } from './core/config';
+
+    export {
+      commitState,
+      deletePendingState,
+      hasBeenProcessed,
+      findLatestStateFile,
+      findStateFileByIdentifier,
+      readStateFile,
+      readAllStateFiles,
+      writePendingState
+    } from './core/state';
+
+    export { processPatch, applyOperations, createSnapshot, restoreSnapshot }
+    from './core/transaction';
+
+
+    // Commands
+
+    export { initCommand } from './commands/init';
+
+    export { watchCommand } from './commands/watch';
+
+    export { logCommand } from './commands/log';
+
+    export { revertCommand } from './commands/revert';
+
+    export { applyCommand } from './commands/apply';
+
+    export { gitCommitCommand } from './commands/git-commit';
+
+
+    // Types
+
+    export * from 'relaycode-core';
+
+
+    // Utils
+
+    export { executeShellCommand, getErrorCount } from './utils/shell';
+
+    export { getTypeScriptErrorCount } from './utils/typescript';
+
+    export {
+      deleteFile,
+      readFileContent,
+      writeFileContent,
+      fileExists,
+      renameFile,
+      safeRename,
+    } from './utils/fs';
+
+    export { logger, getErrorMessage, isEnoentError } from './utils/logger';
+
+    export { getConfirmation } from './utils/prompt';
+
+    export { formatTransactionDetails } from './utils/formatters';
+
+    export {
+      createNotifier,
+      notifyPatchDetected,
+      notifyApprovalRequired,
+      requestApprovalWithNotification,
+      notifySuccess,
+      notifyFailure,
+      notifyRollbackFailure,
+    } from './utils/notifier';
+
+    export { STATE_DIRECTORY_NAME, CONFIG_FILE_NAMES } from './utils/constants';
+approved: true
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: committed
+id: 7
