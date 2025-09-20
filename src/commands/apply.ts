@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { loadConfigOrExit } from '../core/config';
-import { parseLLMResponse } from 'relaycode-core';
+import { parseLLMResponse, logger as coreLogger } from 'relaycode-core';
 import { processPatch } from '../core/transaction';
 import { logger } from '../utils/logger';
 import chalk from 'chalk';
@@ -9,6 +9,9 @@ import chalk from 'chalk';
 export const applyCommand = async (filePath: string, options: { yes?: boolean } = {}, cwd: string = process.cwd()): Promise<void> => {
     const config = await loadConfigOrExit(cwd);
     logger.setLevel(config.core.logLevel);
+    if (config.core.logLevel === 'debug') {
+        coreLogger.setLevel('debug');
+    }
 
     let content: string;
     const absoluteFilePath = path.resolve(cwd, filePath);

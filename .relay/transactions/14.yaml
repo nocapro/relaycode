@@ -1,0 +1,694 @@
+uuid: a62e088d-7649-411a-8805-fd0d6199a099
+projectId: relaycode
+createdAt: '2025-09-20T06:48:14.651Z'
+gitCommitMsg: >-
+  feat(logging): propagate CLI log level to core library
+
+  This commit enhances the logging system to allow the main RelayCode CLI
+  application to control the log level of the `relaycode-core` library.
+
+  - The logger in `relaycode-core` now has a `setLevel` method. - The `apply`
+  and `watch` commands now check the user's configured log level. If it's set to
+  'debug', they enable debug logging in the core library.
+
+  This allows debug messages from core features, such as the new fuzzy file path
+  matching, to be visible when running the CLI in debug mode.
+promptSummary: >-
+  The user asked if root project modifications were needed for the fuzzy file
+  path matching feature. I've added changes to propagate the debug log level
+  from the CLI to the core library.
+reasoning:
+  - >-
+    You are absolutely right to ask. While the core fuzzy-matching logic is
+    self-contained in `relaycode-core`, a small modification to the main
+    `relaycode` application is needed to make the new debug logs visible.
+  - >-
+    The `relaycode-core` package has its own simple logger, which I used to log
+    information about fuzzy path matching. To see these debug messages, we need
+    to tell the core logger to switch to "debug" mode when the main
+    application's log level is set to "debug".
+  - 'I will make the following changes:'
+  - >-
+    1.  **`packages/relaycode-core/src/logger.ts`**: I'll add a `setLevel`
+    function to the core logger so that its log level can be controlled
+    externally.
+  - >-
+    2.  **`src/commands/apply.ts` & `src/commands/watch.ts`**: In the main
+    application's commands, I will call this new `setLevel` function to enable
+    debug logging in the core library whenever the user's configuration
+    specifies `"logLevel": "debug"`.
+  - >-
+    This ensures that when you're debugging, you'll get the detailed output from
+    the core engine, including which file paths are being fuzzy-matched.
+  - 'Here are the required changes:'
+  - First, I'll update the logger in `relaycode-core` to be configurable.
+  - Now, I'll update the `apply` command to set the core logger's level.
+  - Finally, I'll do the same for the `watch` command.
+  - >-
+    These changes connect the main application's configuration to the core
+    library's logger, completing the implementation.
+operations:
+  - type: write
+    path: packages/relaycode-core/src/logger.ts
+    content: >+
+      --- packages/relaycode-core/src/logger.ts
+
+      +++ packages/relaycode-core/src/logger.ts
+
+      @@ -12,12 +12,18 @@
+           return level in levels;
+       }
+       
+      -const envLogLevel = process.env.LOG_LEVEL?.toLowerCase() || 'info';
+
+      -const LOG_LEVEL: LogLevelName = isValidLogLevel(envLogLevel) ?
+      envLogLevel : 'info';
+
+      +const getLogLevel = (): LogLevelName => {
+
+      +    const envLogLevel = process.env.LOG_LEVEL?.toLowerCase() || 'info';
+
+      +    return isValidLogLevel(envLogLevel) ? envLogLevel : 'info';
+
+      +}
+       
+      -const currentLevel = levels[LOG_LEVEL];
+
+      +let currentLogLevelName: LogLevelName = getLogLevel();
+
+      +let currentLevel = levels[currentLogLevelName];
+
+      +
+       
+       const log = (level: number, prefix: string, ...args: any[]) => {
+         if (level >= currentLevel) {
+           if (level === levels.debug) {
+      @@ -29,6 +35,12 @@
+       };
+       
+       export const logger = {
+      +  setLevel: (level: LogLevelName) => {
+
+      +      if (isValidLogLevel(level)) {
+
+      +        currentLogLevelName = level;
+
+      +        currentLevel = levels[level];
+
+      +      }
+
+      +  },
+         debug: (...args: any[]) => log(levels.debug, '[DEBUG]', ...args),
+         info: (...args: any[]) => log(levels.info, '[INFO]', ...args),
+         warn: (...args: any[]) => log(levels.warn, '[WARN]', ...args),
+
+    patchStrategy: standard-diff
+  - type: write
+    path: src/commands/apply.ts
+    content: |+
+      --- src/commands/apply.ts
+      +++ src/commands/apply.ts
+      @@ -1,13 +1,16 @@
+       import { promises as fs } from 'fs';
+       import path from 'path';
+       import { loadConfigOrExit } from '../core/config';
+      -import { parseLLMResponse } from 'relaycode-core';
+      +import { parseLLMResponse, logger as coreLogger } from 'relaycode-core';
+       import { processPatch } from '../core/transaction';
+       import { logger } from '../utils/logger';
+       import chalk from 'chalk';
+       
+       export const applyCommand = async (filePath: string, options: { yes?: boolean } = {}, cwd: string = process.cwd()): Promise<void> => {
+           const config = await loadConfigOrExit(cwd);
+           logger.setLevel(config.core.logLevel);
+      +    if (config.core.logLevel === 'debug') {
+      +        coreLogger.setLevel('debug');
+      +    }
+       
+           let content: string;
+           const absoluteFilePath = path.resolve(cwd, filePath);
+
+    patchStrategy: standard-diff
+  - type: write
+    path: src/commands/watch.ts
+    content: >+
+      --- src/commands/watch.ts
+
+      +++ src/commands/watch.ts
+
+      @@ -1,6 +1,6 @@
+       import { findConfig, loadConfigOrExit, findConfigPath } from '../core/config';
+       import { createClipboardWatcher, createBulkClipboardWatcher } from '../core/clipboard';
+       import chalk from 'chalk';
+      -import { parseLLMResponse, type ParsedLLMResponse } from
+      'relaycode-core';
+
+      +import { parseLLMResponse, type ParsedLLMResponse, logger as coreLogger }
+      from 'relaycode-core';
+       import { processPatch, processPatchesBulk } from '../core/transaction';
+       import { logger } from '../utils/logger';
+       import { type Config } from 'relaycode-core';
+      @@ -213,6 +213,9 @@
+           }
+       
+           logger.setLevel(config.core.logLevel);
+      +    if (config.core.logLevel === 'debug') {
+
+      +      coreLogger.setLevel('debug');
+
+      +    }
+           logger.debug(`Log level set to: ${config.core.logLevel}`);
+           logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+       
+
+    patchStrategy: standard-diff
+snapshot:
+  packages/relaycode-core/src/logger.ts: >-
+    // A simple logger for debugging within the core package.
+
+    // To enable debug logs, set LOG_LEVEL=debug in the environment.
+
+    const levels = {
+      debug: 0,
+      info: 1,
+      warn: 2,
+      error: 3,
+    };
+
+    type LogLevelName = keyof typeof levels;
+
+
+    const isValidLogLevel = (level: string): level is LogLevelName => {
+        return level in levels;
+    }
+
+
+    const envLogLevel = process.env.LOG_LEVEL?.toLowerCase() || 'info';
+
+    const LOG_LEVEL: LogLevelName = isValidLogLevel(envLogLevel) ? envLogLevel :
+    'info';
+
+
+    const currentLevel = levels[LOG_LEVEL];
+
+
+    const log = (level: number, prefix: string, ...args: any[]) => {
+      if (level >= currentLevel) {
+        if (level === levels.debug) {
+            console.log(`\x1b[90m${prefix}\x1b[0m`, ...args); // Gray for debug
+        } else {
+            console.log(prefix, ...args);
+        }
+      }
+    };
+
+
+    export const logger = {
+      debug: (...args: any[]) => log(levels.debug, '[DEBUG]', ...args),
+      info: (...args: any[]) => log(levels.info, '[INFO]', ...args),
+      warn: (...args: any[]) => log(levels.warn, '[WARN]', ...args),
+      error: (...args: any[]) => log(levels.error, '[ERROR]', ...args),
+    };
+  src/commands/apply.ts: >-
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { loadConfigOrExit } from '../core/config';
+
+    import { parseLLMResponse } from 'relaycode-core';
+
+    import { processPatch } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import chalk from 'chalk';
+
+
+    export const applyCommand = async (filePath: string, options: { yes?:
+    boolean } = {}, cwd: string = process.cwd()): Promise<void> => {
+        const config = await loadConfigOrExit(cwd);
+        logger.setLevel(config.core.logLevel);
+
+        let content: string;
+        const absoluteFilePath = path.resolve(cwd, filePath);
+        try {
+            const stats = await fs.stat(absoluteFilePath);
+            if (stats.isDirectory()) {
+                logger.error(`Path is a directory, not a file: ${chalk.cyan(absoluteFilePath)}`);
+                return;
+            }
+            content = await fs.readFile(absoluteFilePath, 'utf-8');
+            logger.info(`Reading patch from file: ${chalk.cyan(absoluteFilePath)}`);
+        } catch (error) {
+            logger.error(`Failed to read patch file at '${chalk.cyan(absoluteFilePath)}'. Aborting.`);
+            return;
+        }
+
+        logger.info('Attempting to parse patch file...');
+        const parsedResponse = parseLLMResponse(content);
+
+        if (!parsedResponse) {
+            logger.error('The content of the file is not a valid relaycode patch. Aborting.');
+            return;
+        }
+
+        if (parsedResponse.ignoredBlocks && parsedResponse.ignoredBlocks.length > 0) {
+            parsedResponse.ignoredBlocks.forEach(block => {
+                logger.warn(`${chalk.yellow('⚠ Ignored block:')} ${block.reason}`);
+            });
+        }
+
+        if (parsedResponse.operations.length === 0) {
+            logger.info('No operations to apply from this file.');
+            return;
+        }
+
+        logger.success('Valid patch format detected. Processing...');
+        await processPatch(config, parsedResponse, { cwd, yes: options.yes });
+        logger.info(chalk.gray('--------------------------------------------------'));
+    };
+  src/commands/watch.ts: >
+    import { findConfig, loadConfigOrExit, findConfigPath } from
+    '../core/config';
+
+    import { createClipboardWatcher, createBulkClipboardWatcher } from
+    '../core/clipboard';
+
+    import chalk from 'chalk';
+
+    import { parseLLMResponse, type ParsedLLMResponse } from 'relaycode-core';
+
+    import { processPatch, processPatchesBulk } from '../core/transaction';
+
+    import { logger } from '../utils/logger';
+
+    import { type Config } from 'relaycode-core';
+
+    import fs from 'fs';
+
+
+    const getSystemPrompt = (
+      projectId: string,
+      preferredStrategy: Config['watcher']['preferredStrategy'],
+      patchConfig: Config['patch'],
+    ): string => {
+        const header = `
+    ✅ relaycode is watching for changes.
+
+
+    IMPORTANT: For relaycode to work, you must configure your AI assistant.
+
+    Copy the entire text below and paste it into your LLM's "System Prompt"
+
+    or "Custom Instructions" section.
+
+    ---------------------------------------------------------------------------`;
+
+      const intro = `You are an expert AI programmer. To modify a file, you MUST use a code block with a specified patch strategy.`;
+
+      const syntaxAuto = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath {patchStrategy}
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - \`patchStrategy\`: (Optional) One of \`standard-diff\`,
+    \`search-replace\`. If omitted, the entire file is replaced (this is the
+    \`replace\` strategy).
+
+
+    **Examples:**
+
+    \`\`\`typescript // src/components/Button.tsx
+
+    ...
+
+    \`\`\`
+
+    \`\`\`typescript // "src/components/My Component.tsx" standard-diff
+
+    ...
+
+    \`\`\``;
+
+      const syntaxReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath
+
+    ... content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - Only the \`replace\` strategy is enabled. This means you must provide the
+    ENTIRE file content for any change. This is suitable for creating new files
+    or making changes to small files.`;
+
+      const syntaxStandardDiff = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath standard-diff
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`standard-diff\` patch strategy for all modifications.`;
+
+      const syntaxSearchReplace = `
+    **Syntax:**
+
+    \`\`\`typescript // filePath search-replace
+
+    ... diff content ...
+
+    \`\`\`
+
+    - \`filePath\`: The path to the file. **If the path contains spaces, it MUST
+    be enclosed in double quotes.**
+
+    - You must use the \`search-replace\` patch strategy for all
+    modifications.`;
+
+      const sectionStandardDiff = `---
+
+    ### Strategy 1: Advanced Unified Diff (\`standard-diff\`) - RECOMMENDED
+
+
+    Use for most changes, like refactoring, adding features, and fixing bugs.
+    It's resilient to minor changes in the source file.
+
+
+    **Diff Format:**
+
+    1.  **File Headers**: Start with \`--- {filePath}\` and \`+++ {filePath}\`.
+
+    2.  **Hunk Header**: Use \`@@ ... @@\`. Exact line numbers are not needed.
+
+    3.  **Context Lines**: Include 2-3 unchanged lines before and after your
+    change for context.
+
+    4.  **Changes**: Mark additions with \`+\` and removals with \`-\`. Maintain
+    indentation.
+
+
+    **Example:**
+
+    \`\`\`diff
+
+    --- src/utils.ts
+
+    +++ src/utils.ts
+
+    @@ ... @@
+        function calculateTotal(items: number[]): number {
+    -      return items.reduce((sum, item) => {
+
+    -        return sum + item;
+
+    -      }, 0);
+
+    +      const total = items.reduce((sum, item) => {
+
+    +        return sum + item * 1.1;  // Add 10% markup
+
+    +      }, 0);
+
+    +      return Math.round(total * 100) / 100;  // Round to 2 decimal places
+
+    +    }
+
+    \`\`\`
+
+    `;
+
+      const sectionSearchReplace = `---
+
+    ### Strategy 2: Search-Replace (\`search-replace\`)
+
+
+    Use for precise, surgical replacements. The \`SEARCH\` block must be an
+    exact match of the content in the file.
+
+
+    **Diff Format:**
+
+    Repeat this block for each replacement.
+
+    \`\`\`diff
+
+    <<<<<<< SEARCH
+
+    [exact content to find including whitespace]
+
+    =======
+
+    [new content to replace with]
+
+    >>>>>>> REPLACE
+
+    \`\`\`
+
+    `;
+
+      const otherOps = `---
+
+    ### Other Operations
+
+
+    -   **Creating a file**: Use the default \`replace\` strategy (omit the
+    strategy name) and provide the full file content.
+
+    -   **Deleting a file**:
+        \`\`\`typescript // path/to/file.ts
+        //TODO: delete this file
+        \`\`\`
+        \`\`\`typescript // "path/to/My Old Component.ts"
+        //TODO: delete this file
+        \`\`\`
+    -   **Renaming/Moving a file**:
+        \`\`\`json // rename-file
+        {
+          "from": "src/old/path/to/file.ts",
+          "to": "src/new/path/to/file.ts"
+        }
+        \`\`\`
+    `;
+
+      const finalSteps_rules = [];
+      if (patchConfig.minFileChanges > 0) {
+        finalSteps_rules.push(`You must modify at least ${patchConfig.minFileChanges} file(s) in this transaction.`);
+      }
+      if (patchConfig.maxFileChanges) {
+        finalSteps_rules.push(`You must not modify more than ${patchConfig.maxFileChanges} file(s) in this transaction.`);
+      }
+
+      const finalSteps_list = [
+        'Add your step-by-step reasoning in plain text before each code block.',
+      ];
+      if (finalSteps_rules.length > 0) {
+        finalSteps_list.push(`Adhere to file limits: ${finalSteps_rules.join(' ')}`);
+      }
+      finalSteps_list.push('ALWAYS add the following YAML block at the very end of your response. Use the exact projectId shown here. Generate a new random uuid for each response.');
+
+      const finalSteps_list_string = finalSteps_list.map((item, index) => `${index + 1}.  ${item}`).join('\n');
+
+      const finalSteps = `---
+
+    ### Final Steps
+
+
+    ${finalSteps_list_string}
+
+        \`\`\`yaml
+        projectId: ${projectId}
+        uuid: (generate a random uuid)
+        changeSummary: # A list of key-value pairs for changes
+          - edit: src/main.ts
+          - new: src/components/Button.tsx
+          - delete: src/utils/old-helper.ts
+        promptSummary: A brief summary of my request.
+        gitCommitMsg: >-
+          feat: A concise, imperative git commit message.
+
+          Optionally, provide a longer description here.
+        \`\`\`
+    `;
+
+      const footer = `---------------------------------------------------------------------------`;
+
+      const strategyInfo = {
+        auto: { syntax: syntaxAuto, details: `${sectionStandardDiff}\n${sectionSearchReplace}` },
+        replace: { syntax: syntaxReplace, details: '' },
+        'standard-diff': { syntax: syntaxStandardDiff, details: sectionStandardDiff },
+        'search-replace': { syntax: syntaxSearchReplace, details: sectionSearchReplace },
+      };
+
+      const preferred = strategyInfo[preferredStrategy] ?? strategyInfo.auto;
+      const syntax = preferred.syntax;
+      const strategyDetails = preferred.details;
+
+      return [header, intro, syntax, strategyDetails, otherOps, finalSteps, footer].filter(Boolean).join('\n');
+    };
+
+
+    export const watchCommand = async (options: { yes?: boolean } = {}, cwd:
+    string = process.cwd()): Promise<{ stop: () => void }> => {
+      let clipboardWatcher: { stop: () => void } | null = null;
+      let configWatcher: fs.FSWatcher | null = null;
+      let debounceTimer: NodeJS.Timeout | null = null;
+
+      const startServices = (config: Config) => {
+        // Stop existing watcher if it's running
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+
+        logger.setLevel(config.core.logLevel);
+        logger.debug(`Log level set to: ${config.core.logLevel}`);
+        logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
+
+        logger.log(getSystemPrompt(config.projectId, config.watcher.preferredStrategy, config.patch));
+
+        // Use bulk clipboard watcher if bulk mode is enabled
+        if (config.watcher.enableBulkProcessing) {
+          clipboardWatcher = createBulkClipboardWatcher(
+            config.watcher.clipboardPollInterval,
+            async (contents) => {
+              logger.info(`Processing ${contents.length} clipboard items in bulk mode...`);
+
+              const parsedResponses: ParsedLLMResponse[] = [];
+              for (const content of contents) {
+                const parsedResponse = parseLLMResponse(content);
+                if (parsedResponse) {
+                  if (parsedResponse.ignoredBlocks && parsedResponse.ignoredBlocks.length > 0) {
+                    parsedResponse.ignoredBlocks.forEach(block => {
+                      logger.warn(`${chalk.yellow('⚠ Ignored block:')} ${block.reason}`);
+                    });
+                  }
+                  // Only add responses that have operations to process
+                  if (parsedResponse.operations.length > 0) {
+                    parsedResponses.push(parsedResponse);
+                  }
+                }
+              }
+
+              if (parsedResponses.length === 0) {
+                logger.warn('No operations to process from clipboard items.');
+                return;
+              }
+
+              await processPatchesBulk(config, parsedResponses, { cwd, notifyOnStart: true, yes: options.yes });
+              logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+            },
+            config.watcher.bulkSize || 5,
+            config.watcher.bulkTimeout || 30000
+          );
+        } else {
+          clipboardWatcher = createClipboardWatcher(config.watcher.clipboardPollInterval, async (content) => {
+            logger.debug('New clipboard content detected. Attempting to parse...');
+            const parsedResponse = parseLLMResponse(content);
+
+            if (!parsedResponse) {
+              logger.debug('Clipboard content is not a valid relaycode patch. Ignoring.');
+              return;
+            }
+            
+            // Check project ID before notifying and processing.
+            if (parsedResponse.control.projectId !== config.projectId) {
+              logger.debug(`Ignoring patch for different project (expected '${config.projectId}', got '${parsedResponse.control.projectId}').`);
+              return;
+            }
+
+            if (parsedResponse.ignoredBlocks && parsedResponse.ignoredBlocks.length > 0) {
+                parsedResponse.ignoredBlocks.forEach(block => {
+                    logger.warn(`${chalk.yellow('⚠ Ignored block:')} ${block.reason}`);
+                });
+            }
+            if (parsedResponse.operations.length === 0) {
+                return; // Silently return, user has been notified of ignored blocks if any.
+            }
+
+            await processPatch(config, parsedResponse, { cwd, notifyOnStart: true, yes: options.yes });
+            logger.info(chalk.gray(`\n[relay] Watching for patches...`));
+          });
+        }
+      };
+
+      const handleConfigChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          logger.info(`Configuration file change detected. Reloading...`);
+          try {
+            const newConfig = await findConfig(cwd);
+            if (newConfig) {
+              logger.success('Configuration reloaded. Restarting services...');
+              startServices(newConfig);
+            } else {
+              logger.error(`Configuration file is invalid or has been deleted. Services paused.`);
+              if (clipboardWatcher) {
+                clipboardWatcher.stop();
+                clipboardWatcher = null;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error reloading configuration: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, 250);
+      };
+
+      // Initial startup
+      const initialConfig = await loadConfigOrExit(cwd);
+      const configPath = await findConfigPath(cwd);
+      
+      const { clipboardPollInterval } = initialConfig.watcher;
+      logger.info(
+        chalk.gray(
+          `[relay] Watching for patches... (project: ${initialConfig.projectId}, approval: ${initialConfig.patch.approvalMode}, poll: ${clipboardPollInterval}ms)`
+        )
+      );
+      
+      logger.success('Configuration loaded. Starting relaycode watch...');
+      startServices(initialConfig);
+
+      // Watch for changes after initial setup
+      if (initialConfig.core.watchConfig && configPath) {
+        configWatcher = fs.watch(configPath, handleConfigChange);
+      } else {
+        logger.info('Configuration file watching is disabled. Changes to config will require a restart to take effect.');
+      }
+
+      const stopAll = () => {
+        if (clipboardWatcher) {
+          clipboardWatcher.stop();
+        }
+        if (configWatcher) {
+          configWatcher.close();
+          logger.info('Configuration file watcher stopped.');
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+      };
+      return { stop: stopAll };
+    };
+approved: true
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: committed
+id: 14

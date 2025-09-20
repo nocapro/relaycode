@@ -1,7 +1,7 @@
 import { findConfig, loadConfigOrExit, findConfigPath } from '../core/config';
 import { createClipboardWatcher, createBulkClipboardWatcher } from '../core/clipboard';
 import chalk from 'chalk';
-import { parseLLMResponse, type ParsedLLMResponse } from 'relaycode-core';
+import { parseLLMResponse, type ParsedLLMResponse, logger as coreLogger } from 'relaycode-core';
 import { processPatch, processPatchesBulk } from '../core/transaction';
 import { logger } from '../utils/logger';
 import { type Config } from 'relaycode-core';
@@ -196,6 +196,9 @@ export const watchCommand = async (options: { yes?: boolean } = {}, cwd: string 
     }
 
     logger.setLevel(config.core.logLevel);
+    if (config.core.logLevel === 'debug') {
+      coreLogger.setLevel('debug');
+    }
     logger.debug(`Log level set to: ${config.core.logLevel}`);
     logger.debug(`Preferred strategy set to: ${config.watcher.preferredStrategy}`);
 
