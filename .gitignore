@@ -41,3 +41,6 @@ bun.lockb
 package-lock.json
 #packages
 .claude
+
+# relay state
+/.relay/

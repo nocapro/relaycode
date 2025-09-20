@@ -85,11 +85,6 @@ export const initCommand = async (cwd: string = process.cwd()): Promise<void> =>
   }
 
   // Create system prompt file if it doesn't exist
-  const systemPrompt = getSystemPrompt(
-    projectId,
-    newConfig.watcher.preferredStrategy,
-    newConfig.patch
-  );
   const promptsDir = path.join(stateDir, 'prompts');
   await fs.mkdir(promptsDir, { recursive: true });
   const systemPromptPath = path.join(promptsDir, PROMPT_FILE_NAME);
