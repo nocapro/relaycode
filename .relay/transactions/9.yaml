@@ -1,0 +1,377 @@
+uuid: d8d928d2-7c39-4467-83d8-e7a93540e1e6
+projectId: relaycode
+createdAt: '2025-09-20T05:25:31.082Z'
+gitCommitMsg: >-
+  feat(cli): display ASCII art header for base command
+
+  Displays the RelayCode ASCII art logo and version number when the `relay`
+  command is executed without any arguments, just before showing the help text.
+
+  This improves the user experience by presenting a clear brand identity upon
+  first interaction. The version display logic has been refactored into a
+  reusable `displayVersionInfo` function to support both the base command and
+  the `--version` flag.
+promptSummary: Display ASCII art logo when running `relay` command without arguments.
+reasoning:
+  - >-
+    I will modify `src/cli.ts` to display an ASCII art logo and version
+    information when the `relay` command is run without any arguments, similar
+    to the `--version` flag.
+  - 'To achieve this, I will:'
+  - >-
+    1.  Extract the version and package information display logic from the
+    `program.on('option:version', ...)` event handler into a new reusable
+    function called `displayVersionInfo`.
+  - >-
+    2.  This new function will accept a boolean argument to control whether to
+    display the full details (with package timestamps) or just the header (ASCII
+    art and version).
+  - >-
+    3.  Update the `option:version` event handler to call
+    `displayVersionInfo(true)`.
+  - >-
+    4.  Modify the logic at the end of the file to call `displayVersionInfo()`
+    before `program.outputHelp()` when no command-line arguments are provided.
+  - 'This will result in the desired behavior:'
+  - >-
+    -   `relay --version`: Shows the full version information, including
+    timestamps for sub-packages.
+  - >-
+    -   `relay`: Shows the ASCII art and version, followed by the standard help
+    message.
+operations:
+  - type: write
+    path: src/cli.ts
+    content: >+
+      --- src/cli.ts
+
+      +++ src/cli.ts
+
+      @@ -29,6 +29,32 @@
+         console.error('Warning: Could not determine package version', error);
+       }
+       
+      +const displayVersionInfo = (full: boolean = false) => {
+
+      +  const asciiArt = `
+
+      +  ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+
+      +  ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+
+      +  ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
+
+      +`;
+
+      +  console.log(chalk.blue(asciiArt));
+
+      +  console.log(`  relaycode version ${version}\n`);
+
+      +
+
+      +  if (full) {
+
+      +      const packages = [
+
+      +          { name: 'relaycode', timestamp: relaycodeTimestamp },
+
+      +          { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
+
+      +          { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp
+      },
+
+      +          { name: 'konro', timestamp: konroTimestamp },
+
+      +      ];
+
+      +      const maxLength = Math.max(...packages.map(p => p.name.length));
+
+      +      console.log('  last modified source code\n');
+
+      +      packages.forEach(p => {
+
+      +          console.log(`  ${p.name.padEnd(maxLength)}      
+      ${p.timestamp}`);
+
+      +      });
+
+      +      console.log('');
+
+      +  }
+
+      +};
+
+      +
+       interface CommandInfo {
+         name: string;
+         alias: string;
+      @@ -47,32 +73,7 @@
+       program.option('-v, --version', 'output the current version');
+       
+       program.on('option:version', () => {
+      -  const asciiArt = `
+
+      -  ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+
+      -  ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+
+      -  ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
+
+      -`;
+
+      -  const packages = [
+
+      -    { name: 'relaycode', timestamp: relaycodeTimestamp },
+
+      -    { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
+
+      -    { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp },
+
+      -    { name: 'konro', timestamp: konroTimestamp },
+
+      -  ];
+
+      -  const maxLength = Math.max(...packages.map(p => p.name.length));
+
+      -
+
+      -  console.log(chalk.blue(asciiArt));
+
+      -  console.log(`  relaycode version ${version}\n`);
+
+      -  console.log('  last modified source code\n');
+
+      -
+
+      -  packages.forEach(p => {
+
+      -    console.log(`  ${p.name.padEnd(maxLength)}       ${p.timestamp}`);
+
+      -  });
+
+      -
+
+      -  console.log('');
+
+      +  displayVersionInfo(true);
+         process.exit(0);
+       });
+       
+      @@ -141,5 +142,6 @@
+       program.parse(process.argv);
+       
+       if (!process.argv.slice(2).length) {
+      +  displayVersionInfo();
+         program.outputHelp();
+       }
+
+    patchStrategy: standard-diff
+snapshot:
+  src/cli.ts: >
+    #!/usr/bin/env node
+
+    import { Command } from 'commander';
+
+    import { initCommand } from './commands/init';
+
+    import { watchCommand } from './commands/watch';
+
+    import { COMMAND_NAME } from './utils/constants';
+
+    import { revertCommand } from './commands/revert';
+
+    import { logCommand } from './commands/log';
+
+    import { applyCommand } from './commands/apply';
+
+    import { gitCommitCommand } from './commands/git-commit';
+
+    import { approveAllCommand } from './commands/approve-all';
+
+    import { createRequire } from 'node:module';
+
+    import { fileURLToPath } from 'node:url';
+
+    import { dirname, join } from 'node:path';
+
+    import chalk from 'chalk';
+
+    import { __LAST_MODIFIED__ as relaycodeTimestamp } from './index';
+
+    import { __LAST_MODIFIED__ as relaycodeCoreTimestamp } from
+    'relaycode-core';
+
+    import { __LAST_MODIFIED__ as applyMultiDiffTimestamp } from
+    'apply-multi-diff';
+
+    import { __LAST_MODIFIED__ as konroTimestamp } from 'konro';
+
+
+    // Default version in case we can't find the package.json
+
+    let version = '0.0.0';
+
+
+    try {
+      const require = createRequire(import.meta.url);
+      let pkg;
+      try {
+        // This works when installed as a package
+        pkg = require('relaycode/package.json');
+      } catch (e) {
+        // Fallback for local development
+        try {
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+          pkg = require(join(__dirname, '..', 'package.json'));
+        } catch (e2) {
+          // ignore
+        }
+      }
+
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+
+    interface CommandInfo {
+      name: string;
+      alias: string;
+      description: string;
+      action: (...args: any[]) => void;
+      args?: { syntax: string; description: string };
+      options?: { flags: string; description: string }[];
+    }
+
+
+    const skipConfirmationOption = { flags: '-y, --yes', description: 'Skip
+    confirmation prompts' };
+
+
+    const program = new Command();
+
+
+    program
+      .name(COMMAND_NAME)
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    // Manually define the version option so we can override its behavior.
+
+    program.option('-v, --version', 'output the current version');
+
+
+    program.on('option:version', () => {
+      const asciiArt = `
+      ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+      ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+      ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
+    `;
+      const packages = [
+        { name: 'relaycode', timestamp: relaycodeTimestamp },
+        { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
+        { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp },
+        { name: 'konro', timestamp: konroTimestamp },
+      ];
+      const maxLength = Math.max(...packages.map(p => p.name.length));
+
+      console.log(chalk.blue(asciiArt));
+      console.log(`  relaycode version ${version}\n`);
+      console.log('  last modified source code\n');
+
+      packages.forEach(p => {
+        console.log(`  ${p.name.padEnd(maxLength)}       ${p.timestamp}`);
+      });
+
+      console.log('');
+      process.exit(0);
+    });
+
+
+    const mainCommands: CommandInfo[] = [
+      { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
+      {
+        name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.',
+        action: (options: { yes: boolean }) => { watchCommand(options, process.cwd()); },
+        options: [skipConfirmationOption]
+      },
+      {
+        name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.',
+        args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' },
+        action: (filePath: string, options: { yes: boolean }) => applyCommand(filePath, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      {
+        name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.',
+        action: (options: { yes: boolean }) => approveAllCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
+      {
+        name: 'revert', alias: 'u', description: 'Reverts a transaction. Defaults to the last one.',
+        args: { syntax: '[uuid_or_index]', description: 'The UUID or index (e.g., 1, 2) of the transaction to revert.' },
+        action: (identifier: string, options: { yes: boolean }) => revertCommand(identifier, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const gitCommands: CommandInfo[] = [
+      {
+        name: 'commit',
+        alias: 'c',
+        description: 'Commits the last transaction using the message from the transaction log.',
+        action: (options: { yes: boolean }) => gitCommitCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const setupCommands = (parent: Command, commandList: CommandInfo[]) => {
+      commandList.forEach(cmdInfo => {
+        const command = parent
+          .command(cmdInfo.name)
+          .alias(cmdInfo.alias)
+          .description(cmdInfo.description);
+
+        if (cmdInfo.args) {
+          command.argument(cmdInfo.args.syntax, cmdInfo.args.description);
+        }
+
+        if (cmdInfo.options) {
+          cmdInfo.options.forEach(opt => {
+            command.option(opt.flags, opt.description);
+          });
+        }
+
+        command.action(cmdInfo.action);
+      });
+    };
+
+
+    setupCommands(program, mainCommands);
+
+
+    // Git command group
+
+    const git = program.command('git').description('Git related commands');
+
+    setupCommands(git, gitCommands);
+
+
+    program.parse(process.argv);
+
+
+    if (!process.argv.slice(2).length) {
+      program.outputHelp();
+    }
+approved: true
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: committed
+id: 9

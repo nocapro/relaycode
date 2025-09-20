@@ -1,0 +1,296 @@
+uuid: a6974720-63eb-460d-8381-1936353d9e87
+projectId: relaycode
+createdAt: '2025-09-20T05:28:53.690Z'
+gitCommitMsg: >-
+  fix(cli): use default action to show header on empty command
+
+  Refactors the CLI to use commander.js's default action handler (`.action()`)
+  to display the ASCII art header and help text when the `relay` command is run
+  without arguments.
+
+  This is a more robust solution than the previous manual argument check, which
+  was not executing due to commander's internal exit behavior. This ensures a
+  consistent and correct user experience.
+promptSummary: >-
+  Fix the CLI to display the ASCII art logo when the `relay` command is run
+  without any arguments.
+reasoning:
+  - >-
+    I see that my previous attempt didn't produce the desired output. The issue
+    is likely that `commander.js` processes arguments and can exit before my
+    manual check for no arguments is reached.
+  - >-
+    A more robust and idiomatic way to handle this with `commander.js` is to set
+    a default action on the main `program` object. This action will only run if
+    no subcommands are provided, which is exactly the behavior we want for the
+    `relay` command.
+  - 'I will modify `src/cli.ts` to:'
+  - >-
+    1.  Add an `.action()` handler to the main `program` definition. This action
+    will call `displayVersionInfo()` and then `program.outputHelp()`.
+  - >-
+    2.  Remove the `if (!process.argv.slice(2).length)` block from the end of
+    the file, as it is now redundant.
+  - >-
+    This will ensure the ASCII art and version are displayed correctly when
+    `relay` is run without any arguments, while leaving the behavior of other
+    commands and the `--version` flag unchanged.
+operations:
+  - type: write
+    path: src/cli.ts
+    content: >
+      --- src/cli.ts
+
+      +++ src/cli.ts
+
+      @@ -82,7 +82,12 @@
+       
+       program
+         .name(COMMAND_NAME)
+      -  .description('A developer assistant that automates applying code
+      changes from LLMs.');
+
+      +  .description('A developer assistant that automates applying code
+      changes from LLMs.')
+
+      +  .action(() => {
+
+      +    // This is the default action when no command is specified
+
+      +    displayVersionInfo();
+
+      +    program.outputHelp();
+
+      +  });
+       
+       // Manually define the version option so we can override its behavior.
+       program.option('-v, --version', 'output the current version');
+      @@ -153,8 +158,3 @@
+       setupCommands(git, gitCommands);
+       
+       program.parse(process.argv);
+      -
+
+      -if (!process.argv.slice(2).length) {
+
+      -  displayVersionInfo();
+
+      -  program.outputHelp();
+
+      -}
+    patchStrategy: standard-diff
+snapshot:
+  src/cli.ts: >
+    #!/usr/bin/env node
+
+    import { Command } from 'commander';
+
+    import { initCommand } from './commands/init';
+
+    import { watchCommand } from './commands/watch';
+
+    import { COMMAND_NAME } from './utils/constants';
+
+    import { revertCommand } from './commands/revert';
+
+    import { logCommand } from './commands/log';
+
+    import { applyCommand } from './commands/apply';
+
+    import { gitCommitCommand } from './commands/git-commit';
+
+    import { approveAllCommand } from './commands/approve-all';
+
+    import { createRequire } from 'node:module';
+
+    import { fileURLToPath } from 'node:url';
+
+    import { dirname, join } from 'node:path';
+
+    import chalk from 'chalk';
+
+    import { __LAST_MODIFIED__ as relaycodeTimestamp } from './index';
+
+    import { __LAST_MODIFIED__ as relaycodeCoreTimestamp } from
+    'relaycode-core';
+
+    import { __LAST_MODIFIED__ as applyMultiDiffTimestamp } from
+    'apply-multi-diff';
+
+    import { __LAST_MODIFIED__ as konroTimestamp } from 'konro';
+
+
+    // Default version in case we can't find the package.json
+
+    let version = '0.0.0';
+
+
+    try {
+      const require = createRequire(import.meta.url);
+      let pkg;
+      try {
+        // This works when installed as a package
+        pkg = require('relaycode/package.json');
+      } catch (e) {
+        // Fallback for local development
+        try {
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+          pkg = require(join(__dirname, '..', 'package.json'));
+        } catch (e2) {
+          // ignore
+        }
+      }
+
+      if (pkg && pkg.version) {
+        version = pkg.version;
+      }
+    } catch (error) {
+      // Fallback to default version if we can't find the package.json
+      console.error('Warning: Could not determine package version', error);
+    }
+
+
+    const displayVersionInfo = (full: boolean = false) => {
+      const asciiArt = `
+      ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+      ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+      ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
+    `;
+      console.log(chalk.blue(asciiArt));
+      console.log(`  relaycode version ${version}\n`);
+
+      if (full) {
+          const packages = [
+              { name: 'relaycode', timestamp: relaycodeTimestamp },
+              { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
+              { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp },
+              { name: 'konro', timestamp: konroTimestamp },
+          ];
+          const maxLength = Math.max(...packages.map(p => p.name.length));
+          console.log('  last modified source code\n');
+          packages.forEach(p => {
+              console.log(`  ${p.name.padEnd(maxLength)}       ${p.timestamp}`);
+          });
+          console.log('');
+      }
+    };
+
+
+    interface CommandInfo {
+      name: string;
+      alias: string;
+      description: string;
+      action: (...args: any[]) => void;
+      args?: { syntax: string; description: string };
+      options?: { flags: string; description: string }[];
+    }
+
+
+    const skipConfirmationOption = { flags: '-y, --yes', description: 'Skip
+    confirmation prompts' };
+
+
+    const program = new Command();
+
+
+    program
+      .name(COMMAND_NAME)
+      .description('A developer assistant that automates applying code changes from LLMs.');
+
+    // Manually define the version option so we can override its behavior.
+
+    program.option('-v, --version', 'output the current version');
+
+
+    program.on('option:version', () => {
+      displayVersionInfo(true);
+      process.exit(0);
+    });
+
+
+    const mainCommands: CommandInfo[] = [
+      { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
+      {
+        name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.',
+        action: (options: { yes: boolean }) => { watchCommand(options, process.cwd()); },
+        options: [skipConfirmationOption]
+      },
+      {
+        name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.',
+        args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' },
+        action: (filePath: string, options: { yes: boolean }) => applyCommand(filePath, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      {
+        name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.',
+        action: (options: { yes: boolean }) => approveAllCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+      { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
+      {
+        name: 'revert', alias: 'u', description: 'Reverts a transaction. Defaults to the last one.',
+        args: { syntax: '[uuid_or_index]', description: 'The UUID or index (e.g., 1, 2) of the transaction to revert.' },
+        action: (identifier: string, options: { yes: boolean }) => revertCommand(identifier, options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const gitCommands: CommandInfo[] = [
+      {
+        name: 'commit',
+        alias: 'c',
+        description: 'Commits the last transaction using the message from the transaction log.',
+        action: (options: { yes: boolean }) => gitCommitCommand(options, process.cwd()),
+        options: [skipConfirmationOption]
+      },
+    ];
+
+
+    const setupCommands = (parent: Command, commandList: CommandInfo[]) => {
+      commandList.forEach(cmdInfo => {
+        const command = parent
+          .command(cmdInfo.name)
+          .alias(cmdInfo.alias)
+          .description(cmdInfo.description);
+
+        if (cmdInfo.args) {
+          command.argument(cmdInfo.args.syntax, cmdInfo.args.description);
+        }
+
+        if (cmdInfo.options) {
+          cmdInfo.options.forEach(opt => {
+            command.option(opt.flags, opt.description);
+          });
+        }
+
+        command.action(cmdInfo.action);
+      });
+    };
+
+
+    setupCommands(program, mainCommands);
+
+
+    // Git command group
+
+    const git = program.command('git').description('Git related commands');
+
+    setupCommands(git, gitCommands);
+
+
+    program.parse(process.argv);
+
+
+    if (!process.argv.slice(2).length) {
+      displayVersionInfo();
+      program.outputHelp();
+    }
+approved: true
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: committed
+id: 10

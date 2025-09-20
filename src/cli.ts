@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import chalk from 'chalk';
-import { __LAST_MODIFIED__ as relaycodeTimestamp } from '../index';
+import { __LAST_MODIFIED__ as relaycodeTimestamp } from './index';
 import { __LAST_MODIFIED__ as relaycodeCoreTimestamp } from 'relaycode-core';
 import { __LAST_MODIFIED__ as applyMultiDiffTimestamp } from 'apply-multi-diff';
 import { __LAST_MODIFIED__ as konroTimestamp } from 'konro';
@@ -36,7 +36,7 @@ try {
       // ignore
     }
   }
-  
+
   if (pkg && pkg.version) {
     version = pkg.version;
   }
@@ -44,6 +44,31 @@ try {
   // Fallback to default version if we can't find the package.json
   console.error('Warning: Could not determine package version', error);
 }
+
+const displayVersionInfo = (full: boolean = false) => {
+  const asciiArt = `
+  ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
+  ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
+  ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
+`;
+  console.log(chalk.blue(asciiArt));
+  console.log(`  relaycode version ${version}\n`);
+
+  if (full) {
+      const packages = [
+          { name: 'relaycode', timestamp: relaycodeTimestamp },
+          { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
+          { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp },
+          { name: 'konro', timestamp: konroTimestamp },
+      ];
+      const maxLength = Math.max(...packages.map(p => p.name.length));
+      console.log('  last modified source code\n');
+      packages.forEach(p => {
+          console.log(`  ${p.name.padEnd(maxLength)}       ${p.timestamp}`);
+      });
+      console.log('');
+  }
+};
 
 interface CommandInfo {
   name: string;
@@ -60,51 +85,42 @@ const program = new Command();
 
 program
   .name(COMMAND_NAME)
-  .version(version, '-v, --version', 'output the current version')
   .description('A developer assistant that automates applying code changes from LLMs.')
-  .on('option:version', () => {
-    const asciiArt = `
-  ░█▀▄░█▀▀░█░░░█▀█░█░█░█▀▀░█▀█░█▀▄░█▀▀
-  ░█▀▄░█▀▀░█░░░█▀█░░█░░█░░░█░█░█░█░█▀▀
-  ░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀░▀▀░░▀▀▀
-`;
-    const packages = [
-      { name: 'relaycode', timestamp: relaycodeTimestamp },
-      { name: 'relaycode-core', timestamp: relaycodeCoreTimestamp },
-      { name: 'apply-multi-diff', timestamp: applyMultiDiffTimestamp },
-      { name: 'konro', timestamp: konroTimestamp },
-    ];
-    const maxLength = Math.max(...packages.map(p => p.name.length));
-
-    console.log(chalk.blue(asciiArt));
-    console.log(`  relaycode version ${version}\n`);
-    console.log('  last modified source code\n');
-    
-    packages.forEach(p => {
-      console.log(`  ${p.name.padEnd(maxLength)}       ${p.timestamp}`);
-    });
-
-    console.log('');
-    process.exit(0);
+  .action(() => {
+    // This is the default action when no command is specified
+    displayVersionInfo();
+    program.outputHelp();
   });
+
+// Manually define the version option so we can override its behavior.
+program.option('-v, --version', 'output the current version');
+
+program.on('option:version', () => {
+  displayVersionInfo(true);
+  process.exit(0);
+});
 
 const mainCommands: CommandInfo[] = [
   { name: 'init', alias: 'i', description: 'Initializes relaycode in the current project.', action: () => initCommand(process.cwd()) },
-  { name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.',
+  {
+    name: 'watch', alias: 'w', description: 'Starts watching the clipboard for code changes to apply.',
     action: (options: { yes: boolean }) => { watchCommand(options, process.cwd()); },
     options: [skipConfirmationOption]
   },
-  { name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.',
+  {
+    name: 'apply', alias: 'a', description: 'Applies a patch from a specified file.',
     args: { syntax: '<filePath>', description: 'The path to the file containing the patch.' },
     action: (filePath: string, options: { yes: boolean }) => applyCommand(filePath, options, process.cwd()),
     options: [skipConfirmationOption]
   },
-  { name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.', 
+  {
+    name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.',
     action: (options: { yes: boolean }) => approveAllCommand(options, process.cwd()),
     options: [skipConfirmationOption]
   },
   { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
-  { name: 'revert', alias: 'u', description: 'Reverts a transaction. Defaults to the last one.',
+  {
+    name: 'revert', alias: 'u', description: 'Reverts a transaction. Defaults to the last one.',
     args: { syntax: '[uuid_or_index]', description: 'The UUID or index (e.g., 1, 2) of the transaction to revert.' },
     action: (identifier: string, options: { yes: boolean }) => revertCommand(identifier, options, process.cwd()),
     options: [skipConfirmationOption]
@@ -127,17 +143,17 @@ const setupCommands = (parent: Command, commandList: CommandInfo[]) => {
       .command(cmdInfo.name)
       .alias(cmdInfo.alias)
       .description(cmdInfo.description);
-  
+
     if (cmdInfo.args) {
       command.argument(cmdInfo.args.syntax, cmdInfo.args.description);
     }
-  
+
     if (cmdInfo.options) {
       cmdInfo.options.forEach(opt => {
         command.option(opt.flags, opt.description);
       });
     }
-  
+
     command.action(cmdInfo.action);
   });
 };
@@ -149,7 +165,3 @@ const git = program.command('git').description('Git related commands');
 setupCommands(git, gitCommands);
 
 program.parse(process.argv);
-
-if (!process.argv.slice(2).length) {
-    program.outputHelp();
-}
