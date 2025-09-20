@@ -1,0 +1,307 @@
+uuid: d0dd1804-0373-4f99-913a-a1b6ebc73797
+projectId: relaycode
+createdAt: '2025-09-20T07:33:16.131Z'
+gitCommitMsg: >-
+  fix(cli): make init command idempotent to fix migration issues
+
+  The `init` command would previously exit immediately if a `relay.config.json`
+  file was found. This prevented the creation of the new
+  `.relay/prompts/system-prompt.md` file for existing users, causing `relay
+  watch` to fail.
+
+  This commit refactors the `init` command to be idempotent. It now: - Creates a
+  config file only if one doesn't exist. - Verifies the project setup for
+  existing users. - Creates the `.relay/prompts/system-prompt.md` file if it's
+  missing, even if a config file is present. - Ensures the state directory and
+  .gitignore are correctly configured on every run.
+
+  This change provides a seamless upgrade path for existing users and allows
+  `relay init` to be used to repair a broken project setup.
+promptSummary: >-
+  I fixed a bug where `relay init` would not generate the `system-prompt.md`
+  file if a config file already existed, which caused `relay watch` to fail for
+  users upgrading from an older version.
+reasoning:
+  - >-
+    You've found a valid bug. When `relay init` is run in a project that already
+    has a configuration file from an older version, it skips the creation of the
+    new `system-prompt.md` file. This causes `relay watch` to fail.
+  - >-
+    I will fix this by making the `init` command idempotent. It will now check
+    for the existence of the configuration file and the system prompt file,
+    creating them only if they are missing. This ensures that running `relay
+    init` on an existing project will repair any missing components without
+    overwriting existing settings.
+  - 'Here is the patch for `src/commands/init.ts`:'
+operations:
+  - type: write
+    path: src/commands/init.ts
+    content: >+
+      --- src/commands/init.ts
+
+      +++ src/commands/init.ts
+
+      @@ -63,39 +63,49 @@
+       export const initCommand = async (cwd: string = process.cwd()): Promise<void> => {
+         logger.info('Initializing relaycode in this project...');
+       
+      -  const config = await findConfig(cwd);
+
+      -  if (config) {
+
+      -    logger.warn(`Configuration file already exists. Initialization
+      skipped.`);
+
+      -    logger.log(`
+
+      -To use relaycode, please run ${chalk.magenta("'relay watch'")}.
+
+      -It will display a system prompt to copy into your LLM assistant.
+
+      -You can review your configuration in your existing config file.
+
+      -`);
+
+      -    return;
+
+      +  let config = await findConfig(cwd);
+
+      +  let isNewProject = false;
+
+      +
+
+      +  if (!config) {
+
+      +    isNewProject = true;
+
+      +    const projectId = await getProjectId(cwd);
+
+      +    config = await createConfig(projectId, cwd);
+
+      +    logger.success(`Created configuration file:
+      ${chalk.cyan(CONFIG_FILE_NAME_JSON)}`);
+
+      +  } else {
+
+      +    logger.info(`Configuration file found. Verifying project setup...`);
+         }
+       
+      -  const projectId = await getProjectId(cwd);
+
+      -  const newConfig = await createConfig(projectId, cwd);
+
+      -  logger.success(`Created configuration file:
+      ${chalk.cyan(CONFIG_FILE_NAME_JSON)}`);
+
+      +  const projectId = config.projectId;
+       
+         // Explicitly create the transaction directory so `log` command doesn't fail on a fresh init
+         const stateDir = getStateDirectory(cwd);
+         await fs.mkdir(path.join(stateDir, 'transaction'), { recursive: true });
+      -  logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+
+      +  if (isNewProject) {
+
+      +    logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+
+      +  }
+       
+      -  // Create system prompt file
+
+      +  // Create system prompt file if it doesn't exist
+         const promptsDir = path.join(stateDir, 'prompts');
+         await fs.mkdir(promptsDir, { recursive: true });
+         const systemPromptPath = path.join(promptsDir, PROMPT_FILE_NAME);
+      -  await fs.writeFile(systemPromptPath, systemPrompt);
+         const relativePromptPath = path.join(STATE_DIRECTORY_NAME, 'prompts', PROMPT_FILE_NAME);
+      -  logger.success(`Created default system prompt:
+      ${chalk.cyan(relativePromptPath)}`);
+
+      +  
+
+      +  let promptFileExists = false;
+
+      +  try {
+
+      +      await fs.access(systemPromptPath);
+
+      +      promptFileExists = true;
+
+      +  } catch (e) {
+
+      +      // file doesn't exist
+
+      +  }
+
+      +
+
+      +  if (!promptFileExists) {
+
+      +    const systemPrompt = getSystemPrompt(projectId,
+      config.watcher.preferredStrategy, config.patch);
+
+      +    await fs.writeFile(systemPromptPath, systemPrompt);
+
+      +    logger.success(`Created default system prompt:
+      ${chalk.cyan(relativePromptPath)}`);
+
+      +  }
+       
+         await updateGitignore(cwd);
+       
+      -  logger.log(getInitMessage(projectId, relativePromptPath));
+
+      +  if (isNewProject) {
+
+      +      logger.log(getInitMessage(projectId, relativePromptPath));
+
+      +  } else {
+
+      +      logger.success('✅ Project setup verified. Your project is ready.');
+
+      +      logger.info(`You can now run ${chalk.magenta("'relay watch'")}.`);
+
+      +  }
+       };
+
+    patchStrategy: standard-diff
+snapshot:
+  src/commands/init.ts: >
+    import { promises as fs } from 'fs';
+
+    import path from 'path';
+
+    import { findConfig, createConfig, getProjectId, getStateDirectory } from
+    '../core/config';
+
+    import { logger, getErrorMessage, isEnoentError } from '../utils/logger';
+
+    import {
+      STATE_DIRECTORY_NAME,
+      GITIGNORE_FILE_NAME,
+      GITIGNORE_COMMENT,
+      CONFIG_FILE_NAME_JSON,
+    } from '../utils/constants';
+
+    import chalk from 'chalk';
+
+    import { getSystemPrompt } from '../core/prompt-generator';
+
+
+    const PROMPT_FILE_NAME = 'system-prompt.md';
+
+
+    const getInitMessage = (projectId: string, promptFilePath: string): string
+    => `
+
+    ${chalk.green('✅ relaycode has been initialized for this project.')}
+
+
+    Configuration file created: ${chalk.cyan(CONFIG_FILE_NAME_JSON)}
+
+    Default system prompt created: ${chalk.cyan(promptFilePath)}
+
+
+    Project ID: ${chalk.cyan(projectId)}
+
+
+    ${chalk.bold('Next steps:')}
+
+    ${chalk.gray('1.')} (Optional) Open ${chalk.cyan(CONFIG_FILE_NAME_JSON)} to
+    customize settings. The config is organized into sections:
+       - In ${chalk.yellow("'watcher'")}, you can set ${chalk.yellow("'preferredStrategy'")} to control AI patch generation ('auto', 'standard-diff', 'search-replace', etc.).
+       - In ${chalk.yellow("'git'")}, you can enable ${chalk.yellow("'git.autoGitBranch'")} to create a new branch for each transaction.
+       - In ${chalk.yellow("'patch'")}, you can configure the linter, pre/post commands, and approval behavior.
+
+    ${chalk.gray('2.')} (Optional) You can customize the AI instructions by
+    editing ${chalk.cyan(promptFilePath)}.
+
+
+    ${chalk.gray('3.')} Run ${chalk.magenta("'relay watch'")} in your terminal.
+    It will automatically copy the system prompt to your clipboard.
+
+
+    ${chalk.gray('4.')} Paste the system prompt into your AI assistant's "System
+    Prompt" or "Custom Instructions".
+
+    `;
+
+
+
+    const updateGitignore = async (cwd: string): Promise<void> => {
+      const gitignorePath = path.join(cwd, GITIGNORE_FILE_NAME);
+      const entry = `\n${GITIGNORE_COMMENT}\n/${STATE_DIRECTORY_NAME}/\n`;
+
+      try {
+        const stats = await fs.stat(gitignorePath);
+        if (stats.isDirectory()) {
+          throw new Error('Path is a directory, not a file');
+        }
+        let content = await fs.readFile(gitignorePath, 'utf-8');
+        if (!content.includes(STATE_DIRECTORY_NAME)) {
+          content += entry;
+          await fs.writeFile(gitignorePath, content);
+          logger.info(`Updated ${chalk.cyan(GITIGNORE_FILE_NAME)} to ignore ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
+        }
+      } catch (error) {
+        if (isEnoentError(error)) {
+          await fs.writeFile(gitignorePath, entry.trim());
+          logger.info(`Created ${chalk.cyan(GITIGNORE_FILE_NAME)} and added ${chalk.cyan(STATE_DIRECTORY_NAME)}/`);
+        } else {
+          logger.error(`Failed to update ${chalk.cyan(GITIGNORE_FILE_NAME)}: ${getErrorMessage(error)}`);
+        }
+      }
+    };
+
+
+    export const initCommand = async (cwd: string = process.cwd()):
+    Promise<void> => {
+      logger.info('Initializing relaycode in this project...');
+
+      const config = await findConfig(cwd);
+      if (config) {
+        logger.warn(`Configuration file already exists. Initialization skipped.`);
+        logger.log(`
+    To use relaycode, please run ${chalk.magenta("'relay watch'")}.
+
+    It will display a system prompt to copy into your LLM assistant.
+
+    You can review your configuration in your existing config file.
+
+    `);
+        return;
+      }
+
+      const projectId = await getProjectId(cwd);
+      const newConfig = await createConfig(projectId, cwd);
+      logger.success(`Created configuration file: ${chalk.cyan(CONFIG_FILE_NAME_JSON)}`);
+
+      // Explicitly create the transaction directory so `log` command doesn't fail on a fresh init
+      const stateDir = getStateDirectory(cwd);
+      await fs.mkdir(path.join(stateDir, 'transaction'), { recursive: true });
+      logger.success(`Created state directory: ${STATE_DIRECTORY_NAME}/`);
+
+      // Create system prompt file
+      const systemPrompt = getSystemPrompt(
+        projectId,
+        newConfig.watcher.preferredStrategy,
+        newConfig.patch
+      );
+      const promptsDir = path.join(stateDir, 'prompts');
+      await fs.mkdir(promptsDir, { recursive: true });
+      const systemPromptPath = path.join(promptsDir, PROMPT_FILE_NAME);
+      await fs.writeFile(systemPromptPath, systemPrompt);
+      const relativePromptPath = path.join(STATE_DIRECTORY_NAME, 'prompts', PROMPT_FILE_NAME);
+      logger.success(`Created default system prompt: ${chalk.cyan(relativePromptPath)}`);
+
+      await updateGitignore(cwd);
+
+      logger.log(getInitMessage(projectId, relativePromptPath));
+    };
+approved: true
+linesAdded: null
+linesRemoved: null
+linesDifference: null
+gitCommittedAt: null
+status: committed
+id: 17

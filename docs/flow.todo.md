@@ -1,6 +1,8 @@
-===
+=== DONE
 
-when user run relay w, no need to ask them to copy,,
+improve UX
+
+when user run relay w/watch, no need to ask them to copy,, just ask them to paste the system prompt to their llm. so relay w/watch it should automatically copy to clipboard, it direct read from .relay/prompts/system-prompt.md so now user can modify system prompt by just edit the file
 
 === DONE
 

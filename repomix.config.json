@@ -25,8 +25,7 @@
     "package.json",
     "tsconfig.json",
     // "scripts",
-
-    // "src",
+    "src",
     "tsup.config.ts",
     // "packages/konro/package.json",
     // "packages/konro/src",
@@ -34,13 +33,13 @@
     // "packages/konro/tsconfig.json",
     // "packages/konro/tsup.config.ts",
     // "packages/konro/scripts",
-    "packages/apply-multi-diff/package.json",
+    // "packages/apply-multi-diff/package.json",
     // "packages/apply-multi-diff/README.md",
-    "packages/apply-multi-diff/tsconfig.json",
+    // "packages/apply-multi-diff/tsconfig.json",
     // "packages/apply-multi-diff/scripts",
     // "packages/apply-multi-diff/src",
     // "packages/apply-multi-diff/test",
-    "packages/apply-multi-diff/src/index.ts",
+    // "packages/apply-multi-diff/src/index.ts",
     // "packages/apply-multi-diff/src/types.ts",
     "packages/relaycode-core/package.json",
     // "packages/relaycode-core/scripts",
@@ -48,18 +47,7 @@
     "packages/relaycode-core/tsconfig.json",
     "packages/relaycode-core/tsup.config.ts",
     "packages/relaycode-core/src/index.ts",
-    // "test/e2e/transaction.test.ts",
-    // "test/e2e/revert.test.ts",
-    "packages/relaycode-core/tsconfig.json",
-
-    // "src/cli.ts",
-    // "src/index.ts",
-    // "src/commands"
-
-    "packages/apply-multi-diff/src/strategies/search-replace.ts",
-    "packages/apply-multi-diff/src/strategies/standard-diff.ts",
-    "packages/konro/src/utils/predicate.util.ts",
-    "packages/relaycode-core/src/patch.ts"
+    "packages/relaycode-core/tsconfig.json"
   ],
   "ignore": {
     "useGitignore": true,
