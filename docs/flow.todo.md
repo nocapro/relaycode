@@ -104,12 +104,18 @@ ls
 
 ==== problem end
 
-===
+=== DONE
 
 1. slow apply
 2. new file created with ---
 
 ===
+
+implement https://www.npmjs.com/package/ink for beautiful UI and best  terminal interactivity UX
+
+because I hate bad UI duplicating info in many areas, like the UI has no state management.
+
+below is one example;
 
 Changes applied. Do you want to approve and commit them? (y/N)
 n
@@ -123,6 +129,8 @@ Operation cancelled by user. Rolling back changes...
 ↩️ Transaction 48e77c8e-28f0-4665-b733-40294711693e rolled back.
 
 [relay] Watching for patches...
+
+
 
 ===
 
@@ -196,7 +204,7 @@ Watching for next patch...
 --------------------------------------------------
 Watching for next patch...
 
-===
+=== DONE
 
 on every transaction process should ask user whether to approve or reject the transaction. not just asking for approve-all
 
