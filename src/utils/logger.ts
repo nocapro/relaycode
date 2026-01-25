@@ -44,3 +44,11 @@ export const logger = {
     export const isEnoentError = (error: unknown): boolean => {
         return error instanceof Error && 'code' in error && error.code === 'ENOENT';
     };
+
+export const isPermissionError = (error: unknown): boolean => {
+  if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'EACCES') {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /eacces|permission denied/i.test(message);
+};

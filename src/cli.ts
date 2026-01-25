@@ -8,6 +8,7 @@ import { logCommand } from './commands/log';
 import { applyCommand } from './commands/apply';
 import { gitCommitCommand } from './commands/git-commit';
 import { approveAllCommand } from './commands/approve-all';
+import { doctorCommand } from './commands/doctor';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -80,6 +81,8 @@ interface CommandInfo {
 }
 
 const skipConfirmationOption = { flags: '-y, --yes', description: 'Skip confirmation prompts' };
+const fixPermissionsOption = { flags: '--fix-permissions', description: 'Attempt to fix permission issues automatically' };
+const pathOption = { flags: '-p, --path <path>', description: 'Target path to fix (defaults to cwd)' };
 
 const program = new Command();
 
@@ -117,6 +120,11 @@ const mainCommands: CommandInfo[] = [
     name: 'approve-all', alias: 'aa', description: 'Approves all pending transactions.',
     action: (options: { yes: boolean }) => approveAllCommand(options, process.cwd()),
     options: [skipConfirmationOption]
+  },
+  {
+    name: 'doctor', alias: 'd', description: 'Diagnostics and fixes (permissions, etc.).',
+    action: (options: { yes?: boolean; fixPermissions?: boolean; path?: string }) => doctorCommand(options, process.cwd()),
+    options: [skipConfirmationOption, fixPermissionsOption, pathOption]
   },
   { name: 'log', alias: 'l', description: 'Displays a log of all committed transactions.', action: () => logCommand(process.cwd()) },
   {

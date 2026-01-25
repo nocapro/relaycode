@@ -1,5 +1,5 @@
 import { type Config, type ParsedLLMResponse, type StateFile, type FileSnapshot, type FileOperation, normalizeGitCommitMsg } from 'relaycode-core';
-import { logger, getErrorMessage } from '../utils/logger';
+import { logger, getErrorMessage, isPermissionError } from '../utils/logger';
 import { getErrorCount, executeShellCommand } from '../utils/shell';
 import { deleteFile, readFileContent, removeEmptyParentDirectories, renameFile, writeFileContent } from '../utils/fs';
 import path from 'path';
@@ -20,6 +20,36 @@ type ProcessPatchOptions = {
 };
 
 const pendingTransactions = new Map<string, StateFile>();
+
+const logPermissionGuidance = (cwd: string, filePath?: string) => {
+    const target = filePath ? ` "${filePath}"` : '';
+    const user = process.env.USER ?? '$USER';
+    logger.warn(`Permission denied while accessing${target}.`);
+    logger.info(`This usually means the file or folder is owned by another user (often root).`);
+    logger.info(`Fix it with: ${chalk.magenta(`sudo chown -R ${user}:${user} "${cwd}"`)}`);
+    logger.info(`Or run: ${chalk.cyan(`relay doctor --fix-permissions --path "${cwd}"`)}`);
+    logger.info(`Then re-run ${chalk.cyan('relay')}.`);
+};
+
+const maybeAutoFixPermissions = async (cwd: string): Promise<void> => {
+    const user = process.env.USER ?? '$USER';
+    const fixCommand = `sudo chown -R ${user}:${user} "${cwd}"`;
+    const confirm = createConfirmationHandler({});
+    const approved = await confirm(`\nPermission issue detected. Run the fix now? (y/N)`);
+    if (!approved) {
+        return;
+    }
+
+    logger.info(`Running: ${chalk.magenta(fixCommand)}`);
+    const result = await executeShellCommand(fixCommand, cwd);
+    if (result.exitCode !== 0) {
+        logger.error(`Permission fix failed with exit code ${chalk.red(result.exitCode)}.`);
+        if (result.stderr) logger.error(result.stderr);
+        return;
+    }
+
+    logger.success('✅ Permissions updated successfully. Re-run relay to retry the patch.');
+};
 
 export const createSnapshot = async (filePaths: string[], cwd: string = process.cwd()): Promise<FileSnapshot> => {
   const snapshot: FileSnapshot = {};
@@ -53,12 +83,28 @@ export const applyOperations = async (
   }
 
   const { newFileStates } = result;
+  const permissionErrors: { path: string; error: unknown }[] = [];
 
   // Step 2: Apply physical changes to the filesystem.
   // To correctly handle renames, we process rename operations first.
   const renameOps = operations.filter((op): op is Extract<FileOperation, {type: 'rename'}> => op.type === 'rename');
   for (const op of renameOps) {
-    await renameFile(op.from, op.to, cwd);
+    try {
+      await renameFile(op.from, op.to, cwd);
+    } catch (error) {
+      if (isPermissionError(error)) {
+        permissionErrors.push({ path: op.from, error });
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (permissionErrors.length > 0) {
+    const firstError = permissionErrors[0]!;
+    logPermissionGuidance(cwd, firstError.path);
+    await maybeAutoFixPermissions(cwd);
+    throw firstError.error instanceof Error ? firstError.error : new Error(getErrorMessage(firstError.error));
   }
 
   // Step 3: Apply writes and deletes, which can be done in parallel.
@@ -75,13 +121,32 @@ export const applyOperations = async (
         // Use `== null` to check for both null and undefined.
         // If newContent is missing from the map, it's treated as a deletion.
         if (newContent == null) {
-            fsPromises.push(deleteFile(path, cwd));
+            fsPromises.push(deleteFile(path, cwd).catch(error => {
+              if (isPermissionError(error)) {
+                permissionErrors.push({ path, error });
+                return;
+              }
+              throw error;
+            }));
         } else {
-            fsPromises.push(writeFileContent(path, newContent, cwd));
+            fsPromises.push(writeFileContent(path, newContent, cwd).catch(error => {
+              if (isPermissionError(error)) {
+                permissionErrors.push({ path, error });
+                return;
+              }
+              throw error;
+            }));
         }
     }
   }
   await Promise.all(fsPromises);
+
+  if (permissionErrors.length > 0) {
+    const firstError = permissionErrors[0]!;
+    logPermissionGuidance(cwd, firstError.path);
+    await maybeAutoFixPermissions(cwd);
+    throw firstError.error instanceof Error ? firstError.error : new Error(getErrorMessage(firstError.error));
+  }
 
   return newFileStates;
 };
@@ -108,6 +173,12 @@ export const restoreSnapshot = async (snapshot: FileSnapshot, cwd: string = proc
         restoreErrors.push({ path: filePath, error });
       }
   }));
+
+  const permissionError = restoreErrors.find(entry => isPermissionError(entry.error));
+  if (permissionError) {
+    logPermissionGuidance(cwd, permissionError.path);
+    await maybeAutoFixPermissions(cwd);
+  }
   
   // After all files are processed, clean up empty directories
   // Sort directories by depth (deepest first) to clean up nested empty dirs properly
